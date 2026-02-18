@@ -33,8 +33,18 @@ app.setErrorHandler((error, _req, reply) => {
       issues: error.issues
     });
   }
+
+  const fastifyError = error as { statusCode?: number; code?: string; message?: string };
+  if (fastifyError.code === "FST_ERR_CTP_EMPTY_JSON_BODY") {
+    return reply.code(400).send({ message: "Body cannot be empty when content-type is set to application/json" });
+  }
+
+  const statusCode =
+    typeof fastifyError.statusCode === "number" && fastifyError.statusCode >= 400
+      ? fastifyError.statusCode
+      : 500;
   const message = error instanceof Error ? error.message : "Internal server error";
-  return reply.code(500).send({ message });
+  return reply.code(statusCode).send({ message });
 });
 
 const encryption = new EncryptionService(Buffer.from(env.MASTER_KEY_BASE64, "base64"));
@@ -271,6 +281,9 @@ async function executeJob(state: BackupState, jobId: string): Promise<JobRun> {
   const errors: JobRun["errors"] = [];
   let copiedCount = 0;
   let failedCount = 0;
+  let photoCount = 0;
+  let videoCount = 0;
+  const copiedLivePhotoIds = new Set<string>();
 
   const sourceFiles = await collectMediaFiles(sourceRoot);
   const relativePaths = sourceFiles.map((fullPath) => toPosixPath(path.relative(sourceRoot, fullPath)));
@@ -309,6 +322,19 @@ async function executeJob(state: BackupState, jobId: string): Promise<JobRun> {
         state.assets.push(nextAsset);
       }
 
+      if (nextAsset.kind === "photo" || nextAsset.kind === "live_photo_image") {
+        photoCount += 1;
+      }
+      if (nextAsset.kind === "live_photo_video") {
+        videoCount += 1;
+      } else {
+        const ext = path.extname(relativePath).toLowerCase();
+        if (VIDEO_EXTENSIONS.has(ext)) videoCount += 1;
+      }
+      if (livePhotoAssetId) {
+        copiedLivePhotoIds.add(livePhotoAssetId);
+      }
+
       copiedCount += 1;
       if (copiedSamples.length < 20) {
         copiedSamples.push(relativePath);
@@ -328,9 +354,12 @@ async function executeJob(state: BackupState, jobId: string): Promise<JobRun> {
     finishedAt,
     copiedCount,
     failedCount,
+    photoCount,
+    videoCount,
+    livePhotoPairCount: copiedLivePhotoIds.size,
     copiedSamples,
     errors,
-    message: `Copied ${copiedCount} files${failedCount ? `, failed ${failedCount}` : ""}.`
+    message: `照片 ${photoCount}，视频 ${videoCount}，Live Photo ${copiedLivePhotoIds.size}，失败 ${failedCount}`
   };
   state.jobRuns.unshift(run);
   state.jobRuns = state.jobRuns.slice(0, 200);
@@ -594,6 +623,19 @@ app.post<{ Body: Omit<BackupJob, "id"> }>("/api/jobs", async (req) => {
   state.jobs.push(item);
   await stateRepo.saveState(state);
   return item;
+});
+
+app.put<{ Params: { jobId: string }; Body: Omit<BackupJob, "id"> }>("/api/jobs/:jobId", async (req, reply) => {
+  const state = await stateRepo.loadState();
+  const body = jobCreateSchema.parse(req.body);
+  const idx = state.jobs.findIndex((j) => j.id === req.params.jobId);
+  if (idx < 0) {
+    return reply.code(404).send({ message: "Job not found" });
+  }
+  const updated: BackupJob = { id: req.params.jobId, ...body };
+  state.jobs[idx] = updated;
+  await stateRepo.saveState(state);
+  return updated;
 });
 
 app.delete<{ Params: { jobId: string } }>("/api/jobs/:jobId", async (req, reply) => {

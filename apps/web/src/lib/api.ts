@@ -16,12 +16,14 @@ import type {
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 
 async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers = new Headers(init?.headers ?? {});
+  if (init?.body !== undefined && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+
   const res = await fetch(`${API_BASE}${path}`, {
     ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...(init?.headers ?? {})
-    }
+    headers
   });
 
   if (!res.ok) {
@@ -94,6 +96,13 @@ export function getJobs() {
 export function createJob(payload: Omit<BackupJob, "id">) {
   return fetchJson<BackupJob>("/api/jobs", {
     method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function updateJob(jobId: string, payload: Omit<BackupJob, "id">) {
+  return fetchJson<BackupJob>(`/api/jobs/${jobId}`, {
+    method: "PUT",
     body: JSON.stringify(payload)
   });
 }

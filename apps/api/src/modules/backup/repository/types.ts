@@ -24,6 +24,9 @@ export interface JobRun {
   finishedAt: string;
   copiedCount: number;
   failedCount: number;
+  photoCount: number;
+  videoCount: number;
+  livePhotoPairCount: number;
   copiedSamples: string[];
   errors: JobRunErrorItem[];
   message?: string;
