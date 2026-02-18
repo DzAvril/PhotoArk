@@ -1,11 +1,12 @@
 import * as Collapsible from "@radix-ui/react-collapsible";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
+import { PathPicker } from "../components/path-picker";
 import { TablePagination } from "../components/table/table-pagination";
 import { TableToolbar } from "../components/table/table-toolbar";
 import { useTablePagination } from "../components/table/use-table-pagination";
 import { browseStorageDirectories, createJob, deleteJob, getJobRuns, getJobs, getStorages, runJob } from "../lib/api";
-import type { BackupJob, DirectoryBrowseResult, JobRun, StorageTarget } from "../types/api";
+import type { BackupJob, JobRun, StorageTarget } from "../types/api";
 
 type SortKey = "name" | "sourcePath" | "destinationPath" | "enabled";
 
@@ -25,8 +26,6 @@ export function JobsPage() {
   const [storages, setStorages] = useState<StorageTarget[]>([]);
   const [form, setForm] = useState(initialForm);
   const [error, setError] = useState("");
-  const [sourceDirs, setSourceDirs] = useState<DirectoryBrowseResult | null>(null);
-  const [targetDirs, setTargetDirs] = useState<DirectoryBrowseResult | null>(null);
   const [formOpen, setFormOpen] = useState(true);
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("name");
@@ -58,54 +57,6 @@ export function JobsPage() {
   useEffect(() => {
     void load();
   }, []);
-
-  useEffect(() => {
-    if (!sourceStorage || sourceStorage.type === "cloud_115") {
-      setSourceDirs(null);
-      return;
-    }
-    void browseStorageDirectories(sourceStorage.id)
-      .then((res) => {
-        setSourceDirs(res);
-        if (!form.sourcePath) setForm((prev) => ({ ...prev, sourcePath: res.currentPath }));
-      })
-      .catch((err: Error) => setError(err.message));
-  }, [sourceStorage?.id]);
-
-  useEffect(() => {
-    if (!targetStorage || targetStorage.type === "cloud_115") {
-      setTargetDirs(null);
-      return;
-    }
-    void browseStorageDirectories(targetStorage.id)
-      .then((res) => {
-        setTargetDirs(res);
-        if (!form.destinationPath) setForm((prev) => ({ ...prev, destinationPath: res.currentPath }));
-      })
-      .catch((err: Error) => setError(err.message));
-  }, [targetStorage?.id]);
-
-  async function loadSourceDirs(dirPath?: string) {
-    if (!sourceStorage) return;
-    try {
-      const res = await browseStorageDirectories(sourceStorage.id, dirPath);
-      setSourceDirs(res);
-      setForm((prev) => ({ ...prev, sourcePath: res.currentPath }));
-    } catch (err) {
-      setError((err as Error).message);
-    }
-  }
-
-  async function loadTargetDirs(dirPath?: string) {
-    if (!targetStorage) return;
-    try {
-      const res = await browseStorageDirectories(targetStorage.id, dirPath);
-      setTargetDirs(res);
-      setForm((prev) => ({ ...prev, destinationPath: res.currentPath }));
-    } catch (err) {
-      setError((err as Error).message);
-    }
-  }
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -234,32 +185,44 @@ export function JobsPage() {
 
             <div className="mp-panel p-3 sm:col-span-2">
               <p className="mb-2 text-xs mp-muted">备份源路径</p>
-              <input className="mp-input" placeholder="源路径" value={form.sourcePath} onChange={(e) => setForm((p) => ({ ...p, sourcePath: e.target.value }))} required />
               {sourceStorage && sourceStorage.type !== "cloud_115" ? (
-                <div className="mt-2 grid grid-cols-[auto_auto_1fr] gap-2">
-                  <button type="button" className="mp-btn" onClick={() => void loadSourceDirs(sourceDirs?.parentPath ?? undefined)}>上级</button>
-                  <button type="button" className="mp-btn" onClick={() => void loadSourceDirs(form.sourcePath)}>读取</button>
-                  <select className="mp-select" value={form.sourcePath} onChange={(e) => setForm((p) => ({ ...p, sourcePath: e.target.value }))}>
-                    <option value="">选择目录</option>
-                    {sourceDirs?.directories.map((d) => <option key={d.path} value={d.path}>{d.path}</option>)}
-                  </select>
-                </div>
-              ) : null}
+                <PathPicker
+                  value={form.sourcePath}
+                  onChange={(sourcePath) => setForm((p) => ({ ...p, sourcePath }))}
+                  placeholder="输入源路径，或点右侧选择路径"
+                  browse={(dirPath) => browseStorageDirectories(sourceStorage.id, dirPath)}
+                  required
+                />
+              ) : (
+                <input
+                  className="mp-input"
+                  placeholder="源路径"
+                  value={form.sourcePath}
+                  onChange={(e) => setForm((p) => ({ ...p, sourcePath: e.target.value }))}
+                  required
+                />
+              )}
             </div>
 
             <div className="mp-panel p-3 sm:col-span-2">
               <p className="mb-2 text-xs mp-muted">备份目标路径</p>
-              <input className="mp-input" placeholder="目标路径" value={form.destinationPath} onChange={(e) => setForm((p) => ({ ...p, destinationPath: e.target.value }))} required />
               {targetStorage && targetStorage.type !== "cloud_115" ? (
-                <div className="mt-2 grid grid-cols-[auto_auto_1fr] gap-2">
-                  <button type="button" className="mp-btn" onClick={() => void loadTargetDirs(targetDirs?.parentPath ?? undefined)}>上级</button>
-                  <button type="button" className="mp-btn" onClick={() => void loadTargetDirs(form.destinationPath)}>读取</button>
-                  <select className="mp-select" value={form.destinationPath} onChange={(e) => setForm((p) => ({ ...p, destinationPath: e.target.value }))}>
-                    <option value="">选择目录</option>
-                    {targetDirs?.directories.map((d) => <option key={d.path} value={d.path}>{d.path}</option>)}
-                  </select>
-                </div>
-              ) : null}
+                <PathPicker
+                  value={form.destinationPath}
+                  onChange={(destinationPath) => setForm((p) => ({ ...p, destinationPath }))}
+                  placeholder="输入目标路径，或点右侧选择路径"
+                  browse={(dirPath) => browseStorageDirectories(targetStorage.id, dirPath)}
+                  required
+                />
+              ) : (
+                <input
+                  className="mp-input"
+                  placeholder="目标路径"
+                  value={form.destinationPath}
+                  onChange={(e) => setForm((p) => ({ ...p, destinationPath: e.target.value }))}
+                  required
+                />
+              )}
             </div>
 
             <input className="mp-input" placeholder="cron（监听模式可留默认）" value={form.schedule ?? ""} onChange={(e) => setForm((p) => ({ ...p, schedule: e.target.value }))} />

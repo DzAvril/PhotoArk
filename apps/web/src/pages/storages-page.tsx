@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { PathPicker } from "../components/path-picker";
 import { TablePagination } from "../components/table/table-pagination";
 import { TableToolbar } from "../components/table/table-toolbar";
 import { useTablePagination } from "../components/table/use-table-pagination";
 import { browseDirectories, createStorage, deleteStorage, getStorages } from "../lib/api";
-import type { DirectoryBrowseResult, StorageTarget } from "../types/api";
+import type { StorageTarget } from "../types/api";
 
 type SortKey = "name" | "type" | "basePath" | "encrypted";
 
@@ -18,8 +19,6 @@ export function StoragesPage() {
   const [items, setItems] = useState<StorageTarget[]>([]);
   const [form, setForm] = useState(initialForm);
   const [error, setError] = useState("");
-  const [browser, setBrowser] = useState<DirectoryBrowseResult | null>(null);
-  const [browseInput, setBrowseInput] = useState("");
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("name");
   const [sortAsc, setSortAsc] = useState(true);
@@ -35,19 +34,8 @@ export function StoragesPage() {
     }
   }
 
-  async function loadDirectories(targetPath?: string) {
-    try {
-      const res = await browseDirectories(targetPath);
-      setBrowser(res);
-      setBrowseInput(res.currentPath);
-    } catch (err) {
-      setError((err as Error).message);
-    }
-  }
-
   useEffect(() => {
     void load();
-    void loadDirectories();
   }, []);
 
   async function onSubmit(e: FormEvent) {
@@ -121,21 +109,25 @@ export function StoragesPage() {
             <option value="external_ssd">external_ssd</option>
             <option value="cloud_115">cloud_115</option>
           </select>
-          <input className="mp-input sm:col-span-2" placeholder={isLocalType ? "选择或输入本地目录路径" : "115://photoark 或其他 URI"} value={form.basePath} onChange={(e) => setForm((p) => ({ ...p, basePath: e.target.value }))} required />
-
-          {isLocalType ? (
-            <>
-              <div className="grid grid-cols-[1fr_auto_auto] gap-2 sm:col-span-2">
-                <input className="mp-input" placeholder="浏览路径（例如 /volume1）" value={browseInput} onChange={(e) => setBrowseInput(e.target.value)} />
-                <button type="button" onClick={() => void loadDirectories(browseInput || undefined)} className="mp-btn">读取</button>
-                <button type="button" onClick={() => void loadDirectories(browser?.parentPath ?? undefined)} className="mp-btn" disabled={!browser?.parentPath}>上级</button>
-              </div>
-              <select className="mp-select sm:col-span-2" value={form.basePath} onChange={(e) => setForm((p) => ({ ...p, basePath: e.target.value }))}>
-                <option value="">从下拉选择目录</option>
-                {browser?.directories.map((dir) => <option key={dir.path} value={dir.path}>{dir.path}</option>)}
-              </select>
-            </>
-          ) : null}
+          <div className="sm:col-span-2">
+            {isLocalType ? (
+              <PathPicker
+                value={form.basePath}
+                onChange={(basePath) => setForm((p) => ({ ...p, basePath }))}
+                placeholder="输入本地目录路径，或点右侧选择路径"
+                browse={browseDirectories}
+                required
+              />
+            ) : (
+              <input
+                className="mp-input"
+                placeholder="115://photoark 或其他 URI"
+                value={form.basePath}
+                onChange={(e) => setForm((p) => ({ ...p, basePath: e.target.value }))}
+                required
+              />
+            )}
+          </div>
 
           <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.encrypted} onChange={(e) => setForm((p) => ({ ...p, encrypted: e.target.checked }))} />加密存储</label>
           <button type="submit" className="mp-btn mp-btn-primary sm:col-span-2">新增存储</button>
