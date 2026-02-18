@@ -22,6 +22,7 @@ const schema = z.object({
   VERSION_CHECK_TIMEOUT_MS: z.coerce.number().int().positive().default(3500),
   GITHUB_TOKEN: z.string().optional(),
   MASTER_KEY_BASE64: z.string().min(1),
+  LEGACY_MASTER_KEYS_BASE64: z.string().optional(),
   TELEGRAM_BOT_TOKEN: z.string().optional(),
   TELEGRAM_CHAT_ID: z.string().optional()
 });

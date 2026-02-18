@@ -4,7 +4,7 @@ import { createReadStream } from "node:fs";
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import Fastify from "fastify";
+import Fastify, { type FastifyReply } from "fastify";
 import cors from "@fastify/cors";
 import fastifyStatic from "@fastify/static";
 import { watch as chokidarWatch, type FSWatcher } from "chokidar";
@@ -48,7 +48,27 @@ app.setErrorHandler((error, _req, reply) => {
   return reply.code(statusCode).send({ message });
 });
 
-const encryption = new EncryptionService(Buffer.from(env.MASTER_KEY_BASE64, "base64"));
+function parseMasterKey(input: string, sourceName: string): Buffer {
+  try {
+    return Buffer.from(input, "base64");
+  } catch {
+    throw new Error(`${sourceName} is not valid base64.`);
+  }
+}
+
+function parseLegacyKeys(raw?: string): Buffer[] {
+  if (!raw) return [];
+  return raw
+    .split(/[\n,;]/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((item) => parseMasterKey(item, "LEGACY_MASTER_KEYS_BASE64 item"));
+}
+
+const encryption = new EncryptionService(
+  parseMasterKey(env.MASTER_KEY_BASE64, "MASTER_KEY_BASE64"),
+  parseLegacyKeys(env.LEGACY_MASTER_KEYS_BASE64)
+);
 const livePhoto = new LivePhotoService();
 const stateRepo = new FileStateRepository(env.BACKUP_STATE_FILE);
 
@@ -129,6 +149,95 @@ const MIME_BY_EXT: Record<string, string> = {
   ".mkv": "video/x-matroska",
   ".webm": "video/webm"
 };
+
+type ByteRange = {
+  start: number;
+  end: number;
+};
+
+function parseByteRange(rangeHeader: string | undefined, size: number): { range: ByteRange | null; error: string | null } {
+  if (!rangeHeader) {
+    return { range: null, error: null };
+  }
+
+  const match = /^bytes=(\d*)-(\d*)$/.exec(rangeHeader);
+  if (!match) {
+    return { range: null, error: "Invalid range header" };
+  }
+
+  const start = match[1] ? Number.parseInt(match[1], 10) : 0;
+  const end = match[2] ? Number.parseInt(match[2], 10) : size - 1;
+  const invalid = !Number.isFinite(start) || !Number.isFinite(end) || start > end || end >= size;
+  if (invalid) {
+    return { range: null, error: "Requested range not satisfiable" };
+  }
+
+  return {
+    range: { start, end },
+    error: null
+  };
+}
+
+function resolveMimeType(filePath: string): string {
+  const ext = path.extname(filePath).toLowerCase();
+  return MIME_BY_EXT[ext] ?? "application/octet-stream";
+}
+
+function sendBufferWithRange(reply: FastifyReply, plain: Buffer, mimeType: string, rangeHeader: string | undefined) {
+  const parsed = parseByteRange(rangeHeader, plain.length);
+  if (parsed.error) {
+    return reply.code(416).send({ message: parsed.error });
+  }
+
+  if (parsed.range) {
+    const { start, end } = parsed.range;
+    const chunk = plain.subarray(start, end + 1);
+    reply
+      .code(206)
+      .header("Content-Type", mimeType)
+      .header("Accept-Ranges", "bytes")
+      .header("Content-Length", String(chunk.length))
+      .header("Content-Range", `bytes ${start}-${end}/${plain.length}`);
+    return reply.send(chunk);
+  }
+
+  reply
+    .header("Content-Type", mimeType)
+    .header("Content-Length", String(plain.length))
+    .header("Accept-Ranges", "bytes");
+  return reply.send(plain);
+}
+
+function sendLocalFileStreamWithRange(
+  reply: FastifyReply,
+  filePath: string,
+  fileSize: number,
+  mimeType: string,
+  rangeHeader: string | undefined
+) {
+  const parsed = parseByteRange(rangeHeader, fileSize);
+  if (parsed.error) {
+    return reply.code(416).send({ message: parsed.error });
+  }
+
+  if (parsed.range) {
+    const { start, end } = parsed.range;
+    const stream = createReadStream(filePath, { start, end });
+    reply
+      .code(206)
+      .header("Content-Type", mimeType)
+      .header("Accept-Ranges", "bytes")
+      .header("Content-Length", String(end - start + 1))
+      .header("Content-Range", `bytes ${start}-${end}/${fileSize}`);
+    return reply.send(stream);
+  }
+
+  reply
+    .header("Content-Type", mimeType)
+    .header("Content-Length", String(fileSize))
+    .header("Accept-Ranges", "bytes");
+  return reply.send(createReadStream(filePath));
+}
 
 type JobWatcherControl = {
   watcher: FSWatcher;
@@ -308,8 +417,9 @@ async function executeJob(state: BackupState, jobId: string): Promise<JobRun> {
     const relativePath = relativePaths[i];
     const destinationFile = path.join(destinationRoot, relativePath);
     try {
-      const input = await readFile(sourceFile);
-      const output = destinationStorage.encrypted ? encryption.encrypt(input) : input;
+      const sourceBlob = await readFile(sourceFile);
+      const plainContent = sourceStorage.encrypted ? encryption.decrypt(sourceBlob) : sourceBlob;
+      const output = destinationStorage.encrypted ? encryption.encrypt(plainContent) : plainContent;
       await mkdir(path.dirname(destinationFile), { recursive: true });
       await writeFile(destinationFile, output);
 
@@ -761,37 +871,20 @@ app.get<{ Params: { storageId: string }; Querystring: { path?: string } }>(
       return reply.code(404).send({ message: "File not found" });
     }
 
-    const ext = path.extname(targetPath).toLowerCase();
-    const mimeType = MIME_BY_EXT[ext] ?? "application/octet-stream";
-    const range = req.headers.range;
-
-    if (range) {
-      const match = /^bytes=(\d*)-(\d*)$/.exec(range);
-      if (!match) {
-        return reply.code(416).send({ message: "Invalid range header" });
-      }
-
-      const start = match[1] ? Number.parseInt(match[1], 10) : 0;
-      const end = match[2] ? Number.parseInt(match[2], 10) : fileStat.size - 1;
-      if (!Number.isFinite(start) || !Number.isFinite(end) || start > end || end >= fileStat.size) {
-        return reply.code(416).send({ message: "Requested range not satisfiable" });
-      }
-
-      const stream = createReadStream(targetPath, { start, end });
-      reply
-        .code(206)
-        .header("Content-Type", mimeType)
-        .header("Accept-Ranges", "bytes")
-        .header("Content-Length", String(end - start + 1))
-        .header("Content-Range", `bytes ${start}-${end}/${fileStat.size}`);
-      return reply.send(stream);
+    const mimeType = resolveMimeType(targetPath);
+    if (!storage.encrypted) {
+      return sendLocalFileStreamWithRange(reply, targetPath, fileStat.size, mimeType, req.headers.range);
     }
 
-    reply
-      .header("Content-Type", mimeType)
-      .header("Content-Length", String(fileStat.size))
-      .header("Accept-Ranges", "bytes");
-    return reply.send(createReadStream(targetPath));
+    try {
+      const encryptedBlob = await readFile(targetPath);
+      const plain = encryption.decrypt(encryptedBlob);
+      return sendBufferWithRange(reply, plain, mimeType, req.headers.range);
+    } catch (error) {
+      return reply.code(422).send({
+        message: `Failed to decrypt media file: ${(error as Error).message}`
+      });
+    }
   }
 );
 
@@ -1011,9 +1104,47 @@ app.get<{ Params: { assetId: string }; Querystring: { ticket?: string } }>(
     }
 
     previewTickets.delete(ticket);
-    return reply
-      .type("application/json")
-      .send({ assetId: req.params.assetId, status: "stream_ready_placeholder" });
+    const state = await stateRepo.loadState();
+    const asset = state.assets.find((item) => item.id === req.params.assetId);
+    if (!asset) {
+      return reply.code(404).send({ message: "Asset not found" });
+    }
+
+    const storage = state.storages.find((item) => item.id === asset.storageTargetId);
+    if (!storage) {
+      return reply.code(404).send({ message: "Storage not found for asset" });
+    }
+    if (!isLocalStorage(storage.type)) {
+      return reply.code(400).send({ message: "Preview stream is only supported for local storage types" });
+    }
+
+    let targetPath = "";
+    try {
+      targetPath = resolvePathInStorage(storage, path.resolve(storage.basePath, asset.name));
+    } catch (error) {
+      return reply.code(403).send({ message: (error as Error).message });
+    }
+
+    const fileStat = await stat(targetPath).catch(() => null);
+    if (!fileStat || !fileStat.isFile()) {
+      return reply.code(404).send({ message: "Asset file not found" });
+    }
+
+    const mimeType = resolveMimeType(asset.name);
+    const shouldDecrypt = asset.encrypted || storage.encrypted;
+    if (!shouldDecrypt) {
+      return sendLocalFileStreamWithRange(reply, targetPath, fileStat.size, mimeType, req.headers.range);
+    }
+
+    try {
+      const encryptedBlob = await readFile(targetPath);
+      const plain = encryption.decrypt(encryptedBlob);
+      return sendBufferWithRange(reply, plain, mimeType, req.headers.range);
+    } catch (error) {
+      return reply.code(422).send({
+        message: `Failed to decrypt backup asset: ${(error as Error).message}`
+      });
+    }
   }
 );
 
