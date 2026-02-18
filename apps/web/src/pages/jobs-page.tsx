@@ -1,10 +1,11 @@
 import * as Collapsible from "@radix-ui/react-collapsible";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { Link } from "react-router-dom";
 import { TablePagination } from "../components/table/table-pagination";
 import { TableToolbar } from "../components/table/table-toolbar";
 import { useTablePagination } from "../components/table/use-table-pagination";
-import { browseStorageDirectories, browseStorageMedia, createJob, deleteJob, getJobs, getStorages } from "../lib/api";
-import type { BackupJob, DirectoryBrowseResult, MediaBrowseResult, StorageTarget } from "../types/api";
+import { browseStorageDirectories, createJob, deleteJob, getJobs, getStorages } from "../lib/api";
+import type { BackupJob, DirectoryBrowseResult, StorageTarget } from "../types/api";
 
 type SortKey = "name" | "sourcePath" | "destinationPath" | "enabled";
 
@@ -26,8 +27,6 @@ export function JobsPage() {
   const [error, setError] = useState("");
   const [sourceDirs, setSourceDirs] = useState<DirectoryBrowseResult | null>(null);
   const [targetDirs, setTargetDirs] = useState<DirectoryBrowseResult | null>(null);
-  const [sourceMedia, setSourceMedia] = useState<MediaBrowseResult | null>(null);
-  const [targetMedia, setTargetMedia] = useState<MediaBrowseResult | null>(null);
   const [formOpen, setFormOpen] = useState(true);
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("name");
@@ -106,27 +105,7 @@ export function JobsPage() {
     try {
       await createJob(form);
       setForm(initialForm);
-      setSourceMedia(null);
-      setTargetMedia(null);
       await load();
-    } catch (err) {
-      setError((err as Error).message);
-    }
-  }
-
-  async function handleViewSourceMedia() {
-    if (!sourceStorage || !form.sourcePath) return;
-    try {
-      setSourceMedia(await browseStorageMedia(sourceStorage.id, form.sourcePath));
-    } catch (err) {
-      setError((err as Error).message);
-    }
-  }
-
-  async function handleViewTargetMedia() {
-    if (!targetStorage || !form.destinationPath) return;
-    try {
-      setTargetMedia(await browseStorageMedia(targetStorage.id, form.destinationPath));
     } catch (err) {
       setError((err as Error).message);
     }
@@ -180,7 +159,10 @@ export function JobsPage() {
         <div className="flex items-center justify-between">
           <div>
             <h2 className="mp-section-title">备份任务</h2>
-            <p className="mt-1 text-xs mp-muted">配置备份源/目标地址，并分别查看两侧路径下的图片视频</p>
+            <p className="mt-1 text-xs mp-muted">
+              配置备份源/目标地址。媒体预览已迁移到
+              <Link to="/media" className="ml-1 text-[var(--ark-primary)] underline">独立页面</Link>
+            </p>
           </div>
           <Collapsible.Trigger className="mp-btn">{formOpen ? "收起" : "展开"}</Collapsible.Trigger>
         </div>
@@ -211,7 +193,6 @@ export function JobsPage() {
                   </select>
                 </div>
               ) : null}
-              <button type="button" className="mp-btn mt-2" onClick={() => void handleViewSourceMedia()}>查看源路径图片/视频</button>
             </div>
 
             <div className="mp-panel p-3 sm:col-span-2">
@@ -227,7 +208,6 @@ export function JobsPage() {
                   </select>
                 </div>
               ) : null}
-              <button type="button" className="mp-btn mt-2" onClick={() => void handleViewTargetMedia()}>查看目标路径图片/视频</button>
             </div>
 
             <input className="mp-input" placeholder="cron（监听模式可留默认）" value={form.schedule ?? ""} onChange={(e) => setForm((p) => ({ ...p, schedule: e.target.value }))} />
@@ -239,23 +219,6 @@ export function JobsPage() {
           </form>
         </Collapsible.Content>
       </Collapsible.Root>
-
-      <div className="grid gap-3 sm:grid-cols-2">
-        <article className="mp-panel p-3">
-          <h3 className="text-sm font-medium">源路径媒体</h3>
-          <ul className="mt-2 max-h-48 overflow-auto text-xs mp-muted">
-            {sourceMedia?.files.map((f) => <li key={f.path}>{f.kind === "image" ? "[图]" : "[视]"} {f.name}</li>)}
-            {!sourceMedia?.files.length ? <li>暂无数据</li> : null}
-          </ul>
-        </article>
-        <article className="mp-panel p-3">
-          <h3 className="text-sm font-medium">目标路径媒体</h3>
-          <ul className="mt-2 max-h-48 overflow-auto text-xs mp-muted">
-            {targetMedia?.files.map((f) => <li key={f.path}>{f.kind === "image" ? "[图]" : "[视]"} {f.name}</li>)}
-            {!targetMedia?.files.length ? <li>暂无数据</li> : null}
-          </ul>
-        </article>
-      </div>
 
       <div className="mp-panel p-4">
         <TableToolbar title="任务列表" search={search} onSearchChange={setSearch} pageSize={table.pageSize} onPageSizeChange={table.setPageSize} totalItems={table.totalItems} />

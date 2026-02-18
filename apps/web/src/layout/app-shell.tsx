@@ -5,6 +5,7 @@ const tabs = [
   { to: "/", label: "总览" },
   { to: "/storages", label: "存储" },
   { to: "/jobs", label: "任务" },
+  { to: "/media", label: "媒体预览" },
   { to: "/backups", label: "备份" }
 ];
 
