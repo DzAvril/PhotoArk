@@ -16,6 +16,7 @@ const livePhoto = new LivePhotoService();
 const stateRepo = new FileStateRepository(env.BACKUP_STATE_FILE);
 
 const previewTokens = new Map<string, { assetId: string; expiresAt: number }>();
+const previewTickets = new Map<string, { assetId: string; expiresAt: number }>();
 const PREVIEW_TOKEN_TTL_MS = 60_000;
 
 function metricSummary(state: BackupState) {
@@ -122,15 +123,63 @@ app.get<{ Params: { assetId: string }; Querystring: { token?: string } }>(
     }
 
     previewTokens.delete(token);
+    const ticket = randomUUID();
+    previewTickets.set(ticket, { assetId: asset.id, expiresAt: Date.now() + PREVIEW_TOKEN_TTL_MS });
 
     return {
       assetId: asset.id,
       mode: asset.encrypted ? "decrypted_memory_stream" : "direct_stream",
-      streamUrl: `/api/backups/${asset.id}/stream?ticket=${randomUUID()}`,
+      streamUrl: `/api/backups/${asset.id}/stream?ticket=${ticket}`,
       message: asset.encrypted
         ? "Encrypted asset will be decrypted in-memory for one-time preview."
         : "Asset can be previewed directly."
     };
+  }
+);
+
+app.get<{ Params: { assetId: string } }>("/api/backups/:assetId/live-photo", async (req, reply) => {
+  const state = await stateRepo.loadState();
+  const asset = state.assets.find((item) => item.id === req.params.assetId);
+  if (!asset) {
+    return reply.code(404).send({ message: "Asset not found" });
+  }
+  if (!asset.livePhotoAssetId) {
+    return { pair: null };
+  }
+
+  const image = state.assets.find(
+    (item) => item.livePhotoAssetId === asset.livePhotoAssetId && item.kind === "live_photo_image"
+  );
+  const video = state.assets.find(
+    (item) => item.livePhotoAssetId === asset.livePhotoAssetId && item.kind === "live_photo_video"
+  );
+
+  return {
+    pair: {
+      livePhotoAssetId: asset.livePhotoAssetId,
+      image: image ?? null,
+      video: video ?? null
+    }
+  };
+});
+
+app.get<{ Params: { assetId: string }; Querystring: { ticket?: string } }>(
+  "/api/backups/:assetId/stream",
+  async (req, reply) => {
+    const ticket = req.query.ticket;
+    if (!ticket) {
+      return reply.code(400).send({ message: "Preview ticket is required" });
+    }
+
+    const ticketInfo = previewTickets.get(ticket);
+    if (!ticketInfo || ticketInfo.assetId !== req.params.assetId || ticketInfo.expiresAt < Date.now()) {
+      return reply.code(401).send({ message: "Preview ticket is invalid or expired" });
+    }
+
+    previewTickets.delete(ticket);
+    return reply
+      .type("application/json")
+      .send({ assetId: req.params.assetId, status: "stream_ready_placeholder" });
   }
 );
 

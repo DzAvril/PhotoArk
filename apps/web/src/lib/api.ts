@@ -2,6 +2,7 @@ import type {
   BackupAsset,
   BackupJob,
   LivePhotoPair,
+  LivePhotoDetail,
   Metrics,
   PreviewResult,
   PreviewTokenResult,
@@ -62,6 +63,10 @@ export function createBackupAsset(payload: Omit<BackupAsset, "id">) {
     method: "POST",
     body: JSON.stringify(payload)
   });
+}
+
+export function getLivePhotoDetail(assetId: string) {
+  return fetchJson<LivePhotoDetail>(`/api/backups/${assetId}/live-photo`);
 }
 
 export function createPreviewToken(assetId: string) {

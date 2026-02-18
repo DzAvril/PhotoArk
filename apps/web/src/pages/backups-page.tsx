@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { createBackupAsset, createPreviewToken, getBackups, getPreview } from "../lib/api";
-import type { BackupAsset, PreviewResult } from "../types/api";
+import { createBackupAsset, createPreviewToken, getBackups, getLivePhotoDetail, getPreview } from "../lib/api";
+import type { BackupAsset, LivePhotoDetail, PreviewResult } from "../types/api";
 
 const initialForm: Omit<BackupAsset, "id"> = {
   name: "",
@@ -11,12 +11,14 @@ const initialForm: Omit<BackupAsset, "id"> = {
   capturedAt: new Date().toISOString(),
   livePhotoAssetId: ""
 };
+const apiBase = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8080";
 
 export function BackupsPage() {
   const [items, setItems] = useState<BackupAsset[]>([]);
   const [form, setForm] = useState(initialForm);
   const [error, setError] = useState("");
   const [preview, setPreview] = useState<PreviewResult | null>(null);
+  const [liveDetail, setLiveDetail] = useState<LivePhotoDetail["pair"]>(null);
 
   async function load() {
     try {
@@ -37,6 +39,8 @@ export function BackupsPage() {
       const tokenResult = await createPreviewToken(assetId);
       const previewResult = await getPreview(assetId, tokenResult.token);
       setPreview(previewResult);
+      const detail = await getLivePhotoDetail(assetId);
+      setLiveDetail(detail.pair);
     } catch (err) {
       setError((err as Error).message);
     }
@@ -116,6 +120,16 @@ export function BackupsPage() {
           <p>预览资产: {preview.assetId}</p>
           <p>模式: {preview.mode}</p>
           <p>流地址: {preview.streamUrl}</p>
+          <a className="mt-1 inline-block underline" href={`${apiBase}${preview.streamUrl}`} target="_blank" rel="noreferrer">
+            打开预览流占位接口
+          </a>
+          {liveDetail ? (
+            <div className="mt-2 rounded-lg bg-emerald-100 p-2">
+              <p>Live Photo 资产组: {liveDetail.livePhotoAssetId}</p>
+              <p>Image: {liveDetail.image?.name ?? "缺失"}</p>
+              <p>Video: {liveDetail.video?.name ?? "缺失"}</p>
+            </div>
+          ) : null}
         </article>
       ) : null}
 

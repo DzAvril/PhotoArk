@@ -53,3 +53,11 @@ export interface PreviewResult {
   streamUrl: string;
   message: string;
 }
+
+export interface LivePhotoDetail {
+  pair: {
+    livePhotoAssetId: string;
+    image: BackupAsset | null;
+    video: BackupAsset | null;
+  } | null;
+}
