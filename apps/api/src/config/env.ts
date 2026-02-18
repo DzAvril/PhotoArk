@@ -16,6 +16,7 @@ const schema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   API_PORT: z.coerce.number().default(8080),
   BACKUP_STATE_FILE: z.string().default("./apps/api/data/backup-state.json"),
+  FS_BROWSE_ROOT: z.string().default("/"),
   MASTER_KEY_BASE64: z.string().min(1),
   TELEGRAM_BOT_TOKEN: z.string().optional(),
   TELEGRAM_CHAT_ID: z.string().optional()

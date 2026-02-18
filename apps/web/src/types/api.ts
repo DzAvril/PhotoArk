@@ -61,3 +61,15 @@ export interface LivePhotoDetail {
     video: BackupAsset | null;
   } | null;
 }
+
+export interface DirectoryOption {
+  name: string;
+  path: string;
+}
+
+export interface DirectoryBrowseResult {
+  rootPath: string;
+  currentPath: string;
+  parentPath: string | null;
+  directories: DirectoryOption[];
+}

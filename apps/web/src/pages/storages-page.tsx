@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { createStorage, getStorages } from "../lib/api";
-import type { StorageTarget } from "../types/api";
+import { browseDirectories, createStorage, getStorages } from "../lib/api";
+import type { DirectoryBrowseResult, StorageTarget } from "../types/api";
 
 const initialForm: Omit<StorageTarget, "id"> = {
   name: "",
@@ -13,6 +13,8 @@ export function StoragesPage() {
   const [items, setItems] = useState<StorageTarget[]>([]);
   const [form, setForm] = useState(initialForm);
   const [error, setError] = useState("");
+  const [browser, setBrowser] = useState<DirectoryBrowseResult | null>(null);
+  const [browseInput, setBrowseInput] = useState("");
 
   async function load() {
     try {
@@ -23,8 +25,19 @@ export function StoragesPage() {
     }
   }
 
+  async function loadDirectories(targetPath?: string) {
+    try {
+      const res = await browseDirectories(targetPath);
+      setBrowser(res);
+      setBrowseInput(res.currentPath);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
   useEffect(() => {
     void load();
+    void loadDirectories();
   }, []);
 
   async function onSubmit(e: FormEvent) {
@@ -39,6 +52,8 @@ export function StoragesPage() {
     }
   }
 
+  const isLocalType = form.type === "local_fs" || form.type === "external_ssd";
+
   return (
     <section className="mt-6 rounded-3xl border border-white/40 bg-white/72 p-5 shadow-[0_8px_24px_rgba(11,41,33,0.09)] backdrop-blur">
       <h2 className="text-lg font-semibold text-[var(--ark-deep)]">目标存储</h2>
@@ -52,13 +67,7 @@ export function StoragesPage() {
           onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
           required
         />
-        <input
-          className="rounded-lg border border-[var(--ark-line)] px-3 py-2 text-sm"
-          placeholder="路径或 URI"
-          value={form.basePath}
-          onChange={(e) => setForm((p) => ({ ...p, basePath: e.target.value }))}
-          required
-        />
+
         <select
           className="rounded-lg border border-[var(--ark-line)] px-3 py-2 text-sm"
           value={form.type}
@@ -68,6 +77,59 @@ export function StoragesPage() {
           <option value="external_ssd">external_ssd</option>
           <option value="cloud_115">cloud_115</option>
         </select>
+
+        <input
+          className="rounded-lg border border-[var(--ark-line)] px-3 py-2 text-sm sm:col-span-2"
+          placeholder={isLocalType ? "选择或输入本地目录路径" : "115://photoark 或其他 URI"}
+          value={form.basePath}
+          onChange={(e) => setForm((p) => ({ ...p, basePath: e.target.value }))}
+          required
+        />
+
+        {isLocalType ? (
+          <>
+            <div className="grid grid-cols-[1fr_auto_auto] gap-2 sm:col-span-2">
+              <input
+                className="rounded-lg border border-[var(--ark-line)] px-3 py-2 text-sm"
+                placeholder="浏览路径（例如 /volume1）"
+                value={browseInput}
+                onChange={(e) => setBrowseInput(e.target.value)}
+              />
+              <button
+                type="button"
+                onClick={() => void loadDirectories(browseInput || undefined)}
+                className="rounded-lg border border-[var(--ark-line)] px-3 py-2 text-sm"
+              >
+                读取
+              </button>
+              <button
+                type="button"
+                onClick={() => void loadDirectories(browser?.parentPath ?? undefined)}
+                className="rounded-lg border border-[var(--ark-line)] px-3 py-2 text-sm"
+                disabled={!browser?.parentPath}
+              >
+                上级
+              </button>
+            </div>
+
+            <select
+              className="rounded-lg border border-[var(--ark-line)] px-3 py-2 text-sm sm:col-span-2"
+              value={form.basePath}
+              onChange={(e) => {
+                const selected = e.target.value;
+                setForm((p) => ({ ...p, basePath: selected }));
+              }}
+            >
+              <option value="">从下拉选择目录</option>
+              {browser?.directories.map((dir) => (
+                <option key={dir.path} value={dir.path}>
+                  {dir.path}
+                </option>
+              ))}
+            </select>
+          </>
+        ) : null}
+
         <label className="flex items-center gap-2 text-sm">
           <input
             type="checkbox"

@@ -1,6 +1,7 @@
 import type {
   BackupAsset,
   BackupJob,
+  DirectoryBrowseResult,
   LivePhotoPair,
   LivePhotoDetail,
   Metrics,
@@ -34,6 +35,13 @@ export function getMetrics() {
 
 export function getStorages() {
   return fetchJson<{ items: StorageTarget[] }>("/api/storages");
+}
+
+export function browseDirectories(dirPath?: string) {
+  const q = new URLSearchParams();
+  if (dirPath) q.set("path", dirPath);
+  const suffix = q.toString() ? `?${q.toString()}` : "";
+  return fetchJson<DirectoryBrowseResult>(`/api/fs/directories${suffix}`);
 }
 
 export function createStorage(payload: Omit<StorageTarget, "id">) {

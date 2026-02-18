@@ -61,6 +61,7 @@ docker compose up -d
 - 当前 API 使用文件持久化（便于本地调试）：
   - 状态文件默认：`/Users/xuzhi/Documents/workspace/new_project/apps/api/data/backup-state.json`
   - 可通过环境变量 `BACKUP_STATE_FILE` 覆盖
+- WebUI 本地目录下拉浏览范围可通过 `FS_BROWSE_ROOT` 限制（默认 `/`）
 
 ## Docker Hub 自动发布
 - 已配置 GitHub Actions 工作流：`/Users/xuzhi/Documents/workspace/new_project/.github/workflows/docker-publish.yml`

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
+import { readdir } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import Fastify from "fastify";
@@ -80,6 +81,12 @@ function metricSummary(state: BackupState) {
   };
 }
 
+function isInBrowseRoot(targetPath: string): boolean {
+  const root = path.resolve(env.FS_BROWSE_ROOT);
+  const target = path.resolve(targetPath);
+  return target === root || target.startsWith(`${root}${path.sep}`);
+}
+
 app.get("/healthz", async () => ({ ok: true }));
 
 app.get("/api/metrics", async () => {
@@ -90,6 +97,39 @@ app.get("/api/metrics", async () => {
 app.get("/api/storages", async () => {
   const state = await stateRepo.loadState();
   return { items: state.storages };
+});
+
+app.get<{ Querystring: { path?: string } }>("/api/fs/directories", async (req, reply) => {
+  const inputPath = req.query.path ?? env.FS_BROWSE_ROOT;
+  const currentPath = path.resolve(inputPath);
+  const rootPath = path.resolve(env.FS_BROWSE_ROOT);
+
+  if (!isInBrowseRoot(currentPath)) {
+    return reply.code(403).send({ message: "Path is outside browse root" });
+  }
+
+  const dirEntries = await readdir(currentPath, { withFileTypes: true });
+  const directories = dirEntries
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => ({
+      name: entry.name,
+      path: path.join(currentPath, entry.name)
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  const parentPath =
+    currentPath === rootPath
+      ? null
+      : path.dirname(currentPath).startsWith(rootPath)
+        ? path.dirname(currentPath)
+        : rootPath;
+
+  return {
+    rootPath,
+    currentPath,
+    parentPath,
+    directories
+  };
 });
 
 app.post<{ Body: Omit<StorageTarget, "id"> }>("/api/storages", async (req) => {
