@@ -321,7 +321,7 @@ function MediaPane({ storages }: MediaPaneProps) {
                 ) : (
                   <div className="px-4 text-center text-sm text-white/80">
                     当前浏览器无法预览该图片格式
-                    {activePair ? "，可点击“播放 Live Photo”查看动态部分" : ""}
+                    {activePair ? "，可长按画面播放动态部分" : ""}
                   </div>
                 )
               )}
