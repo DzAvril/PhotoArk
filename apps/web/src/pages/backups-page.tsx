@@ -80,7 +80,7 @@ export function BackupsPage() {
                 <th className="px-2 py-2">任务</th>
                 <th className="px-2 py-2 cursor-pointer" onClick={() => toggleSort("finishedAt")}>结束时间</th>
                 <th className="px-2 py-2 cursor-pointer" onClick={() => toggleSort("status")}>状态</th>
-                <th className="px-2 py-2 cursor-pointer" onClick={() => toggleSort("copiedCount")}>成功文件</th>
+                <th className="px-2 py-2 cursor-pointer" onClick={() => toggleSort("copiedCount")}>同步文件</th>
                 <th className="px-2 py-2 cursor-pointer" onClick={() => toggleSort("failedCount")}>失败文件</th>
                 <th className="px-2 py-2">摘要</th>
               </tr>
@@ -103,8 +103,8 @@ export function BackupsPage() {
                     <td className="px-2 py-2">{run.copiedCount}</td>
                     <td className="px-2 py-2">{run.failedCount}</td>
                     <td className="px-2 py-2 text-xs">
+                      <div>扫描 {run.scannedCount ?? run.copiedCount + run.failedCount}，同步 {run.copiedCount}，跳过 {run.skippedCount ?? 0}，失败 {run.failedCount}</div>
                       <div>照片 {run.photoCount ?? 0}，视频 {run.videoCount ?? 0}，Live Photo {run.livePhotoPairCount ?? 0}</div>
-                      <div className="mt-1 mp-muted">成功 {run.copiedCount}，失败 {run.failedCount}</div>
                       {run.errors[0] ? <div className="mt-1 text-red-500">首个错误：{run.errors[0].path} - {run.errors[0].error}</div> : null}
                     </td>
                   </tr>
