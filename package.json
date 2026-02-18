@@ -1,0 +1,19 @@
+{
+  "name": "photoark",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Photo backup and multi-target sync platform with Live Photo aware restore",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w @photoark/api & npm run dev -w @photoark/web",
+    "build": "npm run build -w @photoark/shared && npm run build -w @photoark/api && npm run build -w @photoark/web",
+    "lint": "npm run lint -w @photoark/api && npm run lint -w @photoark/web",
+    "typecheck": "npm run typecheck -w @photoark/shared && npm run typecheck -w @photoark/api && npm run typecheck -w @photoark/web"
+  },
+  "engines": {
+    "node": ">=20.11.0"
+  }
+}

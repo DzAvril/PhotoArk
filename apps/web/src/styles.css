@@ -1,0 +1,25 @@
+@import "tailwindcss";
+
+:root {
+  --ark-bg: #f2f4ec;
+  --ark-paper: #fbfff7;
+  --ark-ink: #1f2a24;
+  --ark-deep: #0c3b31;
+  --ark-mint: #d6f0a4;
+  --ark-ocean: #256a66;
+  --ark-warm: #f4d5a4;
+  --ark-line: #d6dfd2;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: "Sora", "Avenir Next", "PingFang SC", "Noto Sans SC", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
