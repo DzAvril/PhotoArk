@@ -5,7 +5,7 @@ import { useTablePagination } from "../components/table/use-table-pagination";
 import { getJobs, getRuns } from "../lib/api";
 import type { BackupJob, JobRun } from "../types/api";
 
-type SortKey = "finishedAt" | "status" | "copiedCount" | "failedCount";
+type SortKey = "finishedAt" | "status" | "copiedCount";
 
 export function BackupsPage() {
   const [jobs, setJobs] = useState<BackupJob[]>([]);
@@ -81,8 +81,7 @@ export function BackupsPage() {
                 <th className="px-2 py-2 cursor-pointer" onClick={() => toggleSort("finishedAt")}>结束时间</th>
                 <th className="px-2 py-2">触发方式</th>
                 <th className="px-2 py-2 cursor-pointer" onClick={() => toggleSort("status")}>状态</th>
-                <th className="px-2 py-2 cursor-pointer" onClick={() => toggleSort("copiedCount")}>同步文件</th>
-                <th className="px-2 py-2 cursor-pointer" onClick={() => toggleSort("failedCount")}>失败文件</th>
+                <th className="px-2 py-2 cursor-pointer" onClick={() => toggleSort("copiedCount")}>成功/失败</th>
                 <th className="px-2 py-2">摘要</th>
               </tr>
             </thead>
@@ -110,8 +109,11 @@ export function BackupsPage() {
                         {run.status === "success" ? "成功" : "失败"}
                       </span>
                     </td>
-                    <td className="px-2 py-2">{run.copiedCount}</td>
-                    <td className="px-2 py-2">{run.failedCount}</td>
+                    <td className="px-2 py-2">
+                      <span className="text-emerald-600">{run.copiedCount}</span>
+                      <span className="mp-muted">/</span>
+                      <span className="text-red-500">{run.failedCount}</span>
+                    </td>
                     <td className="px-2 py-2 text-xs">
                       <div>照片 {run.photoCount ?? 0}，视频 {run.videoCount ?? 0}，Live Photo {run.livePhotoPairCount ?? 0}</div>
                       {run.errors[0] ? <div className="mt-1 text-red-500">首个错误：{run.errors[0].path} - {run.errors[0].error}</div> : null}
@@ -119,7 +121,7 @@ export function BackupsPage() {
                   </tr>
                 );
               })}
-              {!table.paged.length ? <tr><td className="px-2 py-4 text-center text-xs mp-muted" colSpan={7}>暂无记录</td></tr> : null}
+              {!table.paged.length ? <tr><td className="px-2 py-4 text-center text-xs mp-muted" colSpan={6}>暂无记录</td></tr> : null}
             </tbody>
           </table>
         </div>
