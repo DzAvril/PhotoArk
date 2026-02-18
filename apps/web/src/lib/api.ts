@@ -9,7 +9,7 @@ import type {
   StorageTarget
 } from "../types/api";
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8080";
+const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 
 async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {

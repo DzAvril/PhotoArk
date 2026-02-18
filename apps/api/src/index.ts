@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import Fastify from "fastify";
 import cors from "@fastify/cors";
+import fastifyStatic from "@fastify/static";
 import type { BackupJob, StorageTarget } from "@photoark/shared";
 import { z } from "zod";
 import { env } from "./config/env.js";
@@ -11,6 +15,15 @@ import type { BackupAsset, BackupState } from "./modules/backup/repository/types
 
 const app = Fastify({ logger: true });
 await app.register(cors, { origin: true });
+const currentDir = path.dirname(fileURLToPath(import.meta.url));
+const publicRoot = path.resolve(currentDir, "../public");
+const hasWebAssets = existsSync(publicRoot);
+if (hasWebAssets) {
+  await app.register(fastifyStatic, {
+    root: publicRoot,
+    prefix: "/"
+  });
+}
 app.setErrorHandler((error, _req, reply) => {
   if (error instanceof z.ZodError) {
     return reply.code(400).send({
@@ -230,6 +243,16 @@ app.post<{ Body: { contentBase64: string } }>("/api/crypto/encrypt", async (req)
   const plain = Buffer.from(req.body.contentBase64, "base64");
   const encrypted = encryption.encrypt(plain);
   return { cipherBase64: encrypted.toString("base64") };
+});
+
+app.setNotFoundHandler((req, reply) => {
+  if (req.raw.url?.startsWith("/api/")) {
+    return reply.code(404).send({ message: "Not found" });
+  }
+  if (hasWebAssets) {
+    return reply.sendFile("index.html");
+  }
+  return reply.code(404).send({ message: "Not found" });
 });
 
 app.listen({ port: env.API_PORT, host: "0.0.0.0" }).catch((err) => {

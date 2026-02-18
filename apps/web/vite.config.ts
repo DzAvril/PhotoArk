@@ -4,6 +4,12 @@ import tailwindcss from "@tailwindcss/vite";
 import { VitePWA } from "vite-plugin-pwa";
 
 export default defineConfig({
+  server: {
+    proxy: {
+      "/api": "http://localhost:8080",
+      "/healthz": "http://localhost:8080"
+    }
+  },
   plugins: [
     react(),
     tailwindcss(),

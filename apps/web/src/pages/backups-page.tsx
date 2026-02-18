@@ -11,7 +11,7 @@ const initialForm: Omit<BackupAsset, "id"> = {
   capturedAt: new Date().toISOString(),
   livePhotoAssetId: ""
 };
-const apiBase = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8080";
+const apiBase = import.meta.env.VITE_API_BASE_URL ?? "";
 
 export function BackupsPage() {
   const [items, setItems] = useState<BackupAsset[]>([]);
