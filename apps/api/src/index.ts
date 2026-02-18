@@ -242,14 +242,19 @@ function sendLocalFileStreamWithRange(
 type JobWatcherControl = {
   watcher: FSWatcher;
   sourceRoot: string;
+  usePolling: boolean;
+  faulted: boolean;
+  lastError: string | null;
   debounceTimer: NodeJS.Timeout | null;
   pendingPath: string | null;
 };
 
 const jobWatchers = new Map<string, JobWatcherControl>();
+const forcedPollingJobs = new Set<string>();
 const runningWatchJobs = new Set<string>();
 const queuedWatchJobs = new Set<string>();
 let runExecutionQueue: Promise<unknown> = Promise.resolve();
+let watcherReconcileTimer: NodeJS.Timeout | null = null;
 
 type VersionSource = "github_release" | "github_tag" | "unavailable";
 
@@ -567,6 +572,24 @@ function resolveWatchSourceRoot(state: BackupState, job: BackupJob): string | nu
   }
 }
 
+function shouldForcePollingByError(error: unknown): boolean {
+  const code = String((error as { code?: string })?.code ?? "").toUpperCase();
+  if (code === "EMFILE" || code === "ENOSPC" || code === "EPERM" || code === "EACCES") {
+    return true;
+  }
+  const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+  return (
+    message.includes("operation not permitted") ||
+    message.includes("system limit for number of file watchers reached") ||
+    message.includes("too many open files")
+  );
+}
+
+function parseWatcherError(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  return String(error);
+}
+
 async function stopJobWatcher(jobId: string) {
   const control = jobWatchers.get(jobId);
   if (!control) {
@@ -640,16 +663,17 @@ function scheduleWatchedJob(jobId: string, reason: string, changedPath: string) 
   }, WATCH_DEBOUNCE_MS);
 }
 
-async function createJobWatcher(job: BackupJob, sourceRoot: string): Promise<JobWatcherControl> {
+async function createJobWatcher(job: BackupJob, sourceRoot: string, usePolling: boolean): Promise<JobWatcherControl> {
   const watcher = chokidarWatch(sourceRoot, {
     ignoreInitial: true,
-    usePolling: true,
-    interval: 1000,
-    binaryInterval: 1200,
+    usePolling,
+    interval: env.WATCH_POLLING_INTERVAL_MS,
+    binaryInterval: Math.max(env.WATCH_POLLING_INTERVAL_MS, 1200),
     awaitWriteFinish: {
       stabilityThreshold: 800,
       pollInterval: 100
-    }
+    },
+    atomic: true
   });
 
   const onMediaChange = (watchPath: string, reason: string) => {
@@ -662,23 +686,44 @@ async function createJobWatcher(job: BackupJob, sourceRoot: string): Promise<Job
   watcher.on("add", (watchPath) => onMediaChange(watchPath, "add"));
   watcher.on("change", (watchPath) => onMediaChange(watchPath, "change"));
   watcher.on("unlink", (watchPath) => onMediaChange(watchPath, "unlink"));
+  watcher.on("addDir", (watchPath) => scheduleWatchedJob(job.id, "add_dir", watchPath));
+  watcher.on("unlinkDir", (watchPath) => scheduleWatchedJob(job.id, "unlink_dir", watchPath));
   watcher.on("error", (error) => {
-    app.log.error({ jobId: job.id, sourceRoot, err: error }, "Watcher error");
+    const control = jobWatchers.get(job.id);
+    if (control) {
+      control.faulted = true;
+      control.lastError = parseWatcherError(error);
+    }
+    if (!usePolling && shouldForcePollingByError(error)) {
+      forcedPollingJobs.add(job.id);
+    }
+    app.log.error({ jobId: job.id, sourceRoot, usePolling, err: error }, "Watcher error");
+    void reloadAndReconcileWatchers().catch((reconcileError) => {
+      app.log.error({ jobId: job.id, err: reconcileError }, "Watcher reconcile after error failed");
+    });
   });
   watcher.on("ready", () => {
-    app.log.info({ jobId: job.id, sourceRoot }, "Watcher ready");
+    const control = jobWatchers.get(job.id);
+    if (control) {
+      control.faulted = false;
+      control.lastError = null;
+    }
+    app.log.info({ jobId: job.id, sourceRoot, usePolling }, "Watcher ready");
   });
 
   return {
     watcher,
     sourceRoot,
+    usePolling,
+    faulted: false,
+    lastError: null,
     debounceTimer: null,
     pendingPath: null
   };
 }
 
 async function reconcileJobWatchers(state: BackupState) {
-  const expectedWatchers = new Map<string, string>();
+  const expectedWatchers = new Map<string, { sourceRoot: string; usePolling: boolean }>();
 
   for (const job of state.jobs) {
     const sourceRoot = resolveWatchSourceRoot(state, job);
@@ -692,9 +737,15 @@ async function reconcileJobWatchers(state: BackupState) {
       continue;
     }
 
-    expectedWatchers.set(job.id, sourceRoot);
+    const usePolling = env.WATCH_USE_POLLING || forcedPollingJobs.has(job.id);
+    expectedWatchers.set(job.id, { sourceRoot, usePolling });
     const current = jobWatchers.get(job.id);
-    if (current && current.sourceRoot === sourceRoot) {
+    if (
+      current &&
+      current.sourceRoot === sourceRoot &&
+      current.usePolling === usePolling &&
+      !current.faulted
+    ) {
       continue;
     }
 
@@ -702,13 +753,14 @@ async function reconcileJobWatchers(state: BackupState) {
       await stopJobWatcher(job.id);
     }
 
-    const nextWatcher = await createJobWatcher(job, sourceRoot);
+    const nextWatcher = await createJobWatcher(job, sourceRoot, usePolling);
     jobWatchers.set(job.id, nextWatcher);
   }
 
   for (const jobId of [...jobWatchers.keys()]) {
     if (!expectedWatchers.has(jobId)) {
       await stopJobWatcher(jobId);
+      forcedPollingJobs.delete(jobId);
     }
   }
 }
@@ -1197,6 +1249,10 @@ app.post<{ Body: { contentBase64: string } }>("/api/crypto/encrypt", async (req)
 });
 
 app.addHook("onClose", async () => {
+  if (watcherReconcileTimer) {
+    clearInterval(watcherReconcileTimer);
+    watcherReconcileTimer = null;
+  }
   for (const jobId of [...jobWatchers.keys()]) {
     await stopJobWatcher(jobId);
   }
@@ -1215,6 +1271,12 @@ app.setNotFoundHandler((req, reply) => {
 try {
   await app.listen({ port: env.API_PORT, host: "0.0.0.0" });
   await reloadAndReconcileWatchers();
+  watcherReconcileTimer = setInterval(() => {
+    void reloadAndReconcileWatchers().catch((error) => {
+      app.log.error({ err: error }, "Periodic watcher reconcile failed");
+    });
+  }, env.WATCH_RECONCILE_INTERVAL_MS);
+  watcherReconcileTimer.unref();
   app.log.info({ watcherCount: jobWatchers.size }, "Watch mode initialized");
 } catch (err) {
   app.log.error(err);
