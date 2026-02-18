@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { TablePagination } from "../components/table/table-pagination";
 import { TableToolbar } from "../components/table/table-toolbar";
 import { useTablePagination } from "../components/table/use-table-pagination";
+import { useLocalStorageState } from "../hooks/use-local-storage-state";
 import { createJob, deleteJob, getJobs, getRuns, getStorages, runJob, updateJob } from "../lib/api";
 import type { BackupJob, JobRun, StorageTarget } from "../types/api";
 
@@ -17,20 +18,29 @@ type JobForm = {
   enabled: boolean;
 };
 
-const initialForm: JobForm = {
-  name: "",
-  sourceTargetId: "",
-  destinationTargetId: "",
-  schedule: "0 2 * * *",
-  watchMode: false,
-  enabled: true
-};
+function createInitialForm(sourceTargetId = "", destinationTargetId = ""): JobForm {
+  return {
+    name: "",
+    sourceTargetId,
+    destinationTargetId,
+    schedule: "0 2 * * *",
+    watchMode: false,
+    enabled: true
+  };
+}
 
 export function JobsPage() {
   const [items, setItems] = useState<BackupJob[]>([]);
   const [storages, setStorages] = useState<StorageTarget[]>([]);
   const [runs, setRuns] = useState<JobRun[]>([]);
-  const [form, setForm] = useState<JobForm>(initialForm);
+  const [lastSourceTargetId, setLastSourceTargetId] = useLocalStorageState("ark-last-job-source-target-id", "");
+  const [lastDestinationTargetId, setLastDestinationTargetId] = useLocalStorageState(
+    "ark-last-job-destination-target-id",
+    ""
+  );
+  const [form, setForm] = useState<JobForm>(() =>
+    createInitialForm(lastSourceTargetId, lastDestinationTargetId)
+  );
   const [editingJobId, setEditingJobId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [formOpen, setFormOpen] = useState(false);
@@ -61,9 +71,20 @@ export function JobsPage() {
   }, []);
 
   function resetForm() {
-    setForm(initialForm);
+    setForm(createInitialForm(lastSourceTargetId, lastDestinationTargetId));
     setEditingJobId(null);
   }
+
+  useEffect(() => {
+    if (!storages.length) return;
+    const storageIds = new Set(storages.map((item) => item.id));
+    if (form.sourceTargetId && !storageIds.has(form.sourceTargetId)) {
+      setForm((prev) => ({ ...prev, sourceTargetId: "" }));
+    }
+    if (form.destinationTargetId && !storageIds.has(form.destinationTargetId)) {
+      setForm((prev) => ({ ...prev, destinationTargetId: "" }));
+    }
+  }, [storages, form.sourceTargetId, form.destinationTargetId]);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -91,7 +112,10 @@ export function JobsPage() {
       } else {
         await createJob(payload);
       }
-      resetForm();
+      setLastSourceTargetId(form.sourceTargetId);
+      setLastDestinationTargetId(form.destinationTargetId);
+      setForm(createInitialForm(form.sourceTargetId, form.destinationTargetId));
+      setEditingJobId(null);
       setFormOpen(false);
       await load();
     } catch (err) {
@@ -184,7 +208,8 @@ export function JobsPage() {
             .includes(keyword);
         },
       [storageById]
-    )
+    ),
+    { pageSizeStorageKey: "ark-jobs-page-size" }
   );
 
   const latestRunByJobId = useMemo(() => {
@@ -222,7 +247,13 @@ export function JobsPage() {
             <select
               className="mp-select"
               value={form.sourceTargetId}
-              onChange={(e) => setForm((p) => ({ ...p, sourceTargetId: e.target.value }))}
+              onChange={(e) => {
+                const next = e.target.value;
+                setForm((p) => ({ ...p, sourceTargetId: next }));
+                if (next) {
+                  setLastSourceTargetId(next);
+                }
+              }}
               required
             >
               <option value="">选择备份源存储</option>
@@ -232,7 +263,13 @@ export function JobsPage() {
             <select
               className="mp-select"
               value={form.destinationTargetId}
-              onChange={(e) => setForm((p) => ({ ...p, destinationTargetId: e.target.value }))}
+              onChange={(e) => {
+                const next = e.target.value;
+                setForm((p) => ({ ...p, destinationTargetId: next }));
+                if (next) {
+                  setLastDestinationTargetId(next);
+                }
+              }}
               required
             >
               <option value="">选择备份目标存储</option>

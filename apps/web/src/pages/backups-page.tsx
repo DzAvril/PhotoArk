@@ -78,7 +78,8 @@ export function BackupsPage() {
           return `${job?.name ?? row.jobId} ${row.status} ${row.message ?? ""}`.toLowerCase().includes(keyword);
         },
       [jobById]
-    )
+    ),
+    { pageSizeStorageKey: "ark-runs-page-size" }
   );
 
   return (

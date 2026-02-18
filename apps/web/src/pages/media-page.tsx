@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { browseStorageMedia, getStorageMediaStreamUrl, getStorages } from "../lib/api";
+import { useLocalStorageState } from "../hooks/use-local-storage-state";
 import type { MediaBrowseResult, MediaFileItem, StorageTarget } from "../types/api";
 
 interface MediaPaneProps {
@@ -74,7 +75,7 @@ function buildDisplayItems(
 }
 
 function MediaPane({ storages }: MediaPaneProps) {
-  const [storageId, setStorageId] = useState("");
+  const [storageId, setStorageId] = useLocalStorageState("ark-last-media-storage-id", "");
   const [media, setMedia] = useState<MediaBrowseResult | null>(null);
   const [kindFilter, setKindFilter] = useState<"all" | "image" | "video" | "live">("all");
   const [error, setError] = useState("");
@@ -85,6 +86,11 @@ function MediaPane({ storages }: MediaPaneProps) {
   const livePressTimerRef = useRef<number | null>(null);
 
   const selectedStorage = storages.find((s) => s.id === storageId);
+
+  useEffect(() => {
+    if (!storageId || storages.some((item) => item.id === storageId)) return;
+    setStorageId("");
+  }, [storages, storageId, setStorageId]);
 
   async function previewMedia() {
     if (!selectedStorage) return;

@@ -4,21 +4,28 @@ import { PathPicker } from "../components/path-picker";
 import { TablePagination } from "../components/table/table-pagination";
 import { TableToolbar } from "../components/table/table-toolbar";
 import { useTablePagination } from "../components/table/use-table-pagination";
+import { useLocalStorageState } from "../hooks/use-local-storage-state";
 import { browseDirectories, createStorage, deleteStorage, getStorages } from "../lib/api";
 import type { StorageTarget } from "../types/api";
 
 type SortKey = "name" | "type" | "basePath" | "encrypted";
 
-const initialForm: Omit<StorageTarget, "id"> = {
-  name: "",
-  type: "local_fs",
-  basePath: "",
-  encrypted: false
-};
+function createInitialForm(type: StorageTarget["type"] = "local_fs"): Omit<StorageTarget, "id"> {
+  return {
+    name: "",
+    type,
+    basePath: "",
+    encrypted: false
+  };
+}
 
 export function StoragesPage() {
   const [items, setItems] = useState<StorageTarget[]>([]);
-  const [form, setForm] = useState(initialForm);
+  const [lastStorageType, setLastStorageType] = useLocalStorageState<StorageTarget["type"]>(
+    "ark-last-storage-type",
+    "local_fs"
+  );
+  const [form, setForm] = useState<Omit<StorageTarget, "id">>(() => createInitialForm(lastStorageType));
   const [error, setError] = useState("");
   const [formOpen, setFormOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -45,7 +52,8 @@ export function StoragesPage() {
     setError("");
     try {
       await createStorage(form);
-      setForm(initialForm);
+      setLastStorageType(form.type);
+      setForm(createInitialForm(form.type));
       setFormOpen(false);
       await load();
     } catch (err) {
@@ -93,7 +101,8 @@ export function StoragesPage() {
         (row: StorageTarget, keyword: string) =>
           `${row.name} ${row.type} ${row.basePath}`.toLowerCase().includes(keyword),
       []
-    )
+    ),
+    { pageSizeStorageKey: "ark-storages-page-size" }
   );
 
   const allCurrentPageSelected = table.paged.length > 0 && table.paged.every((s) => selected.has(s.id));
@@ -113,7 +122,15 @@ export function StoragesPage() {
         <Collapsible.Content>
           <form onSubmit={(e) => void onSubmit(e)} className="mt-3 grid gap-2 sm:grid-cols-2">
             <input className="mp-input" placeholder="名称" value={form.name} onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))} required />
-            <select className="mp-select" value={form.type} onChange={(e) => setForm((p) => ({ ...p, type: e.target.value as StorageTarget["type"] }))}>
+            <select
+              className="mp-select"
+              value={form.type}
+              onChange={(e) => {
+                const nextType = e.target.value as StorageTarget["type"];
+                setForm((p) => ({ ...p, type: nextType }));
+                setLastStorageType(nextType);
+              }}
+            >
               <option value="local_fs">local_fs</option>
               <option value="external_ssd">external_ssd</option>
               <option value="cloud_115">cloud_115</option>
