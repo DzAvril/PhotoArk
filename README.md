@@ -39,6 +39,7 @@ cp .env.example .env
 编辑 `.env`，至少确认以下变量：
 
 - `MASTER_KEY_BASE64`：必须设置，可用下面命令生成
+- `LEGACY_MASTER_KEYS_BASE64`：可选，密钥轮换时填旧密钥（多个用逗号分隔）
 - `API_PORT`：默认 `8080`
 - `VITE_API_BASE_URL`：本地调试建议留空（前端走同源代理）或设置为 `http://localhost:8080`
 - `BACKUP_STATE_FILE`：默认 `./apps/api/data/backup-state.json`
@@ -135,6 +136,22 @@ docker compose up -d --build app
   - `VERSION_CHECK_REPO`：用于检查最新版本的 GitHub 仓库（默认 `DzAvril/PhotoArk`）
   - `VERSION_CHECK_TIMEOUT_MS`：版本检查超时毫秒数（默认 `3500`）
   - `GITHUB_TOKEN`：可选，GitHub API 访问令牌（用于提高版本查询稳定性）
+
+## 加密机制与避坑
+- 加密算法：AES-256-GCM，每个文件独立随机 IV。
+- 新格式封装：`[MAGIC:PARK][VER:1][KEY_ID(8)][IV(12)][TAG(16)][CIPHERTEXT]`。
+- 兼容旧格式：仍可读取历史的 `[IV][TAG][CIPHERTEXT]` 文件。
+- 任务同步策略：
+  - 源存储加密：先解密为明文
+  - 目标存储加密：再加密后写入
+  - 目标存储不加密：写入明文
+- WebUI 预览：
+  - 存储媒体预览与备份预览均支持加密文件
+  - 解密仅在 API 内存中进行，不写临时明文文件
+- 防止“文件无法解密”的建议：
+  - 不要直接替换掉旧 `MASTER_KEY_BASE64`
+  - 轮换时把旧 key 放入 `LEGACY_MASTER_KEYS_BASE64`（逗号分隔）
+  - 确认历史文件可读后，再做离线重加密并移除旧 key
 
 ## Docker Hub 自动发布
 - 已配置 GitHub Actions 工作流：`/Users/xuzhi/Documents/workspace/new_project/.github/workflows/docker-publish.yml`
