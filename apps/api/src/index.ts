@@ -512,9 +512,6 @@ async function executeJob(state: BackupState, jobId: string, trigger: JobRunTrig
       const ext = path.extname(relativePath).toLowerCase();
       if (livePhotoAssetId) {
         copiedLivePhotoIds.add(livePhotoAssetId);
-        if (IMAGE_EXTENSIONS.has(ext)) {
-          photoCount += 1;
-        }
       } else if (VIDEO_EXTENSIONS.has(ext)) {
         videoCount += 1;
       } else if (IMAGE_EXTENSIONS.has(ext)) {
