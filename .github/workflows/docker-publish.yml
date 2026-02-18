@@ -45,6 +45,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -78,3 +80,54 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Collect changelog
+        id: changelog
+        shell: bash
+        run: |
+          before="${{ github.event.before }}"
+          if [ -n "$before" ] && [ "$before" != "0000000000000000000000000000000000000000" ]; then
+            logs=$(git log --no-merges --pretty=format:'- %h %s' "$before..${{ github.sha }}" | head -n 12)
+          else
+            logs=$(git log --no-merges --pretty=format:'- %h %s' -n 12)
+          fi
+
+          if [ -z "$logs" ]; then
+            logs="- (no commit summary available)"
+          fi
+
+          {
+            echo "value<<EOF"
+            echo "$logs"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Notify Telegram
+        if: >-
+          success() &&
+          (secrets.TELEGRAM_BOT_TOKEN != '' || vars.TELEGRAM_BOT_TOKEN != '') &&
+          (secrets.TELEGRAM_CHAT_ID != '' || vars.TELEGRAM_CHAT_ID != '')
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN != '' && secrets.TELEGRAM_BOT_TOKEN || vars.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID != '' && secrets.TELEGRAM_CHAT_ID || vars.TELEGRAM_CHAT_ID }}
+          IMAGE_TAGS: ${{ steps.meta.outputs.tags }}
+          CHANGELOG: ${{ steps.changelog.outputs.value }}
+        run: |
+          first_tag=$(printf "%s\n" "$IMAGE_TAGS" | head -n 1)
+          message=$(cat <<MSG
+PhotoArk 镜像已更新
+仓库: ${{ github.repository }}
+分支/标签: ${{ github.ref_name }}
+镜像: $first_tag
+提交人: ${{ github.actor }}
+提交: ${{ github.sha }}
+
+更新内容:
+$CHANGELOG
+MSG
+)
+
+          curl -sS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
+            --data-urlencode "text=${message}" \
+            --data-urlencode "disable_web_page_preview=true"

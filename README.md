@@ -77,11 +77,15 @@ docker compose up -d
 - 需要在 GitHub 仓库 `Environment: BuildImage` 下配置 Secrets：
   - `DOCKERHUB_USERNAME`
   - `DOCKERHUB_TOKEN`
+  - `TELEGRAM_BOT_TOKEN`（可选）
+  - `TELEGRAM_CHAT_ID`（可选）
 - 兼容读取顺序：
   - 优先读取 `secrets.DOCKERHUB_USERNAME` / `secrets.DOCKERHUB_TOKEN`
   - 若 secrets 为空，会回退读取 `vars.DOCKERHUB_USERNAME` / `vars.DOCKERHUB_TOKEN`
+  - Telegram 同样支持 `secrets` 优先、`vars` 回退
 - 产物镜像：
   - `dzavril/photoark`
+ - 若配置 Telegram，镜像构建成功后会发送通知，包含镜像 tag 与本次更新摘要
 
 ## 当前状态
 - 已完成：项目初始化、架构文档、核心模块骨架（存储适配/加密/Live Photo 配对/通知）
