@@ -42,7 +42,8 @@ npm run dev
 或使用 Docker：
 
 ```bash
-docker compose up --build
+docker compose pull
+docker compose up -d
 ```
 
 ## WebUI 路由与联调
