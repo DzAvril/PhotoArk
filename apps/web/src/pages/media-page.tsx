@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { browseStorageDirectories, browseStorageMedia, getStorageMediaStreamUrl, getStorages } from "../lib/api";
-import type { DirectoryBrowseResult, MediaBrowseResult, StorageTarget } from "../types/api";
+import type { DirectoryBrowseResult, MediaBrowseResult, MediaFileItem, StorageTarget } from "../types/api";
 
 interface MediaPaneProps {
   title: string;
@@ -9,6 +9,11 @@ interface MediaPaneProps {
 
 const IMAGE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".heic", ".webp", ".gif"]);
 const VIDEO_EXTENSIONS = new Set([".mov", ".mp4", ".m4v", ".avi", ".mkv", ".webm"]);
+
+type LivePhotoPair = {
+  image: MediaFileItem;
+  video: MediaFileItem;
+};
 
 function splitFileName(name: string) {
   const dotIdx = name.lastIndexOf(".");
@@ -19,26 +24,28 @@ function splitFileName(name: string) {
   };
 }
 
-function detectLivePhotoNames(media: MediaBrowseResult | null) {
+function detectLivePhotoPairs(media: MediaBrowseResult | null) {
   const files = media?.files ?? [];
-  const groups = new Map<string, { image: boolean; video: boolean; names: string[] }>();
+  const groups = new Map<string, { image: MediaFileItem | null; video: MediaFileItem | null }>();
 
   for (const file of files) {
     const { base, ext } = splitFileName(file.name);
-    const row = groups.get(base) ?? { image: false, video: false, names: [] };
-    if (IMAGE_EXTENSIONS.has(ext)) row.image = true;
-    if (VIDEO_EXTENSIONS.has(ext)) row.video = true;
-    row.names.push(file.name);
+    const row = groups.get(base) ?? { image: null, video: null };
+    if (IMAGE_EXTENSIONS.has(ext)) row.image = file;
+    if (VIDEO_EXTENSIONS.has(ext)) row.video = file;
     groups.set(base, row);
   }
 
-  const names = new Set<string>();
+  const pairByPath = new Map<string, LivePhotoPair>();
   for (const value of groups.values()) {
     if (value.image && value.video) {
-      value.names.forEach((n) => names.add(n));
+      const pair = { image: value.image, video: value.video };
+      pairByPath.set(value.image.path, pair);
+      pairByPath.set(value.video.path, pair);
     }
   }
-  return names;
+
+  return pairByPath;
 }
 
 function MediaPane({ title, storages }: MediaPaneProps) {
@@ -48,7 +55,7 @@ function MediaPane({ title, storages }: MediaPaneProps) {
   const [media, setMedia] = useState<MediaBrowseResult | null>(null);
   const [kindFilter, setKindFilter] = useState<"all" | "image" | "video">("all");
   const [error, setError] = useState("");
-  const [activeIndex, setActiveIndex] = useState<number | null>(null);
+  const [activePath, setActivePath] = useState<string | null>(null);
 
   const selectedStorage = storages.find((s) => s.id === storageId);
 
@@ -81,35 +88,63 @@ function MediaPane({ title, storages }: MediaPaneProps) {
     setError("");
     try {
       setMedia(await browseStorageMedia(selectedStorage.id, path));
-      setActiveIndex(null);
+      setActivePath(null);
     } catch (err) {
       setError((err as Error).message);
     }
   }
 
+  const allFiles = media?.files ?? [];
+
   const filteredFiles = useMemo(() => {
-    const files = media?.files ?? [];
-    if (kindFilter === "all") return files;
-    return files.filter((f) => f.kind === kindFilter);
-  }, [media?.files, kindFilter]);
+    if (kindFilter === "all") return allFiles;
+    return allFiles.filter((f) => f.kind === kindFilter);
+  }, [allFiles, kindFilter]);
+
+  const livePhotoPairByPath = useMemo(() => detectLivePhotoPairs(media), [media]);
+  const activeFile = useMemo(() => allFiles.find((f) => f.path === activePath) ?? null, [allFiles, activePath]);
+  const activePair = activeFile ? livePhotoPairByPath.get(activeFile.path) ?? null : null;
+
+  const activeList = useMemo(() => {
+    if (!activeFile) return filteredFiles;
+    const inFiltered = filteredFiles.some((f) => f.path === activeFile.path);
+    return inFiltered ? filteredFiles : allFiles;
+  }, [activeFile, filteredFiles, allFiles]);
+
+  const activeIndex = activeFile ? activeList.findIndex((f) => f.path === activeFile.path) : -1;
+
+  function openByPath(nextPath: string) {
+    setActivePath(nextPath);
+  }
+
+  function openPrev() {
+    if (activeIndex <= 0) return;
+    openByPath(activeList[activeIndex - 1].path);
+  }
+
+  function openNext() {
+    if (activeIndex < 0 || activeIndex >= activeList.length - 1) return;
+    openByPath(activeList[activeIndex + 1].path);
+  }
 
   useEffect(() => {
     function onKeydown(e: KeyboardEvent) {
-      if (activeIndex === null) return;
-      if (e.key === "Escape") setActiveIndex(null);
-      if (e.key === "ArrowLeft") setActiveIndex((idx) => (idx === null ? idx : Math.max(0, idx - 1)));
-      if (e.key === "ArrowRight") {
-        setActiveIndex((idx) => (idx === null ? idx : Math.min(filteredFiles.length - 1, idx + 1)));
-      }
+      if (!activeFile) return;
+      if (e.key === "Escape") setActivePath(null);
+      if (e.key === "ArrowLeft") openPrev();
+      if (e.key === "ArrowRight") openNext();
     }
 
     window.addEventListener("keydown", onKeydown);
     return () => window.removeEventListener("keydown", onKeydown);
-  }, [activeIndex, filteredFiles.length]);
+  }, [activeFile, activeIndex, activeList]);
 
-  const livePhotoNames = useMemo(() => detectLivePhotoNames(media), [media]);
-  const activeFile = activeIndex === null ? null : filteredFiles[activeIndex] ?? null;
-  const currentIndex = activeIndex ?? 0;
+  const activeCounterpartPath =
+    activePair && activeFile
+      ? activeFile.kind === "image"
+        ? activePair.video.path
+        : activePair.image.path
+      : null;
 
   return (
     <article className="mp-panel p-4">
@@ -126,7 +161,7 @@ function MediaPane({ title, storages }: MediaPaneProps) {
             setDirs(null);
             setMedia(null);
             setError("");
-            setActiveIndex(null);
+            setActivePath(null);
           }}
         >
           <option value="">选择存储</option>
@@ -185,15 +220,15 @@ function MediaPane({ title, storages }: MediaPaneProps) {
         </div>
 
         <div className="grid grid-cols-2 gap-2 md:grid-cols-3">
-          {selectedStorage && filteredFiles.map((f, idx) => {
+          {selectedStorage && filteredFiles.map((f) => {
             const streamUrl = getStorageMediaStreamUrl(selectedStorage.id, f.path);
-            const isLivePhoto = livePhotoNames.has(f.name);
+            const isLivePhoto = livePhotoPairByPath.has(f.path);
             return (
               <button
                 key={f.path}
                 type="button"
                 className="overflow-hidden rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] text-left"
-                onClick={() => setActiveIndex(idx)}
+                onClick={() => openByPath(f.path)}
               >
                 <div className="relative aspect-square bg-black/10">
                   {f.kind === "image" ? (
@@ -220,17 +255,24 @@ function MediaPane({ title, storages }: MediaPaneProps) {
       </div>
 
       {selectedStorage && activeFile ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-3" onClick={() => setActiveIndex(null)}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-3" onClick={() => setActivePath(null)}>
           <div className="w-full max-w-5xl rounded-xl bg-[var(--ark-surface)] p-3" onClick={(e) => e.stopPropagation()}>
             <div className="mb-2 flex items-center justify-between gap-2">
               <div className="min-w-0">
                 <p className="truncate text-sm font-medium">{activeFile.name}</p>
-                <p className="text-xs mp-muted">{currentIndex + 1} / {filteredFiles.length}</p>
+                <p className="text-xs mp-muted">{activeIndex + 1} / {activeList.length}</p>
               </div>
-              <button type="button" className="mp-btn" onClick={() => setActiveIndex(null)}>关闭</button>
+              <div className="flex items-center gap-2">
+                {activeCounterpartPath ? (
+                  <button type="button" className="mp-btn mp-btn-primary" onClick={() => openByPath(activeCounterpartPath)}>
+                    切换到{activeFile.kind === "image" ? "实况视频" : "实况照片"}
+                  </button>
+                ) : null}
+                <button type="button" className="mp-btn" onClick={() => setActivePath(null)}>关闭</button>
+              </div>
             </div>
 
-            <div className="relative flex h-[70vh] items-center justify-center overflow-hidden rounded-lg bg-black/80">
+            <div className="relative flex h-[62vh] items-center justify-center overflow-hidden rounded-lg bg-black/80">
               {activeFile.kind === "image" ? (
                 <img
                   src={getStorageMediaStreamUrl(selectedStorage.id, activeFile.path)}
@@ -249,20 +291,57 @@ function MediaPane({ title, storages }: MediaPaneProps) {
               <button
                 type="button"
                 className="absolute left-2 top-1/2 -translate-y-1/2 rounded-full border border-white/20 bg-black/50 px-3 py-1.5 text-sm text-white"
-                onClick={() => setActiveIndex((idx) => (idx === null ? idx : Math.max(0, idx - 1)))}
-                disabled={currentIndex <= 0}
+                onClick={openPrev}
+                disabled={activeIndex <= 0}
               >
                 上一张
               </button>
               <button
                 type="button"
                 className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full border border-white/20 bg-black/50 px-3 py-1.5 text-sm text-white"
-                onClick={() => setActiveIndex((idx) => (idx === null ? idx : Math.min(filteredFiles.length - 1, idx + 1)))}
-                disabled={currentIndex >= filteredFiles.length - 1}
+                onClick={openNext}
+                disabled={activeIndex >= activeList.length - 1}
               >
                 下一张
               </button>
             </div>
+
+            {activePair ? (
+              <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                <button
+                  type="button"
+                  className="overflow-hidden rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] text-left"
+                  onClick={() => openByPath(activePair.image.path)}
+                >
+                  <div className="aspect-video bg-black/10">
+                    <img
+                      src={getStorageMediaStreamUrl(selectedStorage.id, activePair.image.path)}
+                      alt={activePair.image.name}
+                      className="h-full w-full object-cover"
+                    />
+                  </div>
+                  <p className="truncate px-2 py-1 text-xs">照片: {activePair.image.name}</p>
+                </button>
+
+                <button
+                  type="button"
+                  className="overflow-hidden rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] text-left"
+                  onClick={() => openByPath(activePair.video.path)}
+                >
+                  <div className="aspect-video bg-black/10">
+                    <video
+                      src={getStorageMediaStreamUrl(selectedStorage.id, activePair.video.path)}
+                      className="h-full w-full object-cover"
+                      muted
+                      loop
+                      autoPlay
+                      playsInline
+                    />
+                  </div>
+                  <p className="truncate px-2 py-1 text-xs">视频: {activePair.video.name}</p>
+                </button>
+              </div>
+            ) : null}
           </div>
         </div>
       ) : null}
