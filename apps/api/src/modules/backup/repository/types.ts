@@ -16,9 +16,12 @@ export interface JobRunErrorItem {
   error: string;
 }
 
+export type JobRunTrigger = "manual" | "watch" | "schedule" | "unknown";
+
 export interface JobRun {
   id: string;
   jobId: string;
+  trigger: JobRunTrigger;
   status: "success" | "failed";
   startedAt: string;
   finishedAt: string;

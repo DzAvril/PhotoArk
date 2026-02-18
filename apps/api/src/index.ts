@@ -14,7 +14,7 @@ import { env } from "./config/env.js";
 import { EncryptionService } from "./modules/crypto/encryption-service.js";
 import { LivePhotoService } from "./modules/livephoto/live-photo-service.js";
 import { FileStateRepository } from "./modules/backup/repository/file-state-repository.js";
-import type { BackupAsset, BackupState, JobRun } from "./modules/backup/repository/types.js";
+import type { BackupAsset, BackupState, JobRun, JobRunTrigger } from "./modules/backup/repository/types.js";
 
 const app = Fastify({ logger: true });
 await app.register(cors, { origin: true });
@@ -383,7 +383,7 @@ function buildLivePhotoIdByRelativePath(relativePaths: string[]): Map<string, st
   return out;
 }
 
-async function executeJob(state: BackupState, jobId: string): Promise<JobRun> {
+async function executeJob(state: BackupState, jobId: string, trigger: JobRunTrigger): Promise<JobRun> {
   const job = state.jobs.find((item) => item.id === jobId);
   if (!job) {
     throw new Error("Job not found");
@@ -513,6 +513,7 @@ async function executeJob(state: BackupState, jobId: string): Promise<JobRun> {
   const run: JobRun = {
     id: `run_${randomUUID()}`,
     jobId: job.id,
+    trigger,
     status: failedCount === 0 ? "success" : "failed",
     startedAt,
     finishedAt,
@@ -541,10 +542,24 @@ function enqueueRunExecution<T>(task: () => Promise<T>): Promise<T> {
   return next;
 }
 
-async function executeJobAndPersist(jobId: string): Promise<JobRun> {
+function normalizeRunTrigger(trigger: string | undefined): JobRunTrigger {
+  if (trigger === "manual" || trigger === "watch" || trigger === "schedule") {
+    return trigger;
+  }
+  return "unknown";
+}
+
+function normalizeJobRun(run: JobRun): JobRun {
+  return {
+    ...run,
+    trigger: normalizeRunTrigger(run.trigger)
+  };
+}
+
+async function executeJobAndPersist(jobId: string, trigger: JobRunTrigger): Promise<JobRun> {
   return enqueueRunExecution(async () => {
     const state = await stateRepo.loadState();
-    const run = await executeJob(state, jobId);
+    const run = await executeJob(state, jobId, trigger);
     await stateRepo.saveState(state);
     return run;
   });
@@ -614,7 +629,7 @@ async function runWatchedJob(jobId: string, reason: string, changedPath?: string
 
   runningWatchJobs.add(jobId);
   try {
-    const run = await executeJobAndPersist(jobId);
+    const run = await executeJobAndPersist(jobId, "watch");
     app.log.info(
       {
         jobId,
@@ -1047,7 +1062,7 @@ app.delete<{ Params: { jobId: string } }>("/api/jobs/:jobId", async (req, reply)
 
 app.get("/api/runs", async () => {
   const state = await stateRepo.loadState();
-  return { items: state.jobRuns };
+  return { items: state.jobRuns.map(normalizeJobRun) };
 });
 
 app.get<{ Params: { jobId: string } }>("/api/jobs/:jobId/runs", async (req, reply) => {
@@ -1056,12 +1071,12 @@ app.get<{ Params: { jobId: string } }>("/api/jobs/:jobId/runs", async (req, repl
   if (!hasJob) {
     return reply.code(404).send({ message: "Job not found" });
   }
-  return { items: state.jobRuns.filter((run) => run.jobId === req.params.jobId) };
+  return { items: state.jobRuns.filter((run) => run.jobId === req.params.jobId).map(normalizeJobRun) };
 });
 
 app.post<{ Params: { jobId: string } }>("/api/jobs/:jobId/run", async (req, reply) => {
   try {
-    const run = await executeJobAndPersist(req.params.jobId);
+    const run = await executeJobAndPersist(req.params.jobId, "manual");
     return run;
   } catch (error) {
     return reply.code(400).send({ message: (error as Error).message });
