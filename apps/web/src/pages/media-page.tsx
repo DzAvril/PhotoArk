@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { browseStorageMedia, getStorageMediaStreamUrl, getStorages } from "../lib/api";
 import type { MediaBrowseResult, MediaFileItem, StorageTarget } from "../types/api";
 
@@ -51,7 +51,7 @@ function detectLivePhotoPairs(media: MediaBrowseResult | null) {
 function buildDisplayItems(
   files: MediaFileItem[],
   livePhotoPairByPath: Map<string, LivePhotoPair>,
-  kindFilter: "all" | "image" | "video"
+  kindFilter: "all" | "image" | "video" | "live"
 ): DisplayMediaItem[] {
   const items: DisplayMediaItem[] = [];
 
@@ -60,11 +60,12 @@ function buildDisplayItems(
     if (pair) {
       if (file.path !== pair.image.path) continue;
       if (kindFilter === "video") continue;
-      if (kindFilter !== "all" && kindFilter !== "image") continue;
+      if (kindFilter !== "all" && kindFilter !== "image" && kindFilter !== "live") continue;
       items.push({ key: pair.image.path, file: pair.image, livePair: pair });
       continue;
     }
 
+    if (kindFilter === "live") continue;
     if (kindFilter !== "all" && file.kind !== kindFilter) continue;
     items.push({ key: file.path, file, livePair: null });
   }
@@ -75,12 +76,13 @@ function buildDisplayItems(
 function MediaPane({ storages }: MediaPaneProps) {
   const [storageId, setStorageId] = useState("");
   const [media, setMedia] = useState<MediaBrowseResult | null>(null);
-  const [kindFilter, setKindFilter] = useState<"all" | "image" | "video">("all");
+  const [kindFilter, setKindFilter] = useState<"all" | "image" | "video" | "live">("all");
   const [error, setError] = useState("");
   const [activePath, setActivePath] = useState<string | null>(null);
   const [playingLiveVideo, setPlayingLiveVideo] = useState(false);
   const [brokenThumbImagePaths, setBrokenThumbImagePaths] = useState<Set<string>>(new Set());
   const [brokenViewerImagePaths, setBrokenViewerImagePaths] = useState<Set<string>>(new Set());
+  const livePressTimerRef = useRef<number | null>(null);
 
   const selectedStorage = storages.find((s) => s.id === storageId);
 
@@ -130,6 +132,11 @@ function MediaPane({ storages }: MediaPaneProps) {
     setActivePath(nextPath);
     setPlayingLiveVideo(false);
   }
+  function closePreview() {
+    setActivePath(null);
+    setPlayingLiveVideo(false);
+    clearLivePressTimer();
+  }
   function openPrev() {
     if (activeIndex <= 0) return;
     openByPath(activeList[activeIndex - 1].file.path);
@@ -142,7 +149,7 @@ function MediaPane({ storages }: MediaPaneProps) {
   useEffect(() => {
     function onKeydown(e: KeyboardEvent) {
       if (!activeItem) return;
-      if (e.key === "Escape") setActivePath(null);
+      if (e.key === "Escape") closePreview();
       if (e.key === "ArrowLeft") openPrev();
       if (e.key === "ArrowRight") openNext();
     }
@@ -157,6 +164,31 @@ function MediaPane({ storages }: MediaPaneProps) {
       ? activeItem.file.path
       : null;
   const shouldShowVideoViewer = Boolean(activeViewerVideoPath && (playingLiveVideo || activeItem?.file.kind === "video"));
+
+  function clearLivePressTimer() {
+    if (livePressTimerRef.current !== null) {
+      window.clearTimeout(livePressTimerRef.current);
+      livePressTimerRef.current = null;
+    }
+  }
+
+  function startLivePress() {
+    if (!activePair) return;
+    clearLivePressTimer();
+    livePressTimerRef.current = window.setTimeout(() => {
+      setPlayingLiveVideo(true);
+      livePressTimerRef.current = null;
+    }, 120);
+  }
+
+  function endLivePress() {
+    clearLivePressTimer();
+    if (activePair) {
+      setPlayingLiveVideo(false);
+    }
+  }
+
+  useEffect(() => () => clearLivePressTimer(), []);
 
   return (
     <article className="mp-panel p-4">
@@ -190,6 +222,7 @@ function MediaPane({ storages }: MediaPaneProps) {
             <button type="button" className={`mp-btn ${kindFilter === "all" ? "mp-btn-primary" : ""}`} onClick={() => setKindFilter("all")}>全部</button>
             <button type="button" className={`mp-btn ${kindFilter === "image" ? "mp-btn-primary" : ""}`} onClick={() => setKindFilter("image")}>图片</button>
             <button type="button" className={`mp-btn ${kindFilter === "video" ? "mp-btn-primary" : ""}`} onClick={() => setKindFilter("video")}>视频</button>
+            <button type="button" className={`mp-btn ${kindFilter === "live" ? "mp-btn-primary" : ""}`} onClick={() => setKindFilter("live")}>Live</button>
           </div>
           <span className="text-xs mp-muted">{displayItems.length} 项</span>
         </div>
@@ -238,26 +271,39 @@ function MediaPane({ storages }: MediaPaneProps) {
       </div>
 
       {selectedStorage && activeItem ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-3" onClick={() => setActivePath(null)}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-3" onClick={closePreview}>
           <div className="w-full max-w-5xl rounded-xl bg-[var(--ark-surface)] p-3" onClick={(e) => e.stopPropagation()}>
             <div className="mb-2 flex items-center justify-between gap-2">
               <div className="min-w-0">
                 <p className="truncate text-sm font-medium">{activeItem.file.name}</p>
                 <p className="text-xs mp-muted">{activeIndex + 1} / {activeList.length}</p>
+                {activePair ? <p className="text-xs mp-muted">长按画面播放 Live Photo</p> : null}
               </div>
               <div className="flex items-center gap-2">
-                {activePair ? (
-                  <button type="button" className="mp-btn mp-btn-primary" onClick={() => setPlayingLiveVideo((prev) => !prev)}>
-                    {playingLiveVideo ? "查看照片" : "播放 Live Photo"}
-                  </button>
-                ) : null}
-                <button type="button" className="mp-btn" onClick={() => setActivePath(null)}>关闭</button>
+                <button type="button" className="mp-btn" onClick={closePreview}>关闭</button>
               </div>
             </div>
 
-            <div className="relative flex h-[62vh] items-center justify-center overflow-hidden rounded-lg bg-black/80">
+            <div
+              className="relative flex h-[62vh] items-center justify-center overflow-hidden rounded-lg bg-black/80"
+              onPointerDown={() => startLivePress()}
+              onPointerUp={() => endLivePress()}
+              onPointerLeave={() => endLivePress()}
+              onPointerCancel={() => endLivePress()}
+            >
               {shouldShowVideoViewer && activeViewerVideoPath ? (
-                <video src={getStorageMediaStreamUrl(selectedStorage.id, activeViewerVideoPath)} className="max-h-full max-w-full" controls autoPlay />
+                activePair ? (
+                  <video
+                    src={getStorageMediaStreamUrl(selectedStorage.id, activeViewerVideoPath)}
+                    className="max-h-full max-w-full"
+                    autoPlay
+                    muted
+                    loop
+                    playsInline
+                  />
+                ) : (
+                  <video src={getStorageMediaStreamUrl(selectedStorage.id, activeViewerVideoPath)} className="max-h-full max-w-full" controls autoPlay />
+                )
               ) : (
                 activeViewerImagePath && !brokenViewerImagePaths.has(activeViewerImagePath) ? (
                   <img
