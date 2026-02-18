@@ -35,12 +35,33 @@ export function getStorages() {
   return fetchJson<{ items: StorageTarget[] }>("/api/storages");
 }
 
+export function createStorage(payload: Omit<StorageTarget, "id">) {
+  return fetchJson<StorageTarget>("/api/storages", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
 export function getJobs() {
   return fetchJson<{ items: BackupJob[] }>("/api/jobs");
 }
 
+export function createJob(payload: Omit<BackupJob, "id">) {
+  return fetchJson<BackupJob>("/api/jobs", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
 export function getBackups() {
   return fetchJson<{ items: BackupAsset[]; livePhotoPairs: LivePhotoPair[] }>("/api/backups");
+}
+
+export function createBackupAsset(payload: Omit<BackupAsset, "id">) {
+  return fetchJson<BackupAsset>("/api/backups", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
 }
 
 export function createPreviewToken(assetId: string) {
