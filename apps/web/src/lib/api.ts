@@ -64,6 +64,10 @@ export function createStorage(payload: Omit<StorageTarget, "id">) {
   });
 }
 
+export function deleteStorage(storageId: string) {
+  return fetchJson<{ ok: true }>(`/api/storages/${storageId}`, { method: "DELETE" });
+}
+
 export function getJobs() {
   return fetchJson<{ items: BackupJob[] }>("/api/jobs");
 }
@@ -75,6 +79,10 @@ export function createJob(payload: Omit<BackupJob, "id">) {
   });
 }
 
+export function deleteJob(jobId: string) {
+  return fetchJson<{ ok: true }>(`/api/jobs/${jobId}`, { method: "DELETE" });
+}
+
 export function getBackups() {
   return fetchJson<{ items: BackupAsset[]; livePhotoPairs: LivePhotoPair[] }>("/api/backups");
 }
@@ -84,6 +92,10 @@ export function createBackupAsset(payload: Omit<BackupAsset, "id">) {
     method: "POST",
     body: JSON.stringify(payload)
   });
+}
+
+export function deleteBackupAsset(assetId: string) {
+  return fetchJson<{ ok: true }>(`/api/backups/${assetId}`, { method: "DELETE" });
 }
 
 export function getLivePhotoDetail(assetId: string) {

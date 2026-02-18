@@ -3,8 +3,10 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { TablePagination } from "../components/table/table-pagination";
 import { TableToolbar } from "../components/table/table-toolbar";
 import { useTablePagination } from "../components/table/use-table-pagination";
-import { browseStorageDirectories, browseStorageMedia, createJob, getJobs, getStorages } from "../lib/api";
+import { browseStorageDirectories, browseStorageMedia, createJob, deleteJob, getJobs, getStorages } from "../lib/api";
 import type { BackupJob, DirectoryBrowseResult, MediaBrowseResult, StorageTarget } from "../types/api";
+
+type SortKey = "name" | "sourcePath" | "destinationPath" | "enabled";
 
 const initialForm: Omit<BackupJob, "id"> = {
   name: "",
@@ -28,6 +30,9 @@ export function JobsPage() {
   const [targetMedia, setTargetMedia] = useState<MediaBrowseResult | null>(null);
   const [formOpen, setFormOpen] = useState(true);
   const [search, setSearch] = useState("");
+  const [sortKey, setSortKey] = useState<SortKey>("name");
+  const [sortAsc, setSortAsc] = useState(true);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
 
   const sourceStorage = useMemo(() => storages.find((s) => s.id === form.sourceTargetId), [storages, form.sourceTargetId]);
   const targetStorage = useMemo(() => storages.find((s) => s.id === form.destinationTargetId), [storages, form.destinationTargetId]);
@@ -37,6 +42,7 @@ export function JobsPage() {
       const [jobsRes, storagesRes] = await Promise.all([getJobs(), getStorages()]);
       setItems(jobsRes.items);
       setStorages(storagesRes.items);
+      setSelected(new Set());
     } catch (err) {
       setError((err as Error).message);
     }
@@ -126,8 +132,37 @@ export function JobsPage() {
     }
   }
 
+  async function handleDeleteSelected() {
+    setError("");
+    try {
+      await Promise.all([...selected].map((id) => deleteJob(id)));
+      await load();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  function toggleSort(nextKey: SortKey) {
+    if (nextKey === sortKey) setSortAsc((v) => !v);
+    else {
+      setSortKey(nextKey);
+      setSortAsc(true);
+    }
+  }
+
+  const sortedItems = useMemo(() => {
+    const arr = [...items];
+    arr.sort((a, b) => {
+      const av = sortKey === "enabled" ? Number(a.enabled) : String(a[sortKey]);
+      const bv = sortKey === "enabled" ? Number(b.enabled) : String(b[sortKey]);
+      const cmp = String(av).localeCompare(String(bv));
+      return sortAsc ? cmp : -cmp;
+    });
+    return arr;
+  }, [items, sortKey, sortAsc]);
+
   const table = useTablePagination(
-    items,
+    sortedItems,
     search,
     useMemo(
       () =>
@@ -136,6 +171,8 @@ export function JobsPage() {
       []
     )
   );
+
+  const allCurrentPageSelected = table.paged.length > 0 && table.paged.every((j) => selected.has(j.id));
 
   return (
     <section className="space-y-3">
@@ -222,24 +259,34 @@ export function JobsPage() {
 
       <div className="mp-panel p-4">
         <TableToolbar title="任务列表" search={search} onSearchChange={setSearch} pageSize={table.pageSize} onPageSizeChange={table.setPageSize} totalItems={table.totalItems} />
+        <div className="mb-2 flex justify-end"><button className="mp-btn" type="button" disabled={!selected.size} onClick={() => void handleDeleteSelected()}>批量删除 ({selected.size})</button></div>
         <div className="overflow-auto">
           <table className="min-w-full text-sm">
             <thead>
               <tr className="border-b border-[var(--ark-line)] text-left text-xs mp-muted">
-                <th className="px-2 py-2">任务</th>
-                <th className="px-2 py-2">源</th>
-                <th className="px-2 py-2">目标</th>
-                <th className="px-2 py-2">模式</th>
-                <th className="px-2 py-2">状态</th>
+                <th className="px-2 py-2"><input type="checkbox" checked={allCurrentPageSelected} onChange={(e) => {
+                  const next = new Set(selected);
+                  if (e.target.checked) table.paged.forEach((j) => next.add(j.id));
+                  else table.paged.forEach((j) => next.delete(j.id));
+                  setSelected(next);
+                }} /></th>
+                <th className="px-2 py-2 cursor-pointer" onClick={() => toggleSort("name")}>任务</th>
+                <th className="px-2 py-2 cursor-pointer" onClick={() => toggleSort("sourcePath")}>源路径</th>
+                <th className="px-2 py-2 cursor-pointer" onClick={() => toggleSort("destinationPath")}>目标路径</th>
+                <th className="px-2 py-2 cursor-pointer" onClick={() => toggleSort("enabled")}>状态</th>
               </tr>
             </thead>
             <tbody>
               {table.paged.map((j) => (
                 <tr key={j.id} className="border-b border-[var(--ark-line)]/70">
-                  <td className="px-2 py-2 font-medium">{j.name}</td>
-                  <td className="px-2 py-2 text-xs mp-muted">{j.sourceTargetId}<br />{j.sourcePath}</td>
-                  <td className="px-2 py-2 text-xs mp-muted">{j.destinationTargetId}<br />{j.destinationPath}</td>
-                  <td className="px-2 py-2 text-xs">{j.watchMode ? "实时监听" : `定时(${j.schedule})`}</td>
+                  <td className="px-2 py-2"><input type="checkbox" checked={selected.has(j.id)} onChange={(e) => {
+                    const next = new Set(selected);
+                    if (e.target.checked) next.add(j.id); else next.delete(j.id);
+                    setSelected(next);
+                  }} /></td>
+                  <td className="px-2 py-2 font-medium">{j.name}<div className="text-xs mp-muted">{j.sourceTargetId} {" -> "} {j.destinationTargetId}</div></td>
+                  <td className="px-2 py-2 text-xs mp-muted break-all">{j.sourcePath}</td>
+                  <td className="px-2 py-2 text-xs mp-muted break-all">{j.destinationPath}</td>
                   <td className="px-2 py-2">{j.enabled ? "启用" : "停用"}</td>
                 </tr>
               ))}

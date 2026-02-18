@@ -3,8 +3,10 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { TablePagination } from "../components/table/table-pagination";
 import { TableToolbar } from "../components/table/table-toolbar";
 import { useTablePagination } from "../components/table/use-table-pagination";
-import { createBackupAsset, createPreviewToken, getBackups, getLivePhotoDetail, getPreview } from "../lib/api";
+import { createBackupAsset, createPreviewToken, deleteBackupAsset, getBackups, getLivePhotoDetail, getPreview } from "../lib/api";
 import type { BackupAsset, LivePhotoDetail, PreviewResult } from "../types/api";
+
+type SortKey = "name" | "kind" | "storageTargetId" | "encrypted";
 
 const initialForm: Omit<BackupAsset, "id"> = {
   name: "",
@@ -25,11 +27,15 @@ export function BackupsPage() {
   const [liveDetail, setLiveDetail] = useState<LivePhotoDetail["pair"]>(null);
   const [formOpen, setFormOpen] = useState(true);
   const [search, setSearch] = useState("");
+  const [sortKey, setSortKey] = useState<SortKey>("name");
+  const [sortAsc, setSortAsc] = useState(true);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
 
   async function load() {
     try {
       const res = await getBackups();
       setItems(res.items);
+      setSelected(new Set());
     } catch (err) {
       setError((err as Error).message);
     }
@@ -68,8 +74,37 @@ export function BackupsPage() {
     }
   }
 
+  async function handleDeleteSelected() {
+    setError("");
+    try {
+      await Promise.all([...selected].map((id) => deleteBackupAsset(id)));
+      await load();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  function toggleSort(nextKey: SortKey) {
+    if (nextKey === sortKey) setSortAsc((v) => !v);
+    else {
+      setSortKey(nextKey);
+      setSortAsc(true);
+    }
+  }
+
+  const sortedItems = useMemo(() => {
+    const arr = [...items];
+    arr.sort((a, b) => {
+      const av = sortKey === "encrypted" ? Number(a.encrypted) : String(a[sortKey]);
+      const bv = sortKey === "encrypted" ? Number(b.encrypted) : String(b[sortKey]);
+      const cmp = String(av).localeCompare(String(bv));
+      return sortAsc ? cmp : -cmp;
+    });
+    return arr;
+  }, [items, sortKey, sortAsc]);
+
   const table = useTablePagination(
-    items,
+    sortedItems,
     search,
     useMemo(
       () =>
@@ -78,6 +113,8 @@ export function BackupsPage() {
       []
     )
   );
+
+  const allCurrentPageSelected = table.paged.length > 0 && table.paged.every((a) => selected.has(a.id));
 
   return (
     <section className="space-y-3">
@@ -128,20 +165,32 @@ export function BackupsPage() {
 
       <div className="mp-panel p-4">
         <TableToolbar title="备份资产列表" search={search} onSearchChange={setSearch} pageSize={table.pageSize} onPageSizeChange={table.setPageSize} totalItems={table.totalItems} />
+        <div className="mb-2 flex justify-end"><button className="mp-btn" type="button" disabled={!selected.size} onClick={() => void handleDeleteSelected()}>批量删除 ({selected.size})</button></div>
         <div className="overflow-auto">
           <table className="min-w-full text-sm">
             <thead>
               <tr className="border-b border-[var(--ark-line)] text-left text-xs mp-muted">
-                <th className="px-2 py-2">文件</th>
-                <th className="px-2 py-2">类型</th>
-                <th className="px-2 py-2">存储</th>
-                <th className="px-2 py-2">状态</th>
+                <th className="px-2 py-2"><input type="checkbox" checked={allCurrentPageSelected} onChange={(e) => {
+                  const next = new Set(selected);
+                  if (e.target.checked) table.paged.forEach((a) => next.add(a.id));
+                  else table.paged.forEach((a) => next.delete(a.id));
+                  setSelected(next);
+                }} /></th>
+                <th className="px-2 py-2 cursor-pointer" onClick={() => toggleSort("name")}>文件</th>
+                <th className="px-2 py-2 cursor-pointer" onClick={() => toggleSort("kind")}>类型</th>
+                <th className="px-2 py-2 cursor-pointer" onClick={() => toggleSort("storageTargetId")}>存储</th>
+                <th className="px-2 py-2 cursor-pointer" onClick={() => toggleSort("encrypted")}>状态</th>
                 <th className="px-2 py-2">操作</th>
               </tr>
             </thead>
             <tbody>
               {table.paged.map((a) => (
                 <tr key={a.id} className="border-b border-[var(--ark-line)]/70">
+                  <td className="px-2 py-2"><input type="checkbox" checked={selected.has(a.id)} onChange={(e) => {
+                    const next = new Set(selected);
+                    if (e.target.checked) next.add(a.id); else next.delete(a.id);
+                    setSelected(next);
+                  }} /></td>
                   <td className="px-2 py-2 font-medium">{a.name}</td>
                   <td className="px-2 py-2">{a.kind}</td>
                   <td className="px-2 py-2 text-xs mp-muted">{a.storageTargetId}</td>
@@ -149,7 +198,7 @@ export function BackupsPage() {
                   <td className="px-2 py-2"><button type="button" onClick={() => void handlePreview(a.id)} className="mp-btn">请求预览</button></td>
                 </tr>
               ))}
-              {!table.paged.length ? <tr><td className="px-2 py-4 text-center text-xs mp-muted" colSpan={5}>暂无数据</td></tr> : null}
+              {!table.paged.length ? <tr><td className="px-2 py-4 text-center text-xs mp-muted" colSpan={6}>暂无数据</td></tr> : null}
             </tbody>
           </table>
         </div>

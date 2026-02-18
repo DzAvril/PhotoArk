@@ -2,8 +2,10 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { TablePagination } from "../components/table/table-pagination";
 import { TableToolbar } from "../components/table/table-toolbar";
 import { useTablePagination } from "../components/table/use-table-pagination";
-import { browseDirectories, createStorage, getStorages } from "../lib/api";
+import { browseDirectories, createStorage, deleteStorage, getStorages } from "../lib/api";
 import type { DirectoryBrowseResult, StorageTarget } from "../types/api";
+
+type SortKey = "name" | "type" | "basePath" | "encrypted";
 
 const initialForm: Omit<StorageTarget, "id"> = {
   name: "",
@@ -19,11 +21,15 @@ export function StoragesPage() {
   const [browser, setBrowser] = useState<DirectoryBrowseResult | null>(null);
   const [browseInput, setBrowseInput] = useState("");
   const [search, setSearch] = useState("");
+  const [sortKey, setSortKey] = useState<SortKey>("name");
+  const [sortAsc, setSortAsc] = useState(true);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
 
   async function load() {
     try {
       const res = await getStorages();
       setItems(res.items);
+      setSelected(new Set());
     } catch (err) {
       setError((err as Error).message);
     }
@@ -56,10 +62,40 @@ export function StoragesPage() {
     }
   }
 
+  async function handleDeleteSelected() {
+    setError("");
+    try {
+      await Promise.all([...selected].map((id) => deleteStorage(id)));
+      await load();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  function toggleSort(nextKey: SortKey) {
+    if (nextKey === sortKey) {
+      setSortAsc((v) => !v);
+    } else {
+      setSortKey(nextKey);
+      setSortAsc(true);
+    }
+  }
+
+  const sortedItems = useMemo(() => {
+    const arr = [...items];
+    arr.sort((a, b) => {
+      const av = sortKey === "encrypted" ? Number(a.encrypted) : String(a[sortKey]);
+      const bv = sortKey === "encrypted" ? Number(b.encrypted) : String(b[sortKey]);
+      const cmp = String(av).localeCompare(String(bv));
+      return sortAsc ? cmp : -cmp;
+    });
+    return arr;
+  }, [items, sortKey, sortAsc]);
+
   const isLocalType = form.type === "local_fs" || form.type === "external_ssd";
 
   const table = useTablePagination(
-    items,
+    sortedItems,
     search,
     useMemo(
       () =>
@@ -68,6 +104,8 @@ export function StoragesPage() {
       []
     )
   );
+
+  const allCurrentPageSelected = table.paged.length > 0 && table.paged.every((s) => selected.has(s.id));
 
   return (
     <section className="space-y-3">
@@ -105,31 +143,45 @@ export function StoragesPage() {
       </div>
 
       <div className="mp-panel p-4">
-        <TableToolbar title="存储列表" search={search} onSearchChange={setSearch} pageSize={table.pageSize} onPageSizeChange={table.setPageSize} totalItems={table.totalItems} />
+        <div className="mb-2 flex items-center justify-between">
+          <TableToolbar title="存储列表" search={search} onSearchChange={setSearch} pageSize={table.pageSize} onPageSizeChange={table.setPageSize} totalItems={table.totalItems} />
+        </div>
+        <div className="mb-2 flex justify-end">
+          <button className="mp-btn" type="button" disabled={!selected.size} onClick={() => void handleDeleteSelected()}>
+            批量删除 ({selected.size})
+          </button>
+        </div>
         <div className="overflow-auto">
           <table className="min-w-full text-sm">
             <thead>
               <tr className="border-b border-[var(--ark-line)] text-left text-xs mp-muted">
-                <th className="px-2 py-2">名称</th>
-                <th className="px-2 py-2">类型</th>
-                <th className="px-2 py-2">路径</th>
-                <th className="px-2 py-2">加密</th>
+                <th className="px-2 py-2"><input type="checkbox" checked={allCurrentPageSelected} onChange={(e) => {
+                  const next = new Set(selected);
+                  if (e.target.checked) table.paged.forEach((s) => next.add(s.id));
+                  else table.paged.forEach((s) => next.delete(s.id));
+                  setSelected(next);
+                }} /></th>
+                <th className="px-2 py-2 cursor-pointer" onClick={() => toggleSort("name")}>名称</th>
+                <th className="px-2 py-2 cursor-pointer" onClick={() => toggleSort("type")}>类型</th>
+                <th className="px-2 py-2 cursor-pointer" onClick={() => toggleSort("basePath")}>路径</th>
+                <th className="px-2 py-2 cursor-pointer" onClick={() => toggleSort("encrypted")}>加密</th>
               </tr>
             </thead>
             <tbody>
               {table.paged.map((s) => (
                 <tr key={s.id} className="border-b border-[var(--ark-line)]/70">
+                  <td className="px-2 py-2"><input type="checkbox" checked={selected.has(s.id)} onChange={(e) => {
+                    const next = new Set(selected);
+                    if (e.target.checked) next.add(s.id); else next.delete(s.id);
+                    setSelected(next);
+                  }} /></td>
                   <td className="px-2 py-2 font-medium">{s.name}</td>
                   <td className="px-2 py-2">{s.type}</td>
                   <td className="px-2 py-2 break-all text-xs mp-muted">{s.basePath}</td>
                   <td className="px-2 py-2">{s.encrypted ? "是" : "否"}</td>
                 </tr>
               ))}
-              {!table.paged.length ? (
-                <tr>
-                  <td className="px-2 py-4 text-center text-xs mp-muted" colSpan={4}>暂无数据</td>
-                </tr>
-              ) : null}
+              {!table.paged.length ? <tr><td className="px-2 py-4 text-center text-xs mp-muted" colSpan={5}>暂无数据</td></tr> : null}
             </tbody>
           </table>
         </div>

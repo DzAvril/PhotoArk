@@ -247,6 +247,17 @@ app.post<{ Body: Omit<StorageTarget, "id"> }>("/api/storages", async (req) => {
   return item;
 });
 
+app.delete<{ Params: { storageId: string } }>("/api/storages/:storageId", async (req, reply) => {
+  const state = await stateRepo.loadState();
+  const before = state.storages.length;
+  state.storages = state.storages.filter((s) => s.id !== req.params.storageId);
+  if (state.storages.length === before) {
+    return reply.code(404).send({ message: "Storage not found" });
+  }
+  await stateRepo.saveState(state);
+  return { ok: true };
+});
+
 app.get("/api/jobs", async () => {
   const state = await stateRepo.loadState();
   return { items: state.jobs };
@@ -259,6 +270,17 @@ app.post<{ Body: Omit<BackupJob, "id"> }>("/api/jobs", async (req) => {
   state.jobs.push(item);
   await stateRepo.saveState(state);
   return item;
+});
+
+app.delete<{ Params: { jobId: string } }>("/api/jobs/:jobId", async (req, reply) => {
+  const state = await stateRepo.loadState();
+  const before = state.jobs.length;
+  state.jobs = state.jobs.filter((j) => j.id !== req.params.jobId);
+  if (state.jobs.length === before) {
+    return reply.code(404).send({ message: "Job not found" });
+  }
+  await stateRepo.saveState(state);
+  return { ok: true };
 });
 
 app.get("/api/backups", async () => {
@@ -278,6 +300,17 @@ app.post<{ Body: Omit<BackupAsset, "id"> }>("/api/backups", async (req) => {
   state.assets.push(item);
   await stateRepo.saveState(state);
   return item;
+});
+
+app.delete<{ Params: { assetId: string } }>("/api/backups/:assetId", async (req, reply) => {
+  const state = await stateRepo.loadState();
+  const before = state.assets.length;
+  state.assets = state.assets.filter((a) => a.id !== req.params.assetId);
+  if (state.assets.length === before) {
+    return reply.code(404).send({ message: "Asset not found" });
+  }
+  await stateRepo.saveState(state);
+  return { ok: true };
 });
 
 app.post<{ Params: { assetId: string } }>("/api/backups/:assetId/preview-token", async (req, reply) => {
