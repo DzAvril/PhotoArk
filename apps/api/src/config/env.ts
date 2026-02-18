@@ -1,7 +1,16 @@
 import dotenv from "dotenv";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { z } from "zod";
 
-dotenv.config({ path: ".env" });
+const currentDir = path.dirname(fileURLToPath(import.meta.url));
+const rootEnvPath = path.resolve(currentDir, "../../../../.env");
+const apiEnvPath = path.resolve(currentDir, "../../.env");
+const cwdEnvPath = path.resolve(process.cwd(), ".env");
+
+dotenv.config({ path: rootEnvPath });
+dotenv.config({ path: apiEnvPath, override: true });
+dotenv.config({ path: cwdEnvPath, override: true });
 
 const schema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
