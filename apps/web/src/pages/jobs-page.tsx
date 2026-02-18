@@ -1,21 +1,18 @@
 import * as Collapsible from "@radix-ui/react-collapsible";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
-import { PathPicker } from "../components/path-picker";
 import { TablePagination } from "../components/table/table-pagination";
 import { TableToolbar } from "../components/table/table-toolbar";
 import { useTablePagination } from "../components/table/use-table-pagination";
-import { browseStorageDirectories, createJob, deleteJob, getJobRuns, getJobs, getStorages, runJob } from "../lib/api";
+import { createJob, deleteJob, getJobRuns, getJobs, getStorages, runJob } from "../lib/api";
 import type { BackupJob, JobRun, StorageTarget } from "../types/api";
 
-type SortKey = "name" | "sourcePath" | "destinationPath" | "enabled";
+type SortKey = "name" | "sourceTargetId" | "destinationTargetId" | "enabled";
 
-const initialForm: Omit<BackupJob, "id"> = {
+const initialForm = {
   name: "",
   sourceTargetId: "",
-  sourcePath: "",
   destinationTargetId: "",
-  destinationPath: "",
   schedule: "0 2 * * *",
   watchMode: false,
   enabled: true
@@ -35,8 +32,9 @@ export function JobsPage() {
   const [activeRunsJobId, setActiveRunsJobId] = useState<string | null>(null);
   const [runningJobIds, setRunningJobIds] = useState<Set<string>>(new Set());
 
-  const sourceStorage = useMemo(() => storages.find((s) => s.id === form.sourceTargetId), [storages, form.sourceTargetId]);
-  const targetStorage = useMemo(() => storages.find((s) => s.id === form.destinationTargetId), [storages, form.destinationTargetId]);
+  const storageById = useMemo(() => Object.fromEntries(storages.map((s) => [s.id, s])), [storages]);
+  const sourceStorage = form.sourceTargetId ? storageById[form.sourceTargetId] : undefined;
+  const destinationStorage = form.destinationTargetId ? storageById[form.destinationTargetId] : undefined;
 
   async function load() {
     try {
@@ -61,8 +59,23 @@ export function JobsPage() {
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setError("");
+
+    if (!sourceStorage || !destinationStorage) {
+      setError("请选择源存储和目标存储");
+      return;
+    }
+
     try {
-      await createJob(form);
+      await createJob({
+        name: form.name,
+        sourceTargetId: form.sourceTargetId,
+        sourcePath: sourceStorage.basePath,
+        destinationTargetId: form.destinationTargetId,
+        destinationPath: destinationStorage.basePath,
+        schedule: form.schedule,
+        watchMode: form.watchMode,
+        enabled: form.enabled
+      });
       setForm(initialForm);
       await load();
     } catch (err) {
@@ -139,17 +152,20 @@ export function JobsPage() {
     search,
     useMemo(
       () =>
-        (row: BackupJob, keyword: string) =>
-          `${row.name} ${row.sourceTargetId} ${row.sourcePath} ${row.destinationTargetId} ${row.destinationPath}`.toLowerCase().includes(keyword),
-      []
+        (row: BackupJob, keyword: string) => {
+          const src = storageById[row.sourceTargetId];
+          const dst = storageById[row.destinationTargetId];
+          return `${row.name} ${src?.name ?? row.sourceTargetId} ${dst?.name ?? row.destinationTargetId}`
+            .toLowerCase()
+            .includes(keyword);
+        },
+      [storageById]
     )
   );
 
   const latestRunByJobId = useMemo(() => {
     const out: Record<string, JobRun | undefined> = {};
-    for (const job of items) {
-      out[job.id] = runsByJobId[job.id]?.[0];
-    }
+    for (const job of items) out[job.id] = runsByJobId[job.id]?.[0];
     return out;
   }, [items, runsByJobId]);
 
@@ -163,7 +179,7 @@ export function JobsPage() {
           <div>
             <h2 className="mp-section-title">备份任务</h2>
             <p className="mt-1 text-xs mp-muted">
-              配置备份源/目标地址。媒体预览已迁移到
+              只需选择已配置存储，路径自动使用存储页面中的基础路径。媒体预览在
               <Link to="/media" className="ml-1 text-[var(--ark-primary)] underline">独立页面</Link>
             </p>
           </div>
@@ -173,59 +189,50 @@ export function JobsPage() {
 
         <Collapsible.Content>
           <form onSubmit={(e) => void onSubmit(e)} className="mt-3 grid gap-2 sm:grid-cols-2">
-            <input className="mp-input sm:col-span-2" placeholder="任务名称" value={form.name} onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))} required />
-            <select className="mp-select" value={form.sourceTargetId} onChange={(e) => setForm((p) => ({ ...p, sourceTargetId: e.target.value, sourcePath: "" }))} required>
+            <input
+              className="mp-input sm:col-span-2"
+              placeholder="任务名称"
+              value={form.name}
+              onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
+              required
+            />
+
+            <select
+              className="mp-select"
+              value={form.sourceTargetId}
+              onChange={(e) => setForm((p) => ({ ...p, sourceTargetId: e.target.value }))}
+              required
+            >
               <option value="">选择备份源存储</option>
               {storages.map((s) => <option key={s.id} value={s.id}>{s.name} ({s.type})</option>)}
             </select>
-            <select className="mp-select" value={form.destinationTargetId} onChange={(e) => setForm((p) => ({ ...p, destinationTargetId: e.target.value, destinationPath: "" }))} required>
+
+            <select
+              className="mp-select"
+              value={form.destinationTargetId}
+              onChange={(e) => setForm((p) => ({ ...p, destinationTargetId: e.target.value }))}
+              required
+            >
               <option value="">选择备份目标存储</option>
               {storages.map((s) => <option key={s.id} value={s.id}>{s.name} ({s.type})</option>)}
             </select>
 
             <div className="mp-panel p-3 sm:col-span-2">
-              <p className="mb-2 text-xs mp-muted">备份源路径</p>
-              {sourceStorage && sourceStorage.type !== "cloud_115" ? (
-                <PathPicker
-                  value={form.sourcePath}
-                  onChange={(sourcePath) => setForm((p) => ({ ...p, sourcePath }))}
-                  placeholder="输入源路径，或点右侧选择路径"
-                  browse={(dirPath) => browseStorageDirectories(sourceStorage.id, dirPath)}
-                  required
-                />
-              ) : (
-                <input
-                  className="mp-input"
-                  placeholder="源路径"
-                  value={form.sourcePath}
-                  onChange={(e) => setForm((p) => ({ ...p, sourcePath: e.target.value }))}
-                  required
-                />
-              )}
+              <p className="text-xs mp-muted">源路径（自动）</p>
+              <p className="mt-1 break-all text-sm">{sourceStorage?.basePath || "请先选择源存储"}</p>
             </div>
 
             <div className="mp-panel p-3 sm:col-span-2">
-              <p className="mb-2 text-xs mp-muted">备份目标路径</p>
-              {targetStorage && targetStorage.type !== "cloud_115" ? (
-                <PathPicker
-                  value={form.destinationPath}
-                  onChange={(destinationPath) => setForm((p) => ({ ...p, destinationPath }))}
-                  placeholder="输入目标路径，或点右侧选择路径"
-                  browse={(dirPath) => browseStorageDirectories(targetStorage.id, dirPath)}
-                  required
-                />
-              ) : (
-                <input
-                  className="mp-input"
-                  placeholder="目标路径"
-                  value={form.destinationPath}
-                  onChange={(e) => setForm((p) => ({ ...p, destinationPath: e.target.value }))}
-                  required
-                />
-              )}
+              <p className="text-xs mp-muted">目标路径（自动）</p>
+              <p className="mt-1 break-all text-sm">{destinationStorage?.basePath || "请先选择目标存储"}</p>
             </div>
 
-            <input className="mp-input" placeholder="cron（监听模式可留默认）" value={form.schedule ?? ""} onChange={(e) => setForm((p) => ({ ...p, schedule: e.target.value }))} />
+            <input
+              className="mp-input"
+              placeholder="cron（监听模式可留默认）"
+              value={form.schedule ?? ""}
+              onChange={(e) => setForm((p) => ({ ...p, schedule: e.target.value }))}
+            />
             <div className="flex items-center gap-4 text-sm">
               <label className="flex items-center gap-2"><input type="checkbox" checked={form.watchMode} onChange={(e) => setForm((p) => ({ ...p, watchMode: e.target.checked }))} />实时监听</label>
               <label className="flex items-center gap-2"><input type="checkbox" checked={form.enabled} onChange={(e) => setForm((p) => ({ ...p, enabled: e.target.checked }))} />启用</label>
@@ -249,8 +256,8 @@ export function JobsPage() {
                   setSelected(next);
                 }} /></th>
                 <th className="px-2 py-2 cursor-pointer" onClick={() => toggleSort("name")}>任务</th>
-                <th className="px-2 py-2 cursor-pointer" onClick={() => toggleSort("sourcePath")}>源路径</th>
-                <th className="px-2 py-2 cursor-pointer" onClick={() => toggleSort("destinationPath")}>目标路径</th>
+                <th className="px-2 py-2 cursor-pointer" onClick={() => toggleSort("sourceTargetId")}>源存储</th>
+                <th className="px-2 py-2 cursor-pointer" onClick={() => toggleSort("destinationTargetId")}>目标存储</th>
                 <th className="px-2 py-2 cursor-pointer" onClick={() => toggleSort("enabled")}>状态</th>
                 <th className="px-2 py-2">最近执行</th>
                 <th className="px-2 py-2">操作</th>
@@ -260,6 +267,8 @@ export function JobsPage() {
               {table.paged.map((j) => {
                 const latest = latestRunByJobId[j.id];
                 const running = runningJobIds.has(j.id);
+                const src = storageById[j.sourceTargetId];
+                const dst = storageById[j.destinationTargetId];
                 return (
                   <tr key={j.id} className="border-b border-[var(--ark-line)]/70">
                     <td className="px-2 py-2"><input type="checkbox" checked={selected.has(j.id)} onChange={(e) => {
@@ -267,9 +276,9 @@ export function JobsPage() {
                       if (e.target.checked) next.add(j.id); else next.delete(j.id);
                       setSelected(next);
                     }} /></td>
-                    <td className="px-2 py-2 font-medium">{j.name}<div className="text-xs mp-muted">{j.sourceTargetId} {" -> "} {j.destinationTargetId}</div></td>
-                    <td className="px-2 py-2 text-xs mp-muted break-all">{j.sourcePath}</td>
-                    <td className="px-2 py-2 text-xs mp-muted break-all">{j.destinationPath}</td>
+                    <td className="px-2 py-2 font-medium">{j.name}</td>
+                    <td className="px-2 py-2 text-xs"><div>{src?.name ?? j.sourceTargetId}</div><div className="mp-muted break-all">{src?.basePath ?? j.sourcePath}</div></td>
+                    <td className="px-2 py-2 text-xs"><div>{dst?.name ?? j.destinationTargetId}</div><div className="mp-muted break-all">{dst?.basePath ?? j.destinationPath}</div></td>
                     <td className="px-2 py-2">{j.enabled ? "启用" : "停用"}</td>
                     <td className="px-2 py-2 text-xs">
                       {latest ? (
@@ -277,9 +286,7 @@ export function JobsPage() {
                           <div className={latest.status === "success" ? "text-emerald-600" : "text-red-500"}>{latest.status === "success" ? "成功" : "失败"}</div>
                           <div className="mp-muted">{new Date(latest.finishedAt).toLocaleString()}</div>
                         </div>
-                      ) : (
-                        <span className="mp-muted">未执行</span>
-                      )}
+                      ) : <span className="mp-muted">未执行</span>}
                     </td>
                     <td className="px-2 py-2">
                       <div className="flex flex-wrap gap-1">
@@ -316,11 +323,7 @@ export function JobsPage() {
                 {activeRuns.map((run) => (
                   <tr key={run.id} className="border-b border-[var(--ark-line)]/70 align-top">
                     <td className="px-2 py-2 text-xs">{new Date(run.finishedAt).toLocaleString()}</td>
-                    <td className="px-2 py-2">
-                      <span className={run.status === "success" ? "text-emerald-600" : "text-red-500"}>
-                        {run.status === "success" ? "成功" : "失败"}
-                      </span>
-                    </td>
+                    <td className="px-2 py-2"><span className={run.status === "success" ? "text-emerald-600" : "text-red-500"}>{run.status === "success" ? "成功" : "失败"}</span></td>
                     <td className="px-2 py-2">{run.copiedCount}</td>
                     <td className="px-2 py-2">{run.failedCount}</td>
                     <td className="px-2 py-2 text-xs">

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { browseStorageDirectories, browseStorageMedia, getStorageMediaStreamUrl, getStorages } from "../lib/api";
-import type { DirectoryBrowseResult, MediaBrowseResult, MediaFileItem, StorageTarget } from "../types/api";
+import { browseStorageMedia, getStorageMediaStreamUrl, getStorages } from "../lib/api";
+import type { MediaBrowseResult, MediaFileItem, StorageTarget } from "../types/api";
 
 interface MediaPaneProps {
   title: string;
@@ -18,16 +18,12 @@ type LivePhotoPair = {
 function splitFileName(name: string) {
   const dotIdx = name.lastIndexOf(".");
   if (dotIdx <= 0) return { base: name.toLowerCase(), ext: "" };
-  return {
-    base: name.slice(0, dotIdx).toLowerCase(),
-    ext: name.slice(dotIdx).toLowerCase()
-  };
+  return { base: name.slice(0, dotIdx).toLowerCase(), ext: name.slice(dotIdx).toLowerCase() };
 }
 
 function detectLivePhotoPairs(media: MediaBrowseResult | null) {
   const files = media?.files ?? [];
   const groups = new Map<string, { image: MediaFileItem | null; video: MediaFileItem | null }>();
-
   for (const file of files) {
     const { base, ext } = splitFileName(file.name);
     const row = groups.get(base) ?? { image: null, video: null };
@@ -36,22 +32,19 @@ function detectLivePhotoPairs(media: MediaBrowseResult | null) {
     groups.set(base, row);
   }
 
-  const pairByPath = new Map<string, LivePhotoPair>();
-  for (const value of groups.values()) {
-    if (value.image && value.video) {
-      const pair = { image: value.image, video: value.video };
-      pairByPath.set(value.image.path, pair);
-      pairByPath.set(value.video.path, pair);
+  const out = new Map<string, LivePhotoPair>();
+  for (const row of groups.values()) {
+    if (row.image && row.video) {
+      const pair = { image: row.image, video: row.video };
+      out.set(row.image.path, pair);
+      out.set(row.video.path, pair);
     }
   }
-
-  return pairByPath;
+  return out;
 }
 
 function MediaPane({ title, storages }: MediaPaneProps) {
   const [storageId, setStorageId] = useState("");
-  const [path, setPath] = useState("");
-  const [dirs, setDirs] = useState<DirectoryBrowseResult | null>(null);
   const [media, setMedia] = useState<MediaBrowseResult | null>(null);
   const [kindFilter, setKindFilter] = useState<"all" | "image" | "video">("all");
   const [error, setError] = useState("");
@@ -59,69 +52,49 @@ function MediaPane({ title, storages }: MediaPaneProps) {
 
   const selectedStorage = storages.find((s) => s.id === storageId);
 
-  useEffect(() => {
-    if (!selectedStorage || selectedStorage.type === "cloud_115") {
-      setDirs(null);
+  async function previewMedia() {
+    if (!selectedStorage) return;
+    setError("");
+    if (selectedStorage.type === "cloud_115") {
+      setError("当前版本暂不支持直接浏览 115 存储媒体");
       return;
     }
-    void browseStorageDirectories(selectedStorage.id)
-      .then((res) => {
-        setDirs(res);
-        setPath(res.currentPath);
-      })
-      .catch((err: Error) => setError(err.message));
-  }, [selectedStorage?.id]);
-
-  async function loadDirs(nextPath?: string) {
-    if (!selectedStorage || selectedStorage.type === "cloud_115") return;
     try {
-      const res = await browseStorageDirectories(selectedStorage.id, nextPath);
-      setDirs(res);
-      setPath(res.currentPath);
-    } catch (err) {
-      setError((err as Error).message);
-    }
-  }
-
-  async function previewMedia() {
-    if (!selectedStorage || !path) return;
-    setError("");
-    try {
-      setMedia(await browseStorageMedia(selectedStorage.id, path));
+      setMedia(await browseStorageMedia(selectedStorage.id, selectedStorage.basePath));
       setActivePath(null);
     } catch (err) {
       setError((err as Error).message);
     }
   }
 
+  useEffect(() => {
+    if (!selectedStorage) {
+      setMedia(null);
+      setActivePath(null);
+      return;
+    }
+    void previewMedia();
+  }, [selectedStorage?.id]);
+
   const allFiles = media?.files ?? [];
-
-  const filteredFiles = useMemo(() => {
-    if (kindFilter === "all") return allFiles;
-    return allFiles.filter((f) => f.kind === kindFilter);
-  }, [allFiles, kindFilter]);
-
+  const filteredFiles = useMemo(() => (kindFilter === "all" ? allFiles : allFiles.filter((f) => f.kind === kindFilter)), [allFiles, kindFilter]);
   const livePhotoPairByPath = useMemo(() => detectLivePhotoPairs(media), [media]);
   const activeFile = useMemo(() => allFiles.find((f) => f.path === activePath) ?? null, [allFiles, activePath]);
   const activePair = activeFile ? livePhotoPairByPath.get(activeFile.path) ?? null : null;
 
   const activeList = useMemo(() => {
     if (!activeFile) return filteredFiles;
-    const inFiltered = filteredFiles.some((f) => f.path === activeFile.path);
-    return inFiltered ? filteredFiles : allFiles;
+    return filteredFiles.some((f) => f.path === activeFile.path) ? filteredFiles : allFiles;
   }, [activeFile, filteredFiles, allFiles]);
-
   const activeIndex = activeFile ? activeList.findIndex((f) => f.path === activeFile.path) : -1;
 
   function openByPath(nextPath: string) {
     setActivePath(nextPath);
   }
-
   function openPrev() {
     if (activeIndex <= 0) return;
     openByPath(activeList[activeIndex - 1].path);
   }
-
   function openNext() {
     if (activeIndex < 0 || activeIndex >= activeList.length - 1) return;
     openByPath(activeList[activeIndex + 1].path);
@@ -134,17 +107,11 @@ function MediaPane({ title, storages }: MediaPaneProps) {
       if (e.key === "ArrowLeft") openPrev();
       if (e.key === "ArrowRight") openNext();
     }
-
     window.addEventListener("keydown", onKeydown);
     return () => window.removeEventListener("keydown", onKeydown);
   }, [activeFile, activeIndex, activeList]);
 
-  const activeCounterpartPath =
-    activePair && activeFile
-      ? activeFile.kind === "image"
-        ? activePair.video.path
-        : activePair.image.path
-      : null;
+  const activeCounterpartPath = activePair && activeFile ? (activeFile.kind === "image" ? activePair.video.path : activePair.image.path) : null;
 
   return (
     <article className="mp-panel p-4">
@@ -157,64 +124,27 @@ function MediaPane({ title, storages }: MediaPaneProps) {
           value={storageId}
           onChange={(e) => {
             setStorageId(e.target.value);
-            setPath("");
-            setDirs(null);
-            setMedia(null);
             setError("");
+            setMedia(null);
             setActivePath(null);
           }}
         >
           <option value="">选择存储</option>
-          {storages.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.name} ({s.type})
-            </option>
-          ))}
+          {storages.map((s) => <option key={s.id} value={s.id}>{s.name} ({s.type})</option>)}
         </select>
 
-        <input
-          className="mp-input"
-          placeholder="输入要预览的路径"
-          value={path}
-          onChange={(e) => setPath(e.target.value)}
-        />
-
-        {selectedStorage && selectedStorage.type !== "cloud_115" ? (
-          <div className="grid grid-cols-[auto_auto_1fr] gap-2">
-            <button type="button" className="mp-btn" onClick={() => void loadDirs(dirs?.parentPath ?? undefined)}>
-              上级
-            </button>
-            <button type="button" className="mp-btn" onClick={() => void loadDirs(path)}>
-              读取
-            </button>
-            <select className="mp-select" value={path} onChange={(e) => setPath(e.target.value)}>
-              <option value="">选择目录</option>
-              {dirs?.directories.map((d) => (
-                <option key={d.path} value={d.path}>
-                  {d.path}
-                </option>
-              ))}
-            </select>
-          </div>
-        ) : null}
-
-        <button type="button" className="mp-btn mp-btn-primary" onClick={() => void previewMedia()}>
-          查看图片/视频
-        </button>
+        <div className="rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-2 text-xs">
+          <div className="mp-muted">当前读取路径（来自存储配置）</div>
+          <div className="mt-1 break-all">{selectedStorage?.basePath || "请先选择存储"}</div>
+        </div>
       </div>
 
       <div className="mt-3 max-h-[28rem] overflow-auto rounded-lg border border-[var(--ark-line)] p-2">
         <div className="mb-2 flex items-center justify-between gap-2">
           <div className="flex gap-1 text-xs">
-            <button type="button" className={`mp-btn ${kindFilter === "all" ? "mp-btn-primary" : ""}`} onClick={() => setKindFilter("all")}>
-              全部
-            </button>
-            <button type="button" className={`mp-btn ${kindFilter === "image" ? "mp-btn-primary" : ""}`} onClick={() => setKindFilter("image")}>
-              图片
-            </button>
-            <button type="button" className={`mp-btn ${kindFilter === "video" ? "mp-btn-primary" : ""}`} onClick={() => setKindFilter("video")}>
-              视频
-            </button>
+            <button type="button" className={`mp-btn ${kindFilter === "all" ? "mp-btn-primary" : ""}`} onClick={() => setKindFilter("all")}>全部</button>
+            <button type="button" className={`mp-btn ${kindFilter === "image" ? "mp-btn-primary" : ""}`} onClick={() => setKindFilter("image")}>图片</button>
+            <button type="button" className={`mp-btn ${kindFilter === "video" ? "mp-btn-primary" : ""}`} onClick={() => setKindFilter("video")}>视频</button>
           </div>
           <span className="text-xs mp-muted">{filteredFiles.length} 项</span>
         </div>
@@ -224,27 +154,14 @@ function MediaPane({ title, storages }: MediaPaneProps) {
             const streamUrl = getStorageMediaStreamUrl(selectedStorage.id, f.path);
             const isLivePhoto = livePhotoPairByPath.has(f.path);
             return (
-              <button
-                key={f.path}
-                type="button"
-                className="overflow-hidden rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] text-left"
-                onClick={() => openByPath(f.path)}
-              >
+              <button key={f.path} type="button" className="overflow-hidden rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] text-left" onClick={() => openByPath(f.path)}>
                 <div className="relative aspect-square bg-black/10">
-                  {f.kind === "image" ? (
-                    <img src={streamUrl} alt={f.name} className="h-full w-full object-cover" loading="lazy" />
-                  ) : (
-                    <video src={streamUrl} className="h-full w-full object-cover" preload="metadata" />
-                  )}
-                  {isLivePhoto ? (
-                    <span className="absolute left-1.5 top-1.5 rounded bg-black/70 px-1.5 py-0.5 text-[10px] text-white">Live</span>
-                  ) : null}
+                  {f.kind === "image" ? <img src={streamUrl} alt={f.name} className="h-full w-full object-cover" loading="lazy" /> : <video src={streamUrl} className="h-full w-full object-cover" preload="metadata" />}
+                  {isLivePhoto ? <span className="absolute left-1.5 top-1.5 rounded bg-black/70 px-1.5 py-0.5 text-[10px] text-white">Live</span> : null}
                 </div>
                 <div className="flex items-center justify-between gap-2 px-2 py-1.5">
                   <span className="truncate text-xs">{f.name}</span>
-                  <span className="shrink-0 rounded border border-[var(--ark-line)] px-1 py-0.5 text-[10px] uppercase">
-                    {f.kind}
-                  </span>
+                  <span className="shrink-0 rounded border border-[var(--ark-line)] px-1 py-0.5 text-[10px] uppercase">{f.kind}</span>
                 </div>
               </button>
             );
@@ -263,80 +180,33 @@ function MediaPane({ title, storages }: MediaPaneProps) {
                 <p className="text-xs mp-muted">{activeIndex + 1} / {activeList.length}</p>
               </div>
               <div className="flex items-center gap-2">
-                {activeCounterpartPath ? (
-                  <button type="button" className="mp-btn mp-btn-primary" onClick={() => openByPath(activeCounterpartPath)}>
-                    切换到{activeFile.kind === "image" ? "实况视频" : "实况照片"}
-                  </button>
-                ) : null}
+                {activeCounterpartPath ? <button type="button" className="mp-btn mp-btn-primary" onClick={() => openByPath(activeCounterpartPath)}>切换到{activeFile.kind === "image" ? "实况视频" : "实况照片"}</button> : null}
                 <button type="button" className="mp-btn" onClick={() => setActivePath(null)}>关闭</button>
               </div>
             </div>
 
             <div className="relative flex h-[62vh] items-center justify-center overflow-hidden rounded-lg bg-black/80">
               {activeFile.kind === "image" ? (
-                <img
-                  src={getStorageMediaStreamUrl(selectedStorage.id, activeFile.path)}
-                  alt={activeFile.name}
-                  className="max-h-full max-w-full object-contain"
-                />
+                <img src={getStorageMediaStreamUrl(selectedStorage.id, activeFile.path)} alt={activeFile.name} className="max-h-full max-w-full object-contain" />
               ) : (
-                <video
-                  src={getStorageMediaStreamUrl(selectedStorage.id, activeFile.path)}
-                  className="max-h-full max-w-full"
-                  controls
-                  autoPlay
-                />
+                <video src={getStorageMediaStreamUrl(selectedStorage.id, activeFile.path)} className="max-h-full max-w-full" controls autoPlay />
               )}
 
-              <button
-                type="button"
-                className="absolute left-2 top-1/2 -translate-y-1/2 rounded-full border border-white/20 bg-black/50 px-3 py-1.5 text-sm text-white"
-                onClick={openPrev}
-                disabled={activeIndex <= 0}
-              >
-                上一张
-              </button>
-              <button
-                type="button"
-                className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full border border-white/20 bg-black/50 px-3 py-1.5 text-sm text-white"
-                onClick={openNext}
-                disabled={activeIndex >= activeList.length - 1}
-              >
-                下一张
-              </button>
+              <button type="button" className="absolute left-2 top-1/2 -translate-y-1/2 rounded-full border border-white/20 bg-black/50 px-3 py-1.5 text-sm text-white" onClick={openPrev} disabled={activeIndex <= 0}>上一张</button>
+              <button type="button" className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full border border-white/20 bg-black/50 px-3 py-1.5 text-sm text-white" onClick={openNext} disabled={activeIndex >= activeList.length - 1}>下一张</button>
             </div>
 
             {activePair ? (
               <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                <button
-                  type="button"
-                  className="overflow-hidden rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] text-left"
-                  onClick={() => openByPath(activePair.image.path)}
-                >
+                <button type="button" className="overflow-hidden rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] text-left" onClick={() => openByPath(activePair.image.path)}>
                   <div className="aspect-video bg-black/10">
-                    <img
-                      src={getStorageMediaStreamUrl(selectedStorage.id, activePair.image.path)}
-                      alt={activePair.image.name}
-                      className="h-full w-full object-cover"
-                    />
+                    <img src={getStorageMediaStreamUrl(selectedStorage.id, activePair.image.path)} alt={activePair.image.name} className="h-full w-full object-cover" />
                   </div>
                   <p className="truncate px-2 py-1 text-xs">照片: {activePair.image.name}</p>
                 </button>
-
-                <button
-                  type="button"
-                  className="overflow-hidden rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] text-left"
-                  onClick={() => openByPath(activePair.video.path)}
-                >
+                <button type="button" className="overflow-hidden rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] text-left" onClick={() => openByPath(activePair.video.path)}>
                   <div className="aspect-video bg-black/10">
-                    <video
-                      src={getStorageMediaStreamUrl(selectedStorage.id, activePair.video.path)}
-                      className="h-full w-full object-cover"
-                      muted
-                      loop
-                      autoPlay
-                      playsInline
-                    />
+                    <video src={getStorageMediaStreamUrl(selectedStorage.id, activePair.video.path)} className="h-full w-full object-cover" muted loop autoPlay playsInline />
                   </div>
                   <p className="truncate px-2 py-1 text-xs">视频: {activePair.video.name}</p>
                 </button>
@@ -354,22 +224,20 @@ export function MediaPage() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    void getStorages()
-      .then((res) => setStorages(res.items))
-      .catch((err: Error) => setError(err.message));
+    void getStorages().then((res) => setStorages(res.items)).catch((err: Error) => setError(err.message));
   }, []);
 
   return (
     <section className="space-y-3">
       <div className="mp-panel p-4">
         <h2 className="mp-section-title">媒体预览</h2>
-        <p className="mt-1 text-xs mp-muted">在独立页面分别查看备份源和备份目标路径下的图片/视频</p>
+        <p className="mt-1 text-xs mp-muted">只能从存储页面已配置的基础路径读取媒体，不再单独配置路径</p>
         {error ? <p className="mp-error mt-2">{error}</p> : null}
       </div>
 
       <div className="grid gap-3 lg:grid-cols-2">
-        <MediaPane title="备份源路径" storages={storages} />
-        <MediaPane title="备份目标路径" storages={storages} />
+        <MediaPane title="备份源路径预览" storages={storages} />
+        <MediaPane title="备份目标路径预览" storages={storages} />
       </div>
     </section>
   );
