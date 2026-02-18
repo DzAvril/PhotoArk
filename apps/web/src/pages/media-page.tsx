@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { browseStorageDirectories, browseStorageMedia, getStorages } from "../lib/api";
+import { useEffect, useMemo, useState } from "react";
+import { browseStorageDirectories, browseStorageMedia, getStorageMediaStreamUrl, getStorages } from "../lib/api";
 import type { DirectoryBrowseResult, MediaBrowseResult, StorageTarget } from "../types/api";
 
 interface MediaPaneProps {
@@ -12,6 +12,7 @@ function MediaPane({ title, storages }: MediaPaneProps) {
   const [path, setPath] = useState("");
   const [dirs, setDirs] = useState<DirectoryBrowseResult | null>(null);
   const [media, setMedia] = useState<MediaBrowseResult | null>(null);
+  const [kindFilter, setKindFilter] = useState<"all" | "image" | "video">("all");
   const [error, setError] = useState("");
 
   const selectedStorage = storages.find((s) => s.id === storageId);
@@ -49,6 +50,12 @@ function MediaPane({ title, storages }: MediaPaneProps) {
       setError((err as Error).message);
     }
   }
+
+  const filteredFiles = useMemo(() => {
+    const files = media?.files ?? [];
+    if (kindFilter === "all") return files;
+    return files.filter((f) => f.kind === kindFilter);
+  }, [media?.files, kindFilter]);
 
   return (
     <article className="mp-panel p-4">
@@ -107,17 +114,45 @@ function MediaPane({ title, storages }: MediaPaneProps) {
       </div>
 
       <div className="mt-3 max-h-72 overflow-auto rounded-lg border border-[var(--ark-line)] p-2">
-        <ul className="space-y-1 text-xs mp-muted">
-          {media?.files.map((f) => (
-            <li key={f.path} className="flex items-center justify-between gap-2 rounded-md px-2 py-1 hover:bg-[var(--ark-surface-soft)]">
-              <span className="truncate">{f.name}</span>
-              <span className="shrink-0 rounded border border-[var(--ark-line)] px-1.5 py-0.5 text-[10px] uppercase">
-                {f.kind === "image" ? "image" : "video"}
-              </span>
-            </li>
-          ))}
-          {!media?.files.length ? <li>暂无数据</li> : null}
-        </ul>
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <div className="flex gap-1 text-xs">
+            <button type="button" className={`mp-btn ${kindFilter === "all" ? "mp-btn-primary" : ""}`} onClick={() => setKindFilter("all")}>
+              全部
+            </button>
+            <button type="button" className={`mp-btn ${kindFilter === "image" ? "mp-btn-primary" : ""}`} onClick={() => setKindFilter("image")}>
+              图片
+            </button>
+            <button type="button" className={`mp-btn ${kindFilter === "video" ? "mp-btn-primary" : ""}`} onClick={() => setKindFilter("video")}>
+              视频
+            </button>
+          </div>
+          <span className="text-xs mp-muted">{filteredFiles.length} 项</span>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2 md:grid-cols-3">
+          {selectedStorage && filteredFiles.map((f) => {
+            const streamUrl = getStorageMediaStreamUrl(selectedStorage.id, f.path);
+            return (
+              <div key={f.path} className="overflow-hidden rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface-soft)]">
+                <div className="aspect-square bg-black/10">
+                  {f.kind === "image" ? (
+                    <img src={streamUrl} alt={f.name} className="h-full w-full object-cover" loading="lazy" />
+                  ) : (
+                    <video src={streamUrl} className="h-full w-full object-cover" controls preload="metadata" />
+                  )}
+                </div>
+                <div className="flex items-center justify-between gap-2 px-2 py-1.5">
+                  <span className="truncate text-xs">{f.name}</span>
+                  <span className="shrink-0 rounded border border-[var(--ark-line)] px-1 py-0.5 text-[10px] uppercase">
+                    {f.kind}
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {!filteredFiles.length ? <p className="py-4 text-center text-xs mp-muted">暂无数据</p> : null}
       </div>
     </article>
   );

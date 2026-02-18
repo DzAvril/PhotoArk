@@ -57,6 +57,11 @@ export function browseStorageMedia(storageId: string, dirPath: string) {
   return fetchJson<MediaBrowseResult>(`/api/storages/${storageId}/media?${q.toString()}`);
 }
 
+export function getStorageMediaStreamUrl(storageId: string, filePath: string) {
+  const q = new URLSearchParams({ path: filePath });
+  return `${API_BASE}/api/storages/${storageId}/media/stream?${q.toString()}`;
+}
+
 export function createStorage(payload: Omit<StorageTarget, "id">) {
   return fetchJson<StorageTarget>("/api/storages", {
     method: "POST",

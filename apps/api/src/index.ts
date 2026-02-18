@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { readdir } from "node:fs/promises";
+import { createReadStream } from "node:fs";
+import { readdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import Fastify from "fastify";
@@ -110,6 +111,20 @@ function resolvePathInStorage(storage: StorageTarget, inputPath?: string): strin
 
 const IMAGE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".heic", ".webp", ".gif"]);
 const VIDEO_EXTENSIONS = new Set([".mov", ".mp4", ".m4v", ".avi", ".mkv", ".webm"]);
+const MIME_BY_EXT: Record<string, string> = {
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".png": "image/png",
+  ".heic": "image/heic",
+  ".webp": "image/webp",
+  ".gif": "image/gif",
+  ".mov": "video/quicktime",
+  ".mp4": "video/mp4",
+  ".m4v": "video/mp4",
+  ".avi": "video/x-msvideo",
+  ".mkv": "video/x-matroska",
+  ".webm": "video/webm"
+};
 
 app.get("/healthz", async () => ({ ok: true }));
 
@@ -235,6 +250,69 @@ app.get<{ Params: { storageId: string }; Querystring: { path?: string } }>(
       path: currentPath,
       files
     };
+  }
+);
+
+app.get<{ Params: { storageId: string }; Querystring: { path?: string } }>(
+  "/api/storages/:storageId/media/stream",
+  async (req, reply) => {
+    const rawPath = req.query.path;
+    if (!rawPath) {
+      return reply.code(400).send({ message: "Path is required" });
+    }
+
+    const state = await stateRepo.loadState();
+    const storage = state.storages.find((item) => item.id === req.params.storageId);
+    if (!storage) {
+      return reply.code(404).send({ message: "Storage not found" });
+    }
+    if (!isLocalStorage(storage.type)) {
+      return reply.code(400).send({ message: "Media stream is only supported for local storage types" });
+    }
+
+    let targetPath = "";
+    try {
+      targetPath = resolvePathInStorage(storage, rawPath);
+    } catch (error) {
+      return reply.code(403).send({ message: (error as Error).message });
+    }
+
+    const fileStat = await stat(targetPath).catch(() => null);
+    if (!fileStat || !fileStat.isFile()) {
+      return reply.code(404).send({ message: "File not found" });
+    }
+
+    const ext = path.extname(targetPath).toLowerCase();
+    const mimeType = MIME_BY_EXT[ext] ?? "application/octet-stream";
+    const range = req.headers.range;
+
+    if (range) {
+      const match = /^bytes=(\d*)-(\d*)$/.exec(range);
+      if (!match) {
+        return reply.code(416).send({ message: "Invalid range header" });
+      }
+
+      const start = match[1] ? Number.parseInt(match[1], 10) : 0;
+      const end = match[2] ? Number.parseInt(match[2], 10) : fileStat.size - 1;
+      if (!Number.isFinite(start) || !Number.isFinite(end) || start > end || end >= fileStat.size) {
+        return reply.code(416).send({ message: "Requested range not satisfiable" });
+      }
+
+      const stream = createReadStream(targetPath, { start, end });
+      reply
+        .code(206)
+        .header("Content-Type", mimeType)
+        .header("Accept-Ranges", "bytes")
+        .header("Content-Length", String(end - start + 1))
+        .header("Content-Range", `bytes ${start}-${end}/${fileStat.size}`);
+      return reply.send(stream);
+    }
+
+    reply
+      .header("Content-Type", mimeType)
+      .header("Content-Length", String(fileStat.size))
+      .header("Accept-Ranges", "bytes");
+    return reply.send(createReadStream(targetPath));
   }
 );
 
