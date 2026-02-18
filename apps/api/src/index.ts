@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import Fastify from "fastify";
 import cors from "@fastify/cors";
 import fastifyStatic from "@fastify/static";
+import { watch as chokidarWatch, type FSWatcher } from "chokidar";
 import type { BackupJob, StorageTarget } from "@photoark/shared";
 import { z } from "zod";
 import { env } from "./config/env.js";
@@ -54,6 +55,7 @@ const stateRepo = new FileStateRepository(env.BACKUP_STATE_FILE);
 const previewTokens = new Map<string, { assetId: string; expiresAt: number }>();
 const previewTickets = new Map<string, { assetId: string; expiresAt: number }>();
 const PREVIEW_TOKEN_TTL_MS = 60_000;
+const WATCH_DEBOUNCE_MS = 1_200;
 
 const storageCreateSchema = z.object({
   name: z.string().min(1),
@@ -127,6 +129,18 @@ const MIME_BY_EXT: Record<string, string> = {
   ".mkv": "video/x-matroska",
   ".webm": "video/webm"
 };
+
+type JobWatcherControl = {
+  watcher: FSWatcher;
+  sourceRoot: string;
+  debounceTimer: NodeJS.Timeout | null;
+  pendingPath: string | null;
+};
+
+const jobWatchers = new Map<string, JobWatcherControl>();
+const runningWatchJobs = new Set<string>();
+const queuedWatchJobs = new Set<string>();
+let runExecutionQueue: Promise<unknown> = Promise.resolve();
 
 type VersionSource = "github_release" | "github_tag" | "unavailable";
 
@@ -366,6 +380,196 @@ async function executeJob(state: BackupState, jobId: string): Promise<JobRun> {
   return run;
 }
 
+function enqueueRunExecution<T>(task: () => Promise<T>): Promise<T> {
+  const next = runExecutionQueue.then(task, task);
+  runExecutionQueue = next.then(
+    () => undefined,
+    () => undefined
+  );
+  return next;
+}
+
+async function executeJobAndPersist(jobId: string): Promise<JobRun> {
+  return enqueueRunExecution(async () => {
+    const state = await stateRepo.loadState();
+    const run = await executeJob(state, jobId);
+    await stateRepo.saveState(state);
+    return run;
+  });
+}
+
+function resolveWatchSourceRoot(state: BackupState, job: BackupJob): string | null {
+  if (!job.enabled || !job.watchMode) {
+    return null;
+  }
+
+  const sourceStorage = state.storages.find((item) => item.id === job.sourceTargetId);
+  const destinationStorage = state.storages.find((item) => item.id === job.destinationTargetId);
+  if (!sourceStorage || !destinationStorage) {
+    return null;
+  }
+  if (!isLocalStorage(sourceStorage.type) || !isLocalStorage(destinationStorage.type)) {
+    return null;
+  }
+
+  try {
+    return resolvePathInStorage(sourceStorage, job.sourcePath);
+  } catch {
+    return null;
+  }
+}
+
+async function stopJobWatcher(jobId: string) {
+  const control = jobWatchers.get(jobId);
+  if (!control) {
+    return;
+  }
+
+  if (control.debounceTimer) {
+    clearTimeout(control.debounceTimer);
+    control.debounceTimer = null;
+  }
+  control.pendingPath = null;
+  queuedWatchJobs.delete(jobId);
+  runningWatchJobs.delete(jobId);
+  await control.watcher.close();
+  jobWatchers.delete(jobId);
+}
+
+async function runWatchedJob(jobId: string, reason: string, changedPath?: string) {
+  if (runningWatchJobs.has(jobId)) {
+    queuedWatchJobs.add(jobId);
+    return;
+  }
+
+  runningWatchJobs.add(jobId);
+  try {
+    const run = await executeJobAndPersist(jobId);
+    app.log.info(
+      {
+        jobId,
+        runId: run.id,
+        reason,
+        changedPath,
+        copiedCount: run.copiedCount,
+        failedCount: run.failedCount
+      },
+      "Watch mode backup run completed"
+    );
+  } catch (error) {
+    app.log.error(
+      {
+        jobId,
+        reason,
+        changedPath,
+        err: error
+      },
+      "Watch mode backup run failed"
+    );
+  } finally {
+    runningWatchJobs.delete(jobId);
+    if (queuedWatchJobs.delete(jobId)) {
+      void runWatchedJob(jobId, "queued");
+    }
+  }
+}
+
+function scheduleWatchedJob(jobId: string, reason: string, changedPath: string) {
+  const control = jobWatchers.get(jobId);
+  if (!control) {
+    return;
+  }
+
+  control.pendingPath = changedPath;
+  if (control.debounceTimer) {
+    clearTimeout(control.debounceTimer);
+  }
+  control.debounceTimer = setTimeout(() => {
+    control.debounceTimer = null;
+    const pendingPath = control.pendingPath ?? undefined;
+    control.pendingPath = null;
+    void runWatchedJob(jobId, reason, pendingPath);
+  }, WATCH_DEBOUNCE_MS);
+}
+
+async function createJobWatcher(job: BackupJob, sourceRoot: string): Promise<JobWatcherControl> {
+  const watcher = chokidarWatch(sourceRoot, {
+    ignoreInitial: true,
+    usePolling: true,
+    interval: 1000,
+    binaryInterval: 1200,
+    awaitWriteFinish: {
+      stabilityThreshold: 800,
+      pollInterval: 100
+    }
+  });
+
+  const onMediaChange = (watchPath: string, reason: string) => {
+    if (!isMediaFile(path.basename(watchPath))) {
+      return;
+    }
+    scheduleWatchedJob(job.id, reason, watchPath);
+  };
+
+  watcher.on("add", (watchPath) => onMediaChange(watchPath, "add"));
+  watcher.on("change", (watchPath) => onMediaChange(watchPath, "change"));
+  watcher.on("unlink", (watchPath) => onMediaChange(watchPath, "unlink"));
+  watcher.on("error", (error) => {
+    app.log.error({ jobId: job.id, sourceRoot, err: error }, "Watcher error");
+  });
+  watcher.on("ready", () => {
+    app.log.info({ jobId: job.id, sourceRoot }, "Watcher ready");
+  });
+
+  return {
+    watcher,
+    sourceRoot,
+    debounceTimer: null,
+    pendingPath: null
+  };
+}
+
+async function reconcileJobWatchers(state: BackupState) {
+  const expectedWatchers = new Map<string, string>();
+
+  for (const job of state.jobs) {
+    const sourceRoot = resolveWatchSourceRoot(state, job);
+    if (!sourceRoot) {
+      continue;
+    }
+
+    const sourceStat = await stat(sourceRoot).catch(() => null);
+    if (!sourceStat?.isDirectory()) {
+      app.log.warn({ jobId: job.id, sourceRoot }, "Watch mode source path does not exist or is not a directory");
+      continue;
+    }
+
+    expectedWatchers.set(job.id, sourceRoot);
+    const current = jobWatchers.get(job.id);
+    if (current && current.sourceRoot === sourceRoot) {
+      continue;
+    }
+
+    if (current) {
+      await stopJobWatcher(job.id);
+    }
+
+    const nextWatcher = await createJobWatcher(job, sourceRoot);
+    jobWatchers.set(job.id, nextWatcher);
+  }
+
+  for (const jobId of [...jobWatchers.keys()]) {
+    if (!expectedWatchers.has(jobId)) {
+      await stopJobWatcher(jobId);
+    }
+  }
+}
+
+async function reloadAndReconcileWatchers() {
+  const state = await stateRepo.loadState();
+  await reconcileJobWatchers(state);
+}
+
 app.get("/healthz", async () => ({ ok: true }));
 
 app.get("/api/metrics", async () => {
@@ -597,6 +801,7 @@ app.post<{ Body: Omit<StorageTarget, "id"> }>("/api/storages", async (req) => {
   const item: StorageTarget = { id: `st_${randomUUID()}`, ...body };
   state.storages.push(item);
   await stateRepo.saveState(state);
+  await reconcileJobWatchers(state);
   return item;
 });
 
@@ -608,6 +813,7 @@ app.delete<{ Params: { storageId: string } }>("/api/storages/:storageId", async 
     return reply.code(404).send({ message: "Storage not found" });
   }
   await stateRepo.saveState(state);
+  await reconcileJobWatchers(state);
   return { ok: true };
 });
 
@@ -622,6 +828,7 @@ app.post<{ Body: Omit<BackupJob, "id"> }>("/api/jobs", async (req) => {
   const item: BackupJob = { id: `job_${randomUUID()}`, ...body };
   state.jobs.push(item);
   await stateRepo.saveState(state);
+  await reconcileJobWatchers(state);
   return item;
 });
 
@@ -635,6 +842,7 @@ app.put<{ Params: { jobId: string }; Body: Omit<BackupJob, "id"> }>("/api/jobs/:
   const updated: BackupJob = { id: req.params.jobId, ...body };
   state.jobs[idx] = updated;
   await stateRepo.saveState(state);
+  await reconcileJobWatchers(state);
   return updated;
 });
 
@@ -648,6 +856,7 @@ app.delete<{ Params: { jobId: string } }>("/api/jobs/:jobId", async (req, reply)
     }
     state.jobRuns = state.jobRuns.filter((run) => run.jobId !== req.params.jobId);
     await stateRepo.saveState(state);
+    await reconcileJobWatchers(state);
     return { ok: true };
   } catch (error) {
     return reply.code(500).send({ message: (error as Error).message || "Delete job failed" });
@@ -669,10 +878,8 @@ app.get<{ Params: { jobId: string } }>("/api/jobs/:jobId/runs", async (req, repl
 });
 
 app.post<{ Params: { jobId: string } }>("/api/jobs/:jobId/run", async (req, reply) => {
-  const state = await stateRepo.loadState();
   try {
-    const run = await executeJob(state, req.params.jobId);
-    await stateRepo.saveState(state);
+    const run = await executeJobAndPersist(req.params.jobId);
     return run;
   } catch (error) {
     return reply.code(400).send({ message: (error as Error).message });
@@ -820,6 +1027,12 @@ app.post<{ Body: { contentBase64: string } }>("/api/crypto/encrypt", async (req)
   return { cipherBase64: encrypted.toString("base64") };
 });
 
+app.addHook("onClose", async () => {
+  for (const jobId of [...jobWatchers.keys()]) {
+    await stopJobWatcher(jobId);
+  }
+});
+
 app.setNotFoundHandler((req, reply) => {
   if (req.raw.url?.startsWith("/api/")) {
     return reply.code(404).send({ message: "Not found" });
@@ -830,7 +1043,11 @@ app.setNotFoundHandler((req, reply) => {
   return reply.code(404).send({ message: "Not found" });
 });
 
-app.listen({ port: env.API_PORT, host: "0.0.0.0" }).catch((err) => {
+try {
+  await app.listen({ port: env.API_PORT, host: "0.0.0.0" });
+  await reloadAndReconcileWatchers();
+  app.log.info({ watcherCount: jobWatchers.size }, "Watch mode initialized");
+} catch (err) {
   app.log.error(err);
   process.exit(1);
-});
+}
