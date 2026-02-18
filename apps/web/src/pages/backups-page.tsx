@@ -2,29 +2,26 @@ import { useEffect, useMemo, useState } from "react";
 import { TablePagination } from "../components/table/table-pagination";
 import { TableToolbar } from "../components/table/table-toolbar";
 import { useTablePagination } from "../components/table/use-table-pagination";
-import { createPreviewToken, getBackups, getLivePhotoDetail, getPreview, getStorages } from "../lib/api";
-import type { BackupAsset, LivePhotoDetail, PreviewResult, StorageTarget } from "../types/api";
+import { getJobs, getRuns } from "../lib/api";
+import type { BackupJob, JobRun } from "../types/api";
 
-type SortKey = "name" | "kind" | "storageTargetId" | "encrypted";
-const apiBase = import.meta.env.VITE_API_BASE_URL ?? "";
+type SortKey = "finishedAt" | "status" | "copiedCount" | "failedCount";
 
 export function BackupsPage() {
-  const [items, setItems] = useState<BackupAsset[]>([]);
-  const [storages, setStorages] = useState<StorageTarget[]>([]);
+  const [jobs, setJobs] = useState<BackupJob[]>([]);
+  const [runs, setRuns] = useState<JobRun[]>([]);
   const [error, setError] = useState("");
-  const [preview, setPreview] = useState<PreviewResult | null>(null);
-  const [liveDetail, setLiveDetail] = useState<LivePhotoDetail["pair"]>(null);
   const [search, setSearch] = useState("");
-  const [sortKey, setSortKey] = useState<SortKey>("name");
-  const [sortAsc, setSortAsc] = useState(true);
+  const [sortKey, setSortKey] = useState<SortKey>("finishedAt");
+  const [sortAsc, setSortAsc] = useState(false);
 
-  const storageById = useMemo(() => Object.fromEntries(storages.map((s) => [s.id, s])), [storages]);
+  const jobById = useMemo(() => Object.fromEntries(jobs.map((j) => [j.id, j])), [jobs]);
 
   async function load() {
     try {
-      const [backupsRes, storagesRes] = await Promise.all([getBackups(), getStorages()]);
-      setItems(backupsRes.items);
-      setStorages(storagesRes.items);
+      const [jobsRes, runsRes] = await Promise.all([getJobs(), getRuns()]);
+      setJobs(jobsRes.items);
+      setRuns(runsRes.items);
     } catch (err) {
       setError((err as Error).message);
     }
@@ -34,19 +31,6 @@ export function BackupsPage() {
     void load();
   }, []);
 
-  async function handlePreview(assetId: string) {
-    setError("");
-    try {
-      const tokenResult = await createPreviewToken(assetId);
-      const previewResult = await getPreview(assetId, tokenResult.token);
-      setPreview(previewResult);
-      const detail = await getLivePhotoDetail(assetId);
-      setLiveDetail(detail.pair);
-    } catch (err) {
-      setError((err as Error).message);
-    }
-  }
-
   function toggleSort(nextKey: SortKey) {
     if (nextKey === sortKey) setSortAsc((v) => !v);
     else {
@@ -55,86 +39,77 @@ export function BackupsPage() {
     }
   }
 
-  const sortedItems = useMemo(() => {
-    const arr = [...items];
+  const sortedRuns = useMemo(() => {
+    const arr = [...runs];
     arr.sort((a, b) => {
-      const av = sortKey === "encrypted" ? Number(a.encrypted) : String(a[sortKey]);
-      const bv = sortKey === "encrypted" ? Number(b.encrypted) : String(b[sortKey]);
-      const cmp = String(av).localeCompare(String(bv));
+      const av = sortKey === "finishedAt" ? new Date(a.finishedAt).getTime() : a[sortKey];
+      const bv = sortKey === "finishedAt" ? new Date(b.finishedAt).getTime() : b[sortKey];
+      const cmp = String(av).localeCompare(String(bv), undefined, { numeric: true });
       return sortAsc ? cmp : -cmp;
     });
     return arr;
-  }, [items, sortKey, sortAsc]);
+  }, [runs, sortKey, sortAsc]);
 
   const table = useTablePagination(
-    sortedItems,
+    sortedRuns,
     search,
     useMemo(
       () =>
-        (row: BackupAsset, keyword: string) => {
-          const storage = storageById[row.storageTargetId];
-          return `${row.name} ${row.kind} ${storage?.name ?? row.storageTargetId}`.toLowerCase().includes(keyword);
+        (row: JobRun, keyword: string) => {
+          const job = jobById[row.jobId];
+          return `${job?.name ?? row.jobId} ${row.status} ${row.message ?? ""}`.toLowerCase().includes(keyword);
         },
-      [storageById]
+      [jobById]
     )
   );
 
   return (
     <section className="space-y-3">
       <div className="mp-panel p-4">
-        <h2 className="mp-section-title">备份内容</h2>
-        <p className="mt-1 text-xs mp-muted">此页面展示任务执行后自动生成的备份文件索引，不需要手动新增资产。</p>
+        <h2 className="mp-section-title">备份历史</h2>
+        <p className="mt-1 text-xs mp-muted">每次任务执行都会在这里生成一条记录</p>
         {error ? <p className="mp-error mt-3">{error}</p> : null}
       </div>
 
-      {preview ? (
-        <article className="mp-panel p-4 text-xs">
-          <p>预览资产: {preview.assetId}</p>
-          <p className="mt-1">模式: {preview.mode}</p>
-          <p className="mt-1">流地址: {preview.streamUrl}</p>
-          <a className="mt-2 inline-block text-[var(--ark-primary)] underline" href={`${apiBase}${preview.streamUrl}`} target="_blank" rel="noreferrer">
-            打开预览流接口
-          </a>
-          {liveDetail ? (
-            <div className="mt-2 rounded-md border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-2">
-              <p>Live Photo 资产组: {liveDetail.livePhotoAssetId}</p>
-              <p>Image: {liveDetail.image?.name ?? "缺失"}</p>
-              <p>Video: {liveDetail.video?.name ?? "缺失"}</p>
-            </div>
-          ) : null}
-        </article>
-      ) : null}
-
       <div className="mp-panel p-4">
-        <TableToolbar title="备份文件列表" search={search} onSearchChange={setSearch} pageSize={table.pageSize} onPageSizeChange={table.setPageSize} totalItems={table.totalItems} />
+        <TableToolbar title="执行记录" search={search} onSearchChange={setSearch} pageSize={table.pageSize} onPageSizeChange={table.setPageSize} totalItems={table.totalItems} />
         <div className="overflow-auto">
           <table className="min-w-full text-sm">
             <thead>
               <tr className="border-b border-[var(--ark-line)] text-left text-xs mp-muted">
-                <th className="px-2 py-2 cursor-pointer" onClick={() => toggleSort("name")}>文件</th>
-                <th className="px-2 py-2 cursor-pointer" onClick={() => toggleSort("kind")}>类型</th>
-                <th className="px-2 py-2 cursor-pointer" onClick={() => toggleSort("storageTargetId")}>所属存储</th>
-                <th className="px-2 py-2 cursor-pointer" onClick={() => toggleSort("encrypted")}>加密状态</th>
-                <th className="px-2 py-2">操作</th>
+                <th className="px-2 py-2">任务</th>
+                <th className="px-2 py-2 cursor-pointer" onClick={() => toggleSort("finishedAt")}>结束时间</th>
+                <th className="px-2 py-2 cursor-pointer" onClick={() => toggleSort("status")}>状态</th>
+                <th className="px-2 py-2 cursor-pointer" onClick={() => toggleSort("copiedCount")}>成功文件</th>
+                <th className="px-2 py-2 cursor-pointer" onClick={() => toggleSort("failedCount")}>失败文件</th>
+                <th className="px-2 py-2">摘要</th>
               </tr>
             </thead>
             <tbody>
-              {table.paged.map((a) => {
-                const st = storageById[a.storageTargetId];
+              {table.paged.map((run) => {
+                const job = jobById[run.jobId];
                 return (
-                  <tr key={a.id} className="border-b border-[var(--ark-line)]/70">
-                    <td className="px-2 py-2 font-medium break-all">{a.name}</td>
-                    <td className="px-2 py-2">{a.kind}</td>
+                  <tr key={run.id} className="border-b border-[var(--ark-line)]/70 align-top">
                     <td className="px-2 py-2 text-xs">
-                      <div>{st?.name ?? a.storageTargetId}</div>
-                      <div className="mp-muted break-all">{st?.basePath ?? ""}</div>
+                      <div>{job?.name ?? run.jobId}</div>
+                      <div className="mp-muted">{job?.sourcePath ?? ""} {" -> "} {job?.destinationPath ?? ""}</div>
                     </td>
-                    <td className="px-2 py-2">{a.encrypted ? "加密" : "明文"}</td>
-                    <td className="px-2 py-2"><button type="button" onClick={() => void handlePreview(a.id)} className="mp-btn">请求预览</button></td>
+                    <td className="px-2 py-2 text-xs">{new Date(run.finishedAt).toLocaleString()}</td>
+                    <td className="px-2 py-2">
+                      <span className={run.status === "success" ? "text-emerald-600" : "text-red-500"}>
+                        {run.status === "success" ? "成功" : "失败"}
+                      </span>
+                    </td>
+                    <td className="px-2 py-2">{run.copiedCount}</td>
+                    <td className="px-2 py-2">{run.failedCount}</td>
+                    <td className="px-2 py-2 text-xs">
+                      <div>{run.message}</div>
+                      {run.errors[0] ? <div className="mt-1 text-red-500">首个错误：{run.errors[0].path} - {run.errors[0].error}</div> : null}
+                    </td>
                   </tr>
                 );
               })}
-              {!table.paged.length ? <tr><td className="px-2 py-4 text-center text-xs mp-muted" colSpan={5}>暂无数据</td></tr> : null}
+              {!table.paged.length ? <tr><td className="px-2 py-4 text-center text-xs mp-muted" colSpan={6}>暂无记录</td></tr> : null}
             </tbody>
           </table>
         </div>

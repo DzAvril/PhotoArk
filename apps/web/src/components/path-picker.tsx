@@ -69,7 +69,7 @@ export function PathPicker({ value, onChange, placeholder, browse, disabled, req
                 onClick={() => void load(browser?.parentPath ?? undefined)}
                 disabled={loading || !browser?.parentPath}
               >
-                上级
+                返回上级
               </button>
               <button
                 type="button"
@@ -88,7 +88,7 @@ export function PathPicker({ value, onChange, placeholder, browse, disabled, req
                 }}
                 disabled={loading || !browser?.currentPath}
               >
-                使用当前
+                选中当前目录
               </button>
             </div>
           </div>
@@ -103,7 +103,6 @@ export function PathPicker({ value, onChange, placeholder, browse, disabled, req
                 type="button"
                 className="block w-full rounded-md px-2 py-1.5 text-left text-xs hover:bg-[var(--ark-surface-soft)]"
                 onClick={() => {
-                  onChange(d.path);
                   void load(d.path);
                 }}
               >

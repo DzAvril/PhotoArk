@@ -1,6 +1,5 @@
 import * as Collapsible from "@radix-ui/react-collapsible";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { Link } from "react-router-dom";
 import { TablePagination } from "../components/table/table-pagination";
 import { TableToolbar } from "../components/table/table-toolbar";
 import { useTablePagination } from "../components/table/use-table-pagination";
@@ -93,6 +92,16 @@ export function JobsPage() {
     }
   }
 
+  async function handleDeleteOne(jobId: string) {
+    setError("");
+    try {
+      await deleteJob(jobId);
+      await load();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
   async function handleRunJob(jobId: string) {
     setError("");
     setRunningJobIds((prev) => new Set(prev).add(jobId));
@@ -178,10 +187,7 @@ export function JobsPage() {
         <div className="flex items-center justify-between">
           <div>
             <h2 className="mp-section-title">备份任务</h2>
-            <p className="mt-1 text-xs mp-muted">
-              只需选择已配置存储，路径自动使用存储页面中的基础路径。媒体预览在
-              <Link to="/media" className="ml-1 text-[var(--ark-primary)] underline">独立页面</Link>
-            </p>
+            <p className="mt-1 text-xs mp-muted">选择源存储和目标存储即可创建同步任务</p>
           </div>
           <Collapsible.Trigger className="mp-btn">{formOpen ? "收起" : "展开"}</Collapsible.Trigger>
         </div>
@@ -217,14 +223,9 @@ export function JobsPage() {
               {storages.map((s) => <option key={s.id} value={s.id}>{s.name} ({s.type})</option>)}
             </select>
 
-            <div className="mp-panel p-3 sm:col-span-2">
-              <p className="text-xs mp-muted">源路径（自动）</p>
-              <p className="mt-1 break-all text-sm">{sourceStorage?.basePath || "请先选择源存储"}</p>
-            </div>
-
-            <div className="mp-panel p-3 sm:col-span-2">
-              <p className="text-xs mp-muted">目标路径（自动）</p>
-              <p className="mt-1 break-all text-sm">{destinationStorage?.basePath || "请先选择目标存储"}</p>
+            <div className="sm:col-span-2 rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-2 text-xs">
+              <p>源路径：{sourceStorage?.basePath || "-"}</p>
+              <p className="mt-1">目标路径：{destinationStorage?.basePath || "-"}</p>
             </div>
 
             <input
@@ -292,6 +293,7 @@ export function JobsPage() {
                       <div className="flex flex-wrap gap-1">
                         <button type="button" className="mp-btn" disabled={!j.enabled || running} onClick={() => void handleRunJob(j.id)}>{running ? "执行中" : "立即执行"}</button>
                         <button type="button" className="mp-btn" onClick={() => void handleToggleRuns(j.id)}>{activeRunsJobId === j.id ? "收起记录" : "查看记录"}</button>
+                        <button type="button" className="mp-btn" onClick={() => void handleDeleteOne(j.id)}>删除</button>
                       </div>
                     </td>
                   </tr>

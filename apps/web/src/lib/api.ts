@@ -110,6 +110,10 @@ export function getJobRuns(jobId: string) {
   return fetchJson<{ items: JobRun[] }>(`/api/jobs/${jobId}/runs`);
 }
 
+export function getRuns() {
+  return fetchJson<{ items: JobRun[] }>("/api/runs");
+}
+
 export function getBackups() {
   return fetchJson<{ items: BackupAsset[]; livePhotoPairs: LivePhotoPair[] }>("/api/backups");
 }

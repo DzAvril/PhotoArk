@@ -3,7 +3,6 @@ import { browseStorageMedia, getStorageMediaStreamUrl, getStorages } from "../li
 import type { MediaBrowseResult, MediaFileItem, StorageTarget } from "../types/api";
 
 interface MediaPaneProps {
-  title: string;
   storages: StorageTarget[];
 }
 
@@ -43,7 +42,7 @@ function detectLivePhotoPairs(media: MediaBrowseResult | null) {
   return out;
 }
 
-function MediaPane({ title, storages }: MediaPaneProps) {
+function MediaPane({ storages }: MediaPaneProps) {
   const [storageId, setStorageId] = useState("");
   const [media, setMedia] = useState<MediaBrowseResult | null>(null);
   const [kindFilter, setKindFilter] = useState<"all" | "image" | "video">("all");
@@ -115,7 +114,7 @@ function MediaPane({ title, storages }: MediaPaneProps) {
 
   return (
     <article className="mp-panel p-4">
-      <h3 className="text-sm font-semibold">{title}</h3>
+      <h3 className="text-sm font-semibold">存储媒体</h3>
       {error ? <p className="mp-error mt-2">{error}</p> : null}
 
       <div className="mt-3 space-y-2">
@@ -134,7 +133,7 @@ function MediaPane({ title, storages }: MediaPaneProps) {
         </select>
 
         <div className="rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-2 text-xs">
-          <div className="mp-muted">当前读取路径（来自存储配置）</div>
+          <div className="mp-muted">路径</div>
           <div className="mt-1 break-all">{selectedStorage?.basePath || "请先选择存储"}</div>
         </div>
       </div>
@@ -231,14 +230,11 @@ export function MediaPage() {
     <section className="space-y-3">
       <div className="mp-panel p-4">
         <h2 className="mp-section-title">媒体预览</h2>
-        <p className="mt-1 text-xs mp-muted">只能从存储页面已配置的基础路径读取媒体，不再单独配置路径</p>
+        <p className="mt-1 text-xs mp-muted">选择存储后可直接查看该存储下的图片和视频</p>
         {error ? <p className="mp-error mt-2">{error}</p> : null}
       </div>
 
-      <div className="grid gap-3 lg:grid-cols-2">
-        <MediaPane title="备份源路径预览" storages={storages} />
-        <MediaPane title="备份目标路径预览" storages={storages} />
-      </div>
+      <MediaPane storages={storages} />
     </section>
   );
 }

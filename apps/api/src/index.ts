@@ -33,7 +33,8 @@ app.setErrorHandler((error, _req, reply) => {
       issues: error.issues
     });
   }
-  return reply.code(500).send({ message: "Internal server error" });
+  const message = error instanceof Error ? error.message : "Internal server error";
+  return reply.code(500).send({ message });
 });
 
 const encryption = new EncryptionService(Buffer.from(env.MASTER_KEY_BASE64, "base64"));
@@ -84,12 +85,6 @@ function metricSummary(state: BackupState) {
   };
 }
 
-function isInBrowseRoot(targetPath: string): boolean {
-  const root = path.resolve(env.FS_BROWSE_ROOT);
-  const target = path.resolve(targetPath);
-  return target === root || target.startsWith(`${root}${path.sep}`);
-}
-
 function isLocalStorage(type: StorageTarget["type"]): boolean {
   return type === "local_fs" || type === "external_ssd";
 }
@@ -101,9 +96,6 @@ function resolvePathInStorage(storage: StorageTarget, inputPath?: string): strin
 
   if (!inStorage) {
     throw new Error("Path is outside storage base path");
-  }
-  if (!isInBrowseRoot(targetPath)) {
-    throw new Error("Path is outside browse root");
   }
 
   return targetPath;
@@ -389,15 +381,13 @@ app.get("/api/storages", async () => {
 });
 
 app.get<{ Querystring: { path?: string } }>("/api/fs/directories", async (req, reply) => {
-  const inputPath = req.query.path ?? env.FS_BROWSE_ROOT;
+  const inputPath = req.query.path ?? env.FS_BROWSE_ROOT ?? "/";
   const currentPath = path.resolve(inputPath);
-  const rootPath = path.resolve(env.FS_BROWSE_ROOT);
-
-  if (!isInBrowseRoot(currentPath)) {
-    return reply.code(403).send({ message: "Path is outside browse root" });
+  const rootPath = path.resolve(env.FS_BROWSE_ROOT || "/");
+  const dirEntries = await readdir(currentPath, { withFileTypes: true }).catch(() => null);
+  if (!dirEntries) {
+    return reply.code(404).send({ message: "Directory not found" });
   }
-
-  const dirEntries = await readdir(currentPath, { withFileTypes: true });
   const directories = dirEntries
     .filter((entry) => entry.isDirectory())
     .map((entry) => ({
@@ -441,7 +431,10 @@ app.get<{ Params: { storageId: string }; Querystring: { path?: string } }>(
     }
 
     const rootPath = path.resolve(storage.basePath);
-    const dirEntries = await readdir(currentPath, { withFileTypes: true });
+    const dirEntries = await readdir(currentPath, { withFileTypes: true }).catch(() => null);
+    if (!dirEntries) {
+      return reply.code(404).send({ message: "Directory not found" });
+    }
     const directories = dirEntries
       .filter((entry) => entry.isDirectory())
       .map((entry) => ({
@@ -481,7 +474,10 @@ app.get<{ Params: { storageId: string }; Querystring: { path?: string } }>(
       return reply.code(403).send({ message: (error as Error).message });
     }
 
-    const entries = await readdir(currentPath, { withFileTypes: true });
+    const entries = await readdir(currentPath, { withFileTypes: true }).catch(() => null);
+    if (!entries) {
+      return reply.code(404).send({ message: "Directory not found" });
+    }
     const files = entries
       .filter((entry) => entry.isFile())
       .map((entry) => {
@@ -601,15 +597,24 @@ app.post<{ Body: Omit<BackupJob, "id"> }>("/api/jobs", async (req) => {
 });
 
 app.delete<{ Params: { jobId: string } }>("/api/jobs/:jobId", async (req, reply) => {
-  const state = await stateRepo.loadState();
-  const before = state.jobs.length;
-  state.jobs = state.jobs.filter((j) => j.id !== req.params.jobId);
-  if (state.jobs.length === before) {
-    return reply.code(404).send({ message: "Job not found" });
+  try {
+    const state = await stateRepo.loadState();
+    const before = state.jobs.length;
+    state.jobs = state.jobs.filter((j) => j.id !== req.params.jobId);
+    if (state.jobs.length === before) {
+      return reply.code(404).send({ message: "Job not found" });
+    }
+    state.jobRuns = state.jobRuns.filter((run) => run.jobId !== req.params.jobId);
+    await stateRepo.saveState(state);
+    return { ok: true };
+  } catch (error) {
+    return reply.code(500).send({ message: (error as Error).message || "Delete job failed" });
   }
-  state.jobRuns = state.jobRuns.filter((run) => run.jobId !== req.params.jobId);
-  await stateRepo.saveState(state);
-  return { ok: true };
+});
+
+app.get("/api/runs", async () => {
+  const state = await stateRepo.loadState();
+  return { items: state.jobRuns };
 });
 
 app.get<{ Params: { jobId: string } }>("/api/jobs/:jobId/runs", async (req, reply) => {
