@@ -28,23 +28,87 @@ docs/
   security.md
 ```
 
-## 本地开发
+## 本地调试（详细步骤）
+
+### 1) 准备环境
 
 ```bash
 cp .env.example .env
-# 生成 32 字节主密钥（示例）
-# openssl rand -base64 32
-
-npm install
-npm run dev
 ```
 
-或使用 Docker：
+编辑 `.env`，至少确认以下变量：
+
+- `MASTER_KEY_BASE64`：必须设置，可用下面命令生成
+- `API_PORT`：默认 `8080`
+- `VITE_API_BASE_URL`：本地调试建议留空（前端走同源代理）或设置为 `http://localhost:8080`
+- `BACKUP_STATE_FILE`：默认 `./apps/api/data/backup-state.json`
+
+生成主密钥示例：
 
 ```bash
-docker compose pull
-docker compose up -d
+openssl rand -base64 32
 ```
+
+### 2) 安装依赖
+
+```bash
+npm install
+```
+
+### 3) 启动调试（推荐：两个终端）
+
+终端 A（API）：
+
+```bash
+npm run dev -w @photoark/api
+```
+
+终端 B（Web）：
+
+```bash
+npm run dev -w @photoark/web
+```
+
+访问：
+
+- WebUI: `http://localhost:5173`
+- API 健康检查: `http://localhost:8080/healthz`
+- 版本接口: `http://localhost:8080/api/version`
+
+### 4) 本地功能验证建议
+
+1. 在 `存储` 页面新增两个本地存储（源/目标）
+2. 在源目录放入图片和视频
+3. 在 `任务` 页面创建任务（只需选源存储和目标存储）
+4. 点击 `立即执行`
+5. 在 `备份` 页面查看执行历史是否新增记录
+6. 在 `媒体预览` 页面选择存储，检查是否能看到媒体
+
+### 5) 清理调试数据
+
+```bash
+rm -f ./apps/api/data/backup-state.json
+```
+
+### 6) Docker 本地调试（可选）
+
+```bash
+docker compose up -d --build app
+docker compose logs -f app
+```
+
+如果要强制替换旧容器：
+
+```bash
+docker compose down
+docker compose up -d --build app
+```
+
+### 7) 常见问题
+
+- 前端看起来像旧版本：先清理浏览器 Service Worker 缓存（PWA），再强刷页面。
+- 删除任务报错：请先更新到最新镜像/最新代码（已修复为可读错误信息）。
+- 路径选择问题：路径组件支持继续进入下级目录，只有点击“选中当前目录”才会确认。
 
 ## WebUI 路由与联调
 - 路由：`/`（总览）、`/storages`、`/jobs`、`/media`、`/backups`
@@ -54,6 +118,7 @@ docker compose up -d
   - `GET /api/storages`
   - `GET /api/jobs`
   - `GET /api/backups`
+  - `GET /api/runs`
   - `POST /api/backups/:assetId/preview-token`
   - `GET /api/backups/:assetId/preview?token=...`
   - `GET /api/storages/:storageId/directories?path=...`
