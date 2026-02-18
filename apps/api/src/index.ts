@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import Fastify from "fastify";
 import cors from "@fastify/cors";
 import type { BackupJob, StorageTarget } from "@photoark/shared";
+import { z } from "zod";
 import { env } from "./config/env.js";
 import { EncryptionService } from "./modules/crypto/encryption-service.js";
 import { LivePhotoService } from "./modules/livephoto/live-photo-service.js";
@@ -10,6 +11,15 @@ import type { BackupAsset, BackupState } from "./modules/backup/repository/types
 
 const app = Fastify({ logger: true });
 await app.register(cors, { origin: true });
+app.setErrorHandler((error, _req, reply) => {
+  if (error instanceof z.ZodError) {
+    return reply.code(400).send({
+      message: "Invalid request payload",
+      issues: error.issues
+    });
+  }
+  return reply.code(500).send({ message: "Internal server error" });
+});
 
 const encryption = new EncryptionService(Buffer.from(env.MASTER_KEY_BASE64, "base64"));
 const livePhoto = new LivePhotoService();
@@ -18,6 +28,32 @@ const stateRepo = new FileStateRepository(env.BACKUP_STATE_FILE);
 const previewTokens = new Map<string, { assetId: string; expiresAt: number }>();
 const previewTickets = new Map<string, { assetId: string; expiresAt: number }>();
 const PREVIEW_TOKEN_TTL_MS = 60_000;
+
+const storageCreateSchema = z.object({
+  name: z.string().min(1),
+  type: z.enum(["local_fs", "external_ssd", "cloud_115"]),
+  basePath: z.string().min(1),
+  encrypted: z.boolean()
+});
+
+const jobCreateSchema = z.object({
+  name: z.string().min(1),
+  sourceTargetId: z.string().min(1),
+  destinationTargetId: z.string().min(1),
+  schedule: z.string().optional(),
+  watchMode: z.boolean(),
+  enabled: z.boolean()
+});
+
+const assetCreateSchema = z.object({
+  name: z.string().min(1),
+  kind: z.enum(["photo", "live_photo_image", "live_photo_video"]),
+  storageTargetId: z.string().min(1),
+  encrypted: z.boolean(),
+  sizeBytes: z.number().int().nonnegative(),
+  capturedAt: z.string().datetime(),
+  livePhotoAssetId: z.string().optional()
+});
 
 function metricSummary(state: BackupState) {
   const encryptedAssets = state.assets.filter((a) => a.encrypted).length;
@@ -45,7 +81,8 @@ app.get("/api/storages", async () => {
 
 app.post<{ Body: Omit<StorageTarget, "id"> }>("/api/storages", async (req) => {
   const state = await stateRepo.loadState();
-  const item: StorageTarget = { id: `st_${randomUUID()}`, ...req.body };
+  const body = storageCreateSchema.parse(req.body);
+  const item: StorageTarget = { id: `st_${randomUUID()}`, ...body };
   state.storages.push(item);
   await stateRepo.saveState(state);
   return item;
@@ -58,7 +95,8 @@ app.get("/api/jobs", async () => {
 
 app.post<{ Body: Omit<BackupJob, "id"> }>("/api/jobs", async (req) => {
   const state = await stateRepo.loadState();
-  const item: BackupJob = { id: `job_${randomUUID()}`, ...req.body };
+  const body = jobCreateSchema.parse(req.body);
+  const item: BackupJob = { id: `job_${randomUUID()}`, ...body };
   state.jobs.push(item);
   await stateRepo.saveState(state);
   return item;
@@ -76,7 +114,8 @@ app.get("/api/backups", async () => {
 
 app.post<{ Body: Omit<BackupAsset, "id"> }>("/api/backups", async (req) => {
   const state = await stateRepo.loadState();
-  const item: BackupAsset = { id: `asset_${randomUUID()}`, ...req.body };
+  const body = assetCreateSchema.parse(req.body);
+  const item: BackupAsset = { id: `asset_${randomUUID()}`, ...body };
   state.assets.push(item);
   await stateRepo.saveState(state);
   return item;
