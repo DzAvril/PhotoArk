@@ -61,6 +61,19 @@ docker compose up --build
   - 状态文件默认：`/Users/xuzhi/Documents/workspace/new_project/apps/api/data/backup-state.json`
   - 可通过环境变量 `BACKUP_STATE_FILE` 覆盖
 
+## Docker Hub 自动发布
+- 已配置 GitHub Actions 工作流：`/Users/xuzhi/Documents/workspace/new_project/.github/workflows/docker-publish.yml`
+- 触发条件：
+  - push 到 `main`
+  - push tag（`v*.*.*`）
+  - 手动触发（workflow_dispatch）
+- 需要在 GitHub 仓库 Secrets 配置：
+  - `DOCKERHUB_USERNAME`
+  - `DOCKERHUB_TOKEN`
+- 产物镜像：
+  - `dzavril/photoark-api`
+  - `dzavril/photoark-web`
+
 ## 当前状态
 - 已完成：项目初始化、架构文档、核心模块骨架（存储适配/加密/Live Photo 配对/通知）
 - 已完成：WebUI 升级为现代技术栈（React + TypeScript + Tailwind + Framer Motion + PWA）
