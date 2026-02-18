@@ -84,24 +84,27 @@ jobs:
       - name: Resolve previous successful build sha
         id: range
         uses: actions/github-script@v7
+        env:
+          WORKFLOW_PATH: .github/workflows/docker-publish.yml
         with:
           script: |
             const { owner, repo } = context.repo;
             const currentRunId = Number(context.runId);
-            const workflowId = context.workflow;
             const branch = context.ref.startsWith("refs/heads/") ? context.ref.replace("refs/heads/", "") : undefined;
+            const workflowPath = process.env.WORKFLOW_PATH;
 
-            const runs = await github.rest.actions.listWorkflowRuns({
+            const runs = await github.rest.actions.listWorkflowRunsForRepo({
               owner,
               repo,
-              workflow_id: workflowId,
               branch,
               status: "completed",
-              per_page: 50
+              per_page: 100
             });
 
             const previous = runs.data.workflow_runs.find((run) =>
-              run.id !== currentRunId && run.conclusion === "success"
+              run.id !== currentRunId &&
+              run.conclusion === "success" &&
+              run.path === workflowPath
             );
 
             if (previous?.head_sha) {
