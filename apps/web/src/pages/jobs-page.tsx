@@ -279,6 +279,7 @@ export function JobsPage() {
                 <th className="px-2 py-2 cursor-pointer" onClick={() => toggleSort("sourceTargetId")}>源存储</th>
                 <th className="px-2 py-2 cursor-pointer" onClick={() => toggleSort("destinationTargetId")}>目标存储</th>
                 <th className="px-2 py-2 cursor-pointer" onClick={() => toggleSort("enabled")}>状态</th>
+                <th className="px-2 py-2">监听</th>
                 <th className="px-2 py-2">最近执行</th>
                 <th className="px-2 py-2">操作</th>
               </tr>
@@ -300,6 +301,7 @@ export function JobsPage() {
                     <td className="px-2 py-2 text-xs"><div>{src?.name ?? j.sourceTargetId}</div><div className="mp-muted break-all">{src?.basePath ?? j.sourcePath}</div></td>
                     <td className="px-2 py-2 text-xs"><div>{dst?.name ?? j.destinationTargetId}</div><div className="mp-muted break-all">{dst?.basePath ?? j.destinationPath}</div></td>
                     <td className="px-2 py-2">{j.enabled ? "启用" : "停用"}</td>
+                    <td className="px-2 py-2">{j.watchMode ? "实时监听" : "关闭"}</td>
                     <td className="px-2 py-2 text-xs">
                       {latest ? (
                         <div>
@@ -318,7 +320,7 @@ export function JobsPage() {
                   </tr>
                 );
               })}
-              {!table.paged.length ? <tr><td className="px-2 py-4 text-center text-xs mp-muted" colSpan={7}>暂无数据</td></tr> : null}
+              {!table.paged.length ? <tr><td className="px-2 py-4 text-center text-xs mp-muted" colSpan={8}>暂无数据</td></tr> : null}
             </tbody>
           </table>
         </div>
