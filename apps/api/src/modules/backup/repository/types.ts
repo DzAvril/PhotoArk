@@ -1,5 +1,15 @@
 import type { BackupJob, StorageTarget } from "@photoark/shared";
 
+export interface TelegramSettings {
+  enabled: boolean;
+  botToken: string;
+  chatId: string;
+}
+
+export interface AppSettings {
+  telegram: TelegramSettings;
+}
+
 export interface BackupAsset {
   id: string;
   name: string;
@@ -42,4 +52,5 @@ export interface BackupState {
   jobs: BackupJob[];
   assets: BackupAsset[];
   jobRuns: JobRun[];
+  settings: AppSettings;
 }

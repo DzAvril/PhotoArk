@@ -11,7 +11,7 @@ export class TelegramService {
       return;
     }
 
-    await fetch(`https://api.telegram.org/bot${this.config.botToken}/sendMessage`, {
+    const res = await fetch(`https://api.telegram.org/bot${this.config.botToken}/sendMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -20,5 +20,10 @@ export class TelegramService {
         disable_web_page_preview: true
       })
     });
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`Telegram API error (${res.status}): ${text || "unknown error"}`);
+    }
   }
 }

@@ -5,6 +5,16 @@ export interface Metrics {
   livePhotoPairs: number;
 }
 
+export interface TelegramSettings {
+  enabled: boolean;
+  botToken: string;
+  chatId: string;
+}
+
+export interface AppSettings {
+  telegram: TelegramSettings;
+}
+
 export interface VersionInfo {
   currentVersion: string;
   latestVersion: string | null;

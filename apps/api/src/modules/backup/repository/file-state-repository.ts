@@ -1,12 +1,23 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import type { BackupState } from "./types.js";
+import type { AppSettings, BackupState } from "./types.js";
+
+function createDefaultSettings(): AppSettings {
+  return {
+    telegram: {
+      enabled: false,
+      botToken: "",
+      chatId: ""
+    }
+  };
+}
 
 const defaultState: BackupState = {
   storages: [],
   jobs: [],
   assets: [],
-  jobRuns: []
+  jobRuns: [],
+  settings: createDefaultSettings()
 };
 
 export class FileStateRepository {
@@ -16,11 +27,19 @@ export class FileStateRepository {
     try {
       const raw = await readFile(this.stateFilePath, "utf8");
       const parsed = JSON.parse(raw) as Partial<BackupState>;
+      const parsedTelegram = parsed.settings?.telegram;
       return {
         storages: parsed.storages ?? [],
         jobs: parsed.jobs ?? [],
         assets: parsed.assets ?? [],
-        jobRuns: parsed.jobRuns ?? []
+        jobRuns: parsed.jobRuns ?? [],
+        settings: {
+          telegram: {
+            enabled: parsedTelegram?.enabled ?? defaultState.settings.telegram.enabled,
+            botToken: parsedTelegram?.botToken ?? defaultState.settings.telegram.botToken,
+            chatId: parsedTelegram?.chatId ?? defaultState.settings.telegram.chatId
+          }
+        }
       };
     } catch {
       return structuredClone(defaultState);

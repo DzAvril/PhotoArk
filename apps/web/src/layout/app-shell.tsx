@@ -8,7 +8,8 @@ const tabs = [
   { to: "/storages", label: "存储" },
   { to: "/jobs", label: "任务" },
   { to: "/media", label: "媒体预览" },
-  { to: "/backups", label: "备份" }
+  { to: "/backups", label: "备份" },
+  { to: "/settings", label: "配置" }
 ];
 
 type ThemeMode = "light" | "dark";

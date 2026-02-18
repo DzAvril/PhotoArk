@@ -13,8 +13,9 @@ import { z } from "zod";
 import { env } from "./config/env.js";
 import { EncryptionService } from "./modules/crypto/encryption-service.js";
 import { LivePhotoService } from "./modules/livephoto/live-photo-service.js";
+import { TelegramService } from "./modules/notification/telegram-service.js";
 import { FileStateRepository } from "./modules/backup/repository/file-state-repository.js";
-import type { BackupAsset, BackupState, JobRun, JobRunTrigger } from "./modules/backup/repository/types.js";
+import type { AppSettings, BackupAsset, BackupState, JobRun, JobRunTrigger } from "./modules/backup/repository/types.js";
 
 const app = Fastify({ logger: true });
 await app.register(cors, { origin: true });
@@ -104,6 +105,24 @@ const assetCreateSchema = z.object({
   capturedAt: z.string().datetime(),
   livePhotoAssetId: z.string().optional()
 });
+
+const settingsSchema = z.object({
+  telegram: z.object({
+    enabled: z.boolean(),
+    botToken: z.string().trim(),
+    chatId: z.string().trim()
+  })
+});
+
+function normalizeSettings(input: Partial<AppSettings> | undefined): AppSettings {
+  return {
+    telegram: {
+      enabled: Boolean(input?.telegram?.enabled),
+      botToken: input?.telegram?.botToken?.trim() ?? "",
+      chatId: input?.telegram?.chatId?.trim() ?? ""
+    }
+  };
+}
 
 function metricSummary(state: BackupState) {
   const encryptedAssets = state.assets.filter((a) => a.encrypted).length;
@@ -559,11 +578,51 @@ function normalizeJobRun(run: JobRun): JobRun {
   };
 }
 
+function mapTriggerLabel(trigger: JobRunTrigger): string {
+  if (trigger === "manual") return "手动执行";
+  if (trigger === "watch") return "实时监听";
+  if (trigger === "schedule") return "定时任务";
+  return "未知";
+}
+
+function buildRunTelegramSummary(state: BackupState, run: JobRun): string {
+  const job = state.jobs.find((item) => item.id === run.jobId);
+  const statusLabel = run.status === "success" ? "成功" : "失败";
+  return [
+    `PhotoArk 备份${statusLabel}`,
+    `任务: ${job?.name ?? run.jobId}`,
+    `触发: ${mapTriggerLabel(run.trigger)}`,
+    `结果: ${run.copiedCount}/${run.failedCount} (成功/失败)`,
+    `摘要: 照片 ${run.photoCount}，视频 ${run.videoCount}，Live Photo ${run.livePhotoPairCount}`,
+    `完成时间: ${new Date(run.finishedAt).toLocaleString("zh-CN", { hour12: false })}`
+  ].join("\n");
+}
+
+async function sendTelegramRunSummaryIfEnabled(state: BackupState, run: JobRun): Promise<void> {
+  const settings = normalizeSettings(state.settings);
+  if (!settings.telegram.enabled) {
+    return;
+  }
+  if (!settings.telegram.botToken || !settings.telegram.chatId) {
+    app.log.warn("Telegram notification skipped: botToken or chatId is empty");
+    return;
+  }
+
+  const telegram = new TelegramService({
+    botToken: settings.telegram.botToken,
+    chatId: settings.telegram.chatId
+  });
+  await telegram.send(buildRunTelegramSummary(state, run));
+}
+
 async function executeJobAndPersist(jobId: string, trigger: JobRunTrigger): Promise<JobRun> {
   return enqueueRunExecution(async () => {
     const state = await stateRepo.loadState();
     const run = await executeJob(state, jobId, trigger);
     await stateRepo.saveState(state);
+    void sendTelegramRunSummaryIfEnabled(state, run).catch((error) => {
+      app.log.error({ err: error, runId: run.id, jobId: run.jobId }, "Failed to send Telegram backup summary");
+    });
     return run;
   });
 }
@@ -822,6 +881,39 @@ app.get("/api/version", async () => {
       latestUrl: null,
       error: (error as Error).message
     };
+  }
+});
+
+app.get("/api/settings", async () => {
+  const state = await stateRepo.loadState();
+  return { settings: normalizeSettings(state.settings) };
+});
+
+app.put<{ Body: AppSettings }>("/api/settings", async (req) => {
+  const state = await stateRepo.loadState();
+  const body = settingsSchema.parse(req.body);
+  state.settings = normalizeSettings(body);
+  await stateRepo.saveState(state);
+  return { settings: state.settings };
+});
+
+app.post("/api/settings/telegram/test", async (_req, reply) => {
+  const state = await stateRepo.loadState();
+  const settings = normalizeSettings(state.settings);
+  if (!settings.telegram.botToken || !settings.telegram.chatId) {
+    return reply.code(400).send({ message: "请先配置 Telegram Bot Token 和 Chat ID" });
+  }
+  try {
+    const telegram = new TelegramService({
+      botToken: settings.telegram.botToken,
+      chatId: settings.telegram.chatId
+    });
+    await telegram.send(
+      `PhotoArk 测试通知\n时间: ${new Date().toLocaleString("zh-CN", { hour12: false })}\n状态: Telegram 配置可用`
+    );
+    return { ok: true };
+  } catch (error) {
+    return reply.code(400).send({ message: (error as Error).message });
   }
 });
 

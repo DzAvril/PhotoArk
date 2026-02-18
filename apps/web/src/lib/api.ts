@@ -1,4 +1,5 @@
 import type {
+  AppSettings,
   BackupAsset,
   BackupJob,
   DirectoryBrowseResult,
@@ -48,6 +49,21 @@ export function getMetrics() {
 
 export function getVersionInfo() {
   return fetchJson<VersionInfo>("/api/version");
+}
+
+export function getSettings() {
+  return fetchJson<{ settings: AppSettings }>("/api/settings");
+}
+
+export function updateSettings(payload: AppSettings) {
+  return fetchJson<{ settings: AppSettings }>("/api/settings", {
+    method: "PUT",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function sendTelegramTest() {
+  return fetchJson<{ ok: true }>("/api/settings/telegram/test", { method: "POST" });
 }
 
 export function getStorages() {
