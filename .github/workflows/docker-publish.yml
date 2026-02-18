@@ -135,21 +135,75 @@ jobs:
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Resolve version status
+        id: version
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require("node:fs");
+            const path = require("node:path");
+            const { owner, repo } = context.repo;
+
+            const pkgPath = path.join(process.env.GITHUB_WORKSPACE, "package.json");
+            const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
+            const current = String(pkg.version || "").replace(/^v/i, "");
+
+            function cmp(a, b) {
+              const pa = a.replace(/^v/i, "").split(".").map((x) => Number.parseInt(x, 10) || 0);
+              const pb = b.replace(/^v/i, "").split(".").map((x) => Number.parseInt(x, 10) || 0);
+              const len = Math.max(pa.length, pb.length);
+              for (let i = 0; i < len; i += 1) {
+                if (pa[i] > pb[i]) return 1;
+                if (pa[i] < pb[i]) return -1;
+              }
+              return 0;
+            }
+
+            let latest = "";
+            let source = "unknown";
+            let latestUrl = "";
+
+            try {
+              const rel = await github.rest.repos.getLatestRelease({ owner, repo });
+              latest = String(rel.data.tag_name || "").replace(/^v/i, "");
+              source = "release";
+              latestUrl = rel.data.html_url || "";
+            } catch {
+              const tags = await github.rest.repos.listTags({ owner, repo, per_page: 1 });
+              latest = String(tags.data?.[0]?.name || "").replace(/^v/i, "");
+              source = "tag";
+              latestUrl = `https://github.com/${owner}/${repo}/tags`;
+            }
+
+            let status = "无法判断";
+            if (current && latest) {
+              const r = cmp(current, latest);
+              status = r >= 0 ? "已是最新" : "发现新版本";
+            }
+
+            const line = `版本: ${current || "unknown"} | 最新: ${latest || "unknown"} | 状态: ${status} | 来源: ${source}`;
+            core.setOutput("line", line);
+            core.setOutput("latest_url", latestUrl);
+
       - name: Notify Telegram
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN != '' && secrets.TELEGRAM_BOT_TOKEN || vars.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID != '' && secrets.TELEGRAM_CHAT_ID || vars.TELEGRAM_CHAT_ID }}
           IMAGE_TAGS: ${{ steps.meta.outputs.tags }}
           CHANGELOG: ${{ steps.changelog.outputs.value }}
+          VERSION_LINE: ${{ steps.version.outputs.line }}
+          VERSION_URL: ${{ steps.version.outputs.latest_url }}
         if: ${{ success() && env.TELEGRAM_BOT_TOKEN != '' && env.TELEGRAM_CHAT_ID != '' }}
         run: |
           first_tag=$(printf "%s\n" "$IMAGE_TAGS" | head -n 1)
-          message=$(printf "PhotoArk 镜像已更新\n仓库: %s\n分支/标签: %s\n镜像: %s\n提交人: %s\n提交: %s\n\n更新内容:\n%s" \
+          message=$(printf "PhotoArk 镜像已更新\n仓库: %s\n分支/标签: %s\n镜像: %s\n提交人: %s\n提交: %s\n%s\n%s\n\n更新内容:\n%s" \
             "${{ github.repository }}" \
             "${{ github.ref_name }}" \
             "$first_tag" \
             "${{ github.actor }}" \
             "${{ github.sha }}" \
+            "$VERSION_LINE" \
+            "$VERSION_URL" \
             "$CHANGELOG")
 
           curl -sS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
