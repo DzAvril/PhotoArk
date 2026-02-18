@@ -1,14 +1,16 @@
 @import "tailwindcss";
 
 :root {
-  --ark-bg: #f2f4ec;
-  --ark-paper: #fbfff7;
-  --ark-ink: #1f2a24;
-  --ark-deep: #0c3b31;
-  --ark-mint: #d6f0a4;
-  --ark-ocean: #256a66;
-  --ark-warm: #f4d5a4;
-  --ark-line: #d6dfd2;
+  --ark-bg: #f5f7fb;
+  --ark-surface: #ffffff;
+  --ark-surface-soft: #fafbfd;
+  --ark-ink: #1f2937;
+  --ark-ink-soft: #6b7280;
+  --ark-line: #e5e7eb;
+  --ark-primary: #2563eb;
+  --ark-primary-strong: #1d4ed8;
+  --ark-danger-bg: #fef2f2;
+  --ark-danger-text: #b91c1c;
 }
 
 html,
@@ -19,7 +21,70 @@ body,
 
 body {
   margin: 0;
-  font-family: "Sora", "Avenir Next", "PingFang SC", "Noto Sans SC", sans-serif;
+  font-family: "Manrope", "Avenir Next", "PingFang SC", "Noto Sans SC", sans-serif;
+  background: radial-gradient(circle at 10% 0%, #ffffff 0%, var(--ark-bg) 40%);
+  color: var(--ark-ink);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+}
+
+.mp-panel {
+  border: 1px solid var(--ark-line);
+  border-radius: 16px;
+  background: var(--ark-surface);
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.06);
+}
+
+.mp-input,
+.mp-select {
+  width: 100%;
+  border: 1px solid var(--ark-line);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 14px;
+  outline: none;
+  background: #fff;
+}
+
+.mp-input:focus,
+.mp-select:focus {
+  border-color: var(--ark-primary);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+.mp-btn {
+  border-radius: 10px;
+  padding: 8px 12px;
+  font-size: 13px;
+  border: 1px solid var(--ark-line);
+  background: #fff;
+  color: var(--ark-ink);
+}
+
+.mp-btn-primary {
+  border: 1px solid var(--ark-primary);
+  background: var(--ark-primary);
+  color: #fff;
+}
+
+.mp-btn-primary:hover {
+  background: var(--ark-primary-strong);
+}
+
+.mp-error {
+  border-radius: 10px;
+  background: var(--ark-danger-bg);
+  color: var(--ark-danger-text);
+  font-size: 13px;
+  padding: 8px 10px;
+}
+
+.mp-section-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--ark-ink);
+}
+
+.mp-muted {
+  color: var(--ark-ink-soft);
 }

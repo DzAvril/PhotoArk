@@ -21,13 +21,13 @@ export function DashboardPage() {
   }, []);
 
   return (
-    <section className="mt-6">
-      {error ? <p className="rounded-xl bg-red-100 px-3 py-2 text-sm text-red-800">{error}</p> : null}
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <MetricCard title="目标存储" value={String(metrics.storageTargets)} meta="NAS / SSD / 115" icon={<span>⬢</span>} />
-        <MetricCard title="备份任务" value={String(metrics.backupJobs)} meta="定时 + 文件监听" icon={<span>◈</span>} />
+    <section className="space-y-3">
+      {error ? <p className="mp-error">{error}</p> : null}
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <MetricCard title="目标存储" value={String(metrics.storageTargets)} meta="NAS / SSD / 115" icon={<span>◫</span>} />
+        <MetricCard title="备份任务" value={String(metrics.backupJobs)} meta="定时 + 文件监听" icon={<span>◎</span>} />
         <MetricCard title="加密对象" value={String(metrics.encryptedAssets)} meta="AES-256-GCM" icon={<span>◍</span>} />
-        <MetricCard title="Live Photo 对" value={String(metrics.livePhotoPairs)} meta="HEIC/JPG + MOV" icon={<span>◎</span>} />
+        <MetricCard title="Live Photo 对" value={String(metrics.livePhotoPairs)} meta="HEIC/JPG + MOV" icon={<span>◌</span>} />
       </div>
     </section>
   );
