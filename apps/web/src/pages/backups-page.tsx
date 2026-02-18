@@ -79,6 +79,7 @@ export function BackupsPage() {
               <tr className="border-b border-[var(--ark-line)] text-left text-xs mp-muted">
                 <th className="px-2 py-2">任务</th>
                 <th className="px-2 py-2 cursor-pointer" onClick={() => toggleSort("finishedAt")}>结束时间</th>
+                <th className="px-2 py-2">触发方式</th>
                 <th className="px-2 py-2 cursor-pointer" onClick={() => toggleSort("status")}>状态</th>
                 <th className="px-2 py-2 cursor-pointer" onClick={() => toggleSort("copiedCount")}>同步文件</th>
                 <th className="px-2 py-2 cursor-pointer" onClick={() => toggleSort("failedCount")}>失败文件</th>
@@ -88,6 +89,14 @@ export function BackupsPage() {
             <tbody>
               {table.paged.map((run) => {
                 const job = jobById[run.jobId];
+                const triggerLabel =
+                  run.trigger === "manual"
+                    ? "手动执行"
+                    : run.trigger === "watch"
+                      ? "实时监听"
+                      : run.trigger === "schedule"
+                        ? "定时任务"
+                        : "未知";
                 return (
                   <tr key={run.id} className="border-b border-[var(--ark-line)]/70 align-top">
                     <td className="px-2 py-2 text-xs">
@@ -95,6 +104,7 @@ export function BackupsPage() {
                       <div className="mp-muted">{job?.sourcePath ?? ""} {" -> "} {job?.destinationPath ?? ""}</div>
                     </td>
                     <td className="px-2 py-2 text-xs">{new Date(run.finishedAt).toLocaleString()}</td>
+                    <td className="px-2 py-2 text-xs">{triggerLabel}</td>
                     <td className="px-2 py-2">
                       <span className={run.status === "success" ? "text-emerald-600" : "text-red-500"}>
                         {run.status === "success" ? "成功" : "失败"}
@@ -103,21 +113,13 @@ export function BackupsPage() {
                     <td className="px-2 py-2">{run.copiedCount}</td>
                     <td className="px-2 py-2">{run.failedCount}</td>
                     <td className="px-2 py-2 text-xs">
-                      <div className="flex flex-wrap gap-1">
-                        <span className="rounded border border-[var(--ark-line)] px-1.5 py-0.5" title="扫描">🔍 {run.scannedCount ?? run.copiedCount + run.failedCount}</span>
-                        <span className="rounded border border-[var(--ark-line)] px-1.5 py-0.5" title="同步">🔁 {run.copiedCount}</span>
-                        <span className="rounded border border-[var(--ark-line)] px-1.5 py-0.5" title="跳过">⏭️ {run.skippedCount ?? 0}</span>
-                        <span className="rounded border border-[var(--ark-line)] px-1.5 py-0.5" title="失败">❌ {run.failedCount}</span>
-                        <span className="rounded border border-[var(--ark-line)] px-1.5 py-0.5" title="照片">🖼️ {run.photoCount ?? 0}</span>
-                        <span className="rounded border border-[var(--ark-line)] px-1.5 py-0.5" title="视频">🎬 {run.videoCount ?? 0}</span>
-                        <span className="rounded border border-[var(--ark-line)] px-1.5 py-0.5" title="Live Photo">📸 {run.livePhotoPairCount ?? 0}</span>
-                      </div>
+                      <div>照片 {run.photoCount ?? 0}，视频 {run.videoCount ?? 0}，Live Photo {run.livePhotoPairCount ?? 0}</div>
                       {run.errors[0] ? <div className="mt-1 text-red-500">首个错误：{run.errors[0].path} - {run.errors[0].error}</div> : null}
                     </td>
                   </tr>
                 );
               })}
-              {!table.paged.length ? <tr><td className="px-2 py-4 text-center text-xs mp-muted" colSpan={6}>暂无记录</td></tr> : null}
+              {!table.paged.length ? <tr><td className="px-2 py-4 text-center text-xs mp-muted" colSpan={7}>暂无记录</td></tr> : null}
             </tbody>
           </table>
         </div>
