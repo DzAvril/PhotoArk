@@ -297,9 +297,9 @@ function MediaPane({ storages }: MediaPaneProps) {
                     src={getStorageMediaStreamUrl(selectedStorage.id, activeViewerVideoPath)}
                     className="max-h-full max-w-full"
                     autoPlay
-                    muted
                     loop
                     playsInline
+                    preload="auto"
                   />
                 ) : (
                   <video src={getStorageMediaStreamUrl(selectedStorage.id, activeViewerVideoPath)} className="max-h-full max-w-full" controls autoPlay />
