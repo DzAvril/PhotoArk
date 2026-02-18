@@ -103,8 +103,15 @@ export function BackupsPage() {
                     <td className="px-2 py-2">{run.copiedCount}</td>
                     <td className="px-2 py-2">{run.failedCount}</td>
                     <td className="px-2 py-2 text-xs">
-                      <div>扫描 {run.scannedCount ?? run.copiedCount + run.failedCount}，同步 {run.copiedCount}，跳过 {run.skippedCount ?? 0}，失败 {run.failedCount}</div>
-                      <div>照片 {run.photoCount ?? 0}，视频 {run.videoCount ?? 0}，Live Photo {run.livePhotoPairCount ?? 0}</div>
+                      <div className="flex flex-wrap gap-1">
+                        <span className="rounded border border-[var(--ark-line)] px-1.5 py-0.5">扫 {run.scannedCount ?? run.copiedCount + run.failedCount}</span>
+                        <span className="rounded border border-[var(--ark-line)] px-1.5 py-0.5">同 {run.copiedCount}</span>
+                        <span className="rounded border border-[var(--ark-line)] px-1.5 py-0.5">跳 {run.skippedCount ?? 0}</span>
+                        <span className="rounded border border-[var(--ark-line)] px-1.5 py-0.5">错 {run.failedCount}</span>
+                        <span className="rounded border border-[var(--ark-line)] px-1.5 py-0.5">图 {run.photoCount ?? 0}</span>
+                        <span className="rounded border border-[var(--ark-line)] px-1.5 py-0.5">视 {run.videoCount ?? 0}</span>
+                        <span className="rounded border border-[var(--ark-line)] px-1.5 py-0.5">实况 {run.livePhotoPairCount ?? 0}</span>
+                      </div>
                       {run.errors[0] ? <div className="mt-1 text-red-500">首个错误：{run.errors[0].path} - {run.errors[0].error}</div> : null}
                     </td>
                   </tr>
