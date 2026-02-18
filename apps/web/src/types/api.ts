@@ -25,6 +25,24 @@ export interface BackupJob {
   enabled: boolean;
 }
 
+export interface JobRunErrorItem {
+  path: string;
+  error: string;
+}
+
+export interface JobRun {
+  id: string;
+  jobId: string;
+  status: "success" | "failed";
+  startedAt: string;
+  finishedAt: string;
+  copiedCount: number;
+  failedCount: number;
+  copiedSamples: string[];
+  errors: JobRunErrorItem[];
+  message?: string;
+}
+
 export interface BackupAsset {
   id: string;
   name: string;

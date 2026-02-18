@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { createReadStream } from "node:fs";
-import { readdir, stat } from "node:fs/promises";
+import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import Fastify from "fastify";
@@ -13,7 +13,7 @@ import { env } from "./config/env.js";
 import { EncryptionService } from "./modules/crypto/encryption-service.js";
 import { LivePhotoService } from "./modules/livephoto/live-photo-service.js";
 import { FileStateRepository } from "./modules/backup/repository/file-state-repository.js";
-import type { BackupAsset, BackupState } from "./modules/backup/repository/types.js";
+import type { BackupAsset, BackupState, JobRun } from "./modules/backup/repository/types.js";
 
 const app = Fastify({ logger: true });
 await app.register(cors, { origin: true });
@@ -125,6 +125,157 @@ const MIME_BY_EXT: Record<string, string> = {
   ".mkv": "video/x-matroska",
   ".webm": "video/webm"
 };
+
+function toPosixPath(input: string): string {
+  return input.split(path.sep).join(path.posix.sep);
+}
+
+function isMediaFile(fileName: string): boolean {
+  const ext = path.extname(fileName).toLowerCase();
+  return IMAGE_EXTENSIONS.has(ext) || VIDEO_EXTENSIONS.has(ext);
+}
+
+function detectAssetKind(fileName: string, livePhotoAssetId: string | undefined): BackupAsset["kind"] {
+  const ext = path.extname(fileName).toLowerCase();
+  if (!livePhotoAssetId) return "photo";
+  return VIDEO_EXTENSIONS.has(ext) ? "live_photo_video" : "live_photo_image";
+}
+
+async function collectMediaFiles(dirPath: string): Promise<string[]> {
+  const out: string[] = [];
+
+  async function walk(currentPath: string) {
+    const entries = await readdir(currentPath, { withFileTypes: true });
+    for (const entry of entries) {
+      const fullPath = path.join(currentPath, entry.name);
+      if (entry.isDirectory()) {
+        await walk(fullPath);
+      } else if (entry.isFile() && isMediaFile(entry.name)) {
+        out.push(fullPath);
+      }
+    }
+  }
+
+  await walk(dirPath);
+  return out;
+}
+
+function buildLivePhotoIdByRelativePath(relativePaths: string[]): Map<string, string> {
+  const images = new Set([".jpg", ".jpeg", ".heic"]);
+  const videos = new Set([".mov"]);
+  const baseGroups = new Map<string, { image?: string; video?: string }>();
+
+  for (const relPath of relativePaths) {
+    const ext = path.extname(relPath).toLowerCase();
+    const base = relPath.slice(0, relPath.length - ext.length).toLowerCase();
+    const row = baseGroups.get(base) ?? {};
+    if (images.has(ext)) row.image = relPath;
+    if (videos.has(ext)) row.video = relPath;
+    baseGroups.set(base, row);
+  }
+
+  const out = new Map<string, string>();
+  for (const [base, pair] of baseGroups.entries()) {
+    if (pair.image && pair.video) {
+      const id = `lp_${base}`;
+      out.set(pair.image, id);
+      out.set(pair.video, id);
+    }
+  }
+  return out;
+}
+
+async function executeJob(state: BackupState, jobId: string): Promise<JobRun> {
+  const job = state.jobs.find((item) => item.id === jobId);
+  if (!job) {
+    throw new Error("Job not found");
+  }
+  if (!job.enabled) {
+    throw new Error("Job is disabled");
+  }
+
+  const sourceStorage = state.storages.find((item) => item.id === job.sourceTargetId);
+  const destinationStorage = state.storages.find((item) => item.id === job.destinationTargetId);
+  if (!sourceStorage || !destinationStorage) {
+    throw new Error("Storage target for this job is missing");
+  }
+  if (!isLocalStorage(sourceStorage.type) || !isLocalStorage(destinationStorage.type)) {
+    throw new Error("Only local-to-local sync is supported in current version");
+  }
+
+  const sourceRoot = resolvePathInStorage(sourceStorage, job.sourcePath);
+  const destinationRoot = resolvePathInStorage(destinationStorage, job.destinationPath);
+  const startedAt = new Date().toISOString();
+
+  const copiedSamples: string[] = [];
+  const errors: JobRun["errors"] = [];
+  let copiedCount = 0;
+  let failedCount = 0;
+
+  const sourceFiles = await collectMediaFiles(sourceRoot);
+  const relativePaths = sourceFiles.map((fullPath) => toPosixPath(path.relative(sourceRoot, fullPath)));
+  const livePhotoMap = buildLivePhotoIdByRelativePath(relativePaths);
+
+  for (let i = 0; i < sourceFiles.length; i += 1) {
+    const sourceFile = sourceFiles[i];
+    const relativePath = relativePaths[i];
+    const destinationFile = path.join(destinationRoot, relativePath);
+    try {
+      const input = await readFile(sourceFile);
+      const output = destinationStorage.encrypted ? encryption.encrypt(input) : input;
+      await mkdir(path.dirname(destinationFile), { recursive: true });
+      await writeFile(destinationFile, output);
+
+      const st = await stat(sourceFile);
+      const livePhotoAssetId = livePhotoMap.get(relativePath);
+      const existing = state.assets.find(
+        (asset) => asset.storageTargetId === destinationStorage.id && asset.name === relativePath
+      );
+      const nextAsset: BackupAsset = {
+        id: existing?.id ?? `asset_${randomUUID()}`,
+        name: relativePath,
+        kind: detectAssetKind(relativePath, livePhotoAssetId),
+        storageTargetId: destinationStorage.id,
+        encrypted: destinationStorage.encrypted,
+        sizeBytes: st.size,
+        capturedAt: st.mtime.toISOString(),
+        livePhotoAssetId
+      };
+
+      if (existing) {
+        const idx = state.assets.findIndex((asset) => asset.id === existing.id);
+        state.assets[idx] = nextAsset;
+      } else {
+        state.assets.push(nextAsset);
+      }
+
+      copiedCount += 1;
+      if (copiedSamples.length < 20) {
+        copiedSamples.push(relativePath);
+      }
+    } catch (error) {
+      failedCount += 1;
+      errors.push({ path: relativePath, error: (error as Error).message });
+    }
+  }
+
+  const finishedAt = new Date().toISOString();
+  const run: JobRun = {
+    id: `run_${randomUUID()}`,
+    jobId: job.id,
+    status: failedCount === 0 ? "success" : "failed",
+    startedAt,
+    finishedAt,
+    copiedCount,
+    failedCount,
+    copiedSamples,
+    errors,
+    message: `Copied ${copiedCount} files${failedCount ? `, failed ${failedCount}` : ""}.`
+  };
+  state.jobRuns.unshift(run);
+  state.jobRuns = state.jobRuns.slice(0, 200);
+  return run;
+}
 
 app.get("/healthz", async () => ({ ok: true }));
 
@@ -357,8 +508,29 @@ app.delete<{ Params: { jobId: string } }>("/api/jobs/:jobId", async (req, reply)
   if (state.jobs.length === before) {
     return reply.code(404).send({ message: "Job not found" });
   }
+  state.jobRuns = state.jobRuns.filter((run) => run.jobId !== req.params.jobId);
   await stateRepo.saveState(state);
   return { ok: true };
+});
+
+app.get<{ Params: { jobId: string } }>("/api/jobs/:jobId/runs", async (req, reply) => {
+  const state = await stateRepo.loadState();
+  const hasJob = state.jobs.some((j) => j.id === req.params.jobId);
+  if (!hasJob) {
+    return reply.code(404).send({ message: "Job not found" });
+  }
+  return { items: state.jobRuns.filter((run) => run.jobId === req.params.jobId) };
+});
+
+app.post<{ Params: { jobId: string } }>("/api/jobs/:jobId/run", async (req, reply) => {
+  const state = await stateRepo.loadState();
+  try {
+    const run = await executeJob(state, req.params.jobId);
+    await stateRepo.saveState(state);
+    return run;
+  } catch (error) {
+    return reply.code(400).send({ message: (error as Error).message });
+  }
 });
 
 app.get("/api/backups", async () => {

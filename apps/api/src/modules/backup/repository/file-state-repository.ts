@@ -5,7 +5,8 @@ import type { BackupState } from "./types.js";
 const defaultState: BackupState = {
   storages: [],
   jobs: [],
-  assets: []
+  assets: [],
+  jobRuns: []
 };
 
 export class FileStateRepository {
@@ -14,7 +15,13 @@ export class FileStateRepository {
   async loadState(): Promise<BackupState> {
     try {
       const raw = await readFile(this.stateFilePath, "utf8");
-      return JSON.parse(raw) as BackupState;
+      const parsed = JSON.parse(raw) as Partial<BackupState>;
+      return {
+        storages: parsed.storages ?? [],
+        jobs: parsed.jobs ?? [],
+        assets: parsed.assets ?? [],
+        jobRuns: parsed.jobRuns ?? []
+      };
     } catch {
       return structuredClone(defaultState);
     }
