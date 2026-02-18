@@ -126,6 +126,74 @@ const MIME_BY_EXT: Record<string, string> = {
   ".webm": "video/webm"
 };
 
+type VersionSource = "github_release" | "github_tag" | "unavailable";
+
+function normalizeVersion(input: string): string {
+  return input.trim().replace(/^v/i, "");
+}
+
+function compareVersions(a: string, b: string): number {
+  const pa = normalizeVersion(a).split(".").map((x) => Number.parseInt(x, 10));
+  const pb = normalizeVersion(b).split(".").map((x) => Number.parseInt(x, 10));
+  const len = Math.max(pa.length, pb.length);
+  for (let i = 0; i < len; i += 1) {
+    const av = Number.isFinite(pa[i]) ? pa[i] : 0;
+    const bv = Number.isFinite(pb[i]) ? pb[i] : 0;
+    if (av > bv) return 1;
+    if (av < bv) return -1;
+  }
+  return 0;
+}
+
+async function fetchLatestVersion(repo: string): Promise<{ latestVersion: string; source: VersionSource; latestUrl: string | null }> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), env.VERSION_CHECK_TIMEOUT_MS);
+
+  const headers: Record<string, string> = {
+    Accept: "application/vnd.github+json",
+    "User-Agent": "PhotoArk-Version-Checker"
+  };
+  if (env.GITHUB_TOKEN) {
+    headers.Authorization = `Bearer ${env.GITHUB_TOKEN}`;
+  }
+
+  try {
+    const releaseRes = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
+      headers,
+      signal: controller.signal
+    });
+    if (releaseRes.ok) {
+      const releaseJson = (await releaseRes.json()) as { tag_name?: string; html_url?: string };
+      if (releaseJson.tag_name) {
+        return {
+          latestVersion: normalizeVersion(releaseJson.tag_name),
+          source: "github_release",
+          latestUrl: releaseJson.html_url ?? null
+        };
+      }
+    }
+
+    const tagsRes = await fetch(`https://api.github.com/repos/${repo}/tags?per_page=1`, {
+      headers,
+      signal: controller.signal
+    });
+    if (tagsRes.ok) {
+      const tagsJson = (await tagsRes.json()) as Array<{ name?: string }>;
+      const tagName = tagsJson[0]?.name;
+      if (tagName) {
+        return {
+          latestVersion: normalizeVersion(tagName),
+          source: "github_tag",
+          latestUrl: `https://github.com/${repo}/tags`
+        };
+      }
+    }
+    throw new Error("No release/tag found");
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function toPosixPath(input: string): string {
   return input.split(path.sep).join(path.posix.sep);
 }
@@ -282,6 +350,37 @@ app.get("/healthz", async () => ({ ok: true }));
 app.get("/api/metrics", async () => {
   const state = await stateRepo.loadState();
   return metricSummary(state);
+});
+
+app.get("/api/version", async () => {
+  const checkedAt = new Date().toISOString();
+  const currentVersion = normalizeVersion(env.APP_VERSION);
+  try {
+    const { latestVersion, source, latestUrl } = await fetchLatestVersion(env.VERSION_CHECK_REPO);
+    const cmp = compareVersions(currentVersion, latestVersion);
+    return {
+      currentVersion,
+      latestVersion,
+      upToDate: cmp >= 0,
+      hasUpdate: cmp < 0,
+      source,
+      checkedAt,
+      repo: env.VERSION_CHECK_REPO,
+      latestUrl
+    };
+  } catch (error) {
+    return {
+      currentVersion,
+      latestVersion: null,
+      upToDate: null,
+      hasUpdate: null,
+      source: "unavailable" as VersionSource,
+      checkedAt,
+      repo: env.VERSION_CHECK_REPO,
+      latestUrl: null,
+      error: (error as Error).message
+    };
+  }
 });
 
 app.get("/api/storages", async () => {

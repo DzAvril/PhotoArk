@@ -5,6 +5,18 @@ export interface Metrics {
   livePhotoPairs: number;
 }
 
+export interface VersionInfo {
+  currentVersion: string;
+  latestVersion: string | null;
+  upToDate: boolean | null;
+  hasUpdate: boolean | null;
+  source: "github_release" | "github_tag" | "unavailable";
+  checkedAt: string;
+  repo: string;
+  latestUrl: string | null;
+  error?: string;
+}
+
 export interface StorageTarget {
   id: string;
   name: string;

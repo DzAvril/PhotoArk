@@ -47,7 +47,7 @@ docker compose up -d
 ```
 
 ## WebUI 路由与联调
-- 路由：`/`（总览）、`/storages`、`/jobs`、`/backups`
+- 路由：`/`（总览）、`/storages`、`/jobs`、`/media`、`/backups`
 - API 基地址：`VITE_API_BASE_URL`（默认 `http://localhost:8080`）
 - 当前已联调接口：
   - `GET /api/metrics`
@@ -58,12 +58,18 @@ docker compose up -d
   - `GET /api/backups/:assetId/preview?token=...`
   - `GET /api/storages/:storageId/directories?path=...`
   - `GET /api/storages/:storageId/media?path=...`
+  - `GET /api/version`
 
 ## API 持久化状态
 - 当前 API 使用文件持久化（便于本地调试）：
   - 状态文件默认：`/Users/xuzhi/Documents/workspace/new_project/apps/api/data/backup-state.json`
   - 可通过环境变量 `BACKUP_STATE_FILE` 覆盖
 - WebUI 本地目录下拉浏览范围可通过 `FS_BROWSE_ROOT` 限制（默认 `/`）
+- 版本检查相关环境变量：
+  - `APP_VERSION`：当前代码版本（默认 `0.1.0`）
+  - `VERSION_CHECK_REPO`：用于检查最新版本的 GitHub 仓库（默认 `DzAvril/PhotoArk`）
+  - `VERSION_CHECK_TIMEOUT_MS`：版本检查超时毫秒数（默认 `3500`）
+  - `GITHUB_TOKEN`：可选，GitHub API 访问令牌（用于提高版本查询稳定性）
 
 ## Docker Hub 自动发布
 - 已配置 GitHub Actions 工作流：`/Users/xuzhi/Documents/workspace/new_project/.github/workflows/docker-publish.yml`

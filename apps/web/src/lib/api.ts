@@ -9,7 +9,8 @@ import type {
   Metrics,
   PreviewResult,
   PreviewTokenResult,
-  StorageTarget
+  StorageTarget,
+  VersionInfo
 } from "../types/api";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
@@ -33,6 +34,10 @@ async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
 
 export function getMetrics() {
   return fetchJson<Metrics>("/api/metrics");
+}
+
+export function getVersionInfo() {
+  return fetchJson<VersionInfo>("/api/version");
 }
 
 export function getStorages() {

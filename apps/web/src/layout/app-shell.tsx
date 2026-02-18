@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
+import { getVersionInfo } from "../lib/api";
+import type { VersionInfo } from "../types/api";
 
 const tabs = [
   { to: "/", label: "总览" },
@@ -13,11 +15,16 @@ type ThemeMode = "light" | "dark";
 
 export function AppShell() {
   const [theme, setTheme] = useState<ThemeMode>("light");
+  const [version, setVersion] = useState<VersionInfo | null>(null);
 
   useEffect(() => {
     const saved = (localStorage.getItem("ark-theme") as ThemeMode | null) ?? "light";
     setTheme(saved);
     document.documentElement.setAttribute("data-theme", saved);
+  }, []);
+
+  useEffect(() => {
+    void getVersionInfo().then(setVersion).catch(() => undefined);
   }, []);
 
   function toggleTheme() {
@@ -58,6 +65,18 @@ export function AppShell() {
               <div>
                 <p className="text-xs uppercase tracking-widest text-[var(--ark-primary)]">PhotoArk</p>
                 <h2 className="text-lg font-semibold">NAS 多目标照片备份平台</h2>
+                <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
+                  <span className="mp-muted">版本 {version?.currentVersion ?? "..."}</span>
+                  {version?.hasUpdate ? (
+                    <a className="rounded-full border border-amber-400 bg-amber-50 px-2 py-0.5 text-amber-700" href={version.latestUrl ?? undefined} target="_blank" rel="noreferrer">
+                      有新版本 {version.latestVersion}
+                    </a>
+                  ) : version?.upToDate ? (
+                    <span className="rounded-full border border-emerald-400 bg-emerald-50 px-2 py-0.5 text-emerald-700">已是最新</span>
+                  ) : version ? (
+                    <span className="rounded-full border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] px-2 py-0.5">无法检查更新</span>
+                  ) : null}
+                </div>
               </div>
               <div className="flex items-center gap-2">
                 <button type="button" onClick={toggleTheme} className="mp-btn">
