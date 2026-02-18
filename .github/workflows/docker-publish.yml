@@ -103,15 +103,12 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Notify Telegram
-        if: >-
-          success() &&
-          (secrets.TELEGRAM_BOT_TOKEN != '' || vars.TELEGRAM_BOT_TOKEN != '') &&
-          (secrets.TELEGRAM_CHAT_ID != '' || vars.TELEGRAM_CHAT_ID != '')
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN != '' && secrets.TELEGRAM_BOT_TOKEN || vars.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID != '' && secrets.TELEGRAM_CHAT_ID || vars.TELEGRAM_CHAT_ID }}
           IMAGE_TAGS: ${{ steps.meta.outputs.tags }}
           CHANGELOG: ${{ steps.changelog.outputs.value }}
+        if: ${{ success() && env.TELEGRAM_BOT_TOKEN != '' && env.TELEGRAM_CHAT_ID != '' }}
         run: |
           first_tag=$(printf "%s\n" "$IMAGE_TAGS" | head -n 1)
           message=$(printf "PhotoArk 镜像已更新\n仓库: %s\n分支/标签: %s\n镜像: %s\n提交人: %s\n提交: %s\n\n更新内容:\n%s" \
