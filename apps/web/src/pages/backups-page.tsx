@@ -1,5 +1,8 @@
 import * as Collapsible from "@radix-ui/react-collapsible";
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { TablePagination } from "../components/table/table-pagination";
+import { TableToolbar } from "../components/table/table-toolbar";
+import { useTablePagination } from "../components/table/use-table-pagination";
 import { createBackupAsset, createPreviewToken, getBackups, getLivePhotoDetail, getPreview } from "../lib/api";
 import type { BackupAsset, LivePhotoDetail, PreviewResult } from "../types/api";
 
@@ -21,6 +24,7 @@ export function BackupsPage() {
   const [preview, setPreview] = useState<PreviewResult | null>(null);
   const [liveDetail, setLiveDetail] = useState<LivePhotoDetail["pair"]>(null);
   const [formOpen, setFormOpen] = useState(true);
+  const [search, setSearch] = useState("");
 
   async function load() {
     try {
@@ -63,6 +67,17 @@ export function BackupsPage() {
       setError((err as Error).message);
     }
   }
+
+  const table = useTablePagination(
+    items,
+    search,
+    useMemo(
+      () =>
+        (row: BackupAsset, keyword: string) =>
+          `${row.name} ${row.kind} ${row.storageTargetId}`.toLowerCase().includes(keyword),
+      []
+    )
+  );
 
   return (
     <section className="space-y-3">
@@ -111,17 +126,34 @@ export function BackupsPage() {
         </article>
       ) : null}
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-        {items.map((a) => (
-          <article key={a.id} className="mp-panel p-4">
-            <h3 className="font-medium">{a.name}</h3>
-            <p className="mt-1 text-xs mp-muted">类型: {a.kind}</p>
-            <p className="mt-1 text-xs mp-muted">{a.encrypted ? "加密" : "明文"}</p>
-            <button type="button" onClick={() => void handlePreview(a.id)} className="mp-btn mt-3">
-              请求预览
-            </button>
-          </article>
-        ))}
+      <div className="mp-panel p-4">
+        <TableToolbar title="备份资产列表" search={search} onSearchChange={setSearch} pageSize={table.pageSize} onPageSizeChange={table.setPageSize} totalItems={table.totalItems} />
+        <div className="overflow-auto">
+          <table className="min-w-full text-sm">
+            <thead>
+              <tr className="border-b border-[var(--ark-line)] text-left text-xs mp-muted">
+                <th className="px-2 py-2">文件</th>
+                <th className="px-2 py-2">类型</th>
+                <th className="px-2 py-2">存储</th>
+                <th className="px-2 py-2">状态</th>
+                <th className="px-2 py-2">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {table.paged.map((a) => (
+                <tr key={a.id} className="border-b border-[var(--ark-line)]/70">
+                  <td className="px-2 py-2 font-medium">{a.name}</td>
+                  <td className="px-2 py-2">{a.kind}</td>
+                  <td className="px-2 py-2 text-xs mp-muted">{a.storageTargetId}</td>
+                  <td className="px-2 py-2">{a.encrypted ? "加密" : "明文"}</td>
+                  <td className="px-2 py-2"><button type="button" onClick={() => void handlePreview(a.id)} className="mp-btn">请求预览</button></td>
+                </tr>
+              ))}
+              {!table.paged.length ? <tr><td className="px-2 py-4 text-center text-xs mp-muted" colSpan={5}>暂无数据</td></tr> : null}
+            </tbody>
+          </table>
+        </div>
+        <TablePagination page={table.page} totalPages={table.totalPages} onChange={table.setPage} />
       </div>
     </section>
   );

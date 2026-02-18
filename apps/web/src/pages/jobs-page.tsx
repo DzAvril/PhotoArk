@@ -1,5 +1,8 @@
 import * as Collapsible from "@radix-ui/react-collapsible";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { TablePagination } from "../components/table/table-pagination";
+import { TableToolbar } from "../components/table/table-toolbar";
+import { useTablePagination } from "../components/table/use-table-pagination";
 import { browseStorageDirectories, browseStorageMedia, createJob, getJobs, getStorages } from "../lib/api";
 import type { BackupJob, DirectoryBrowseResult, MediaBrowseResult, StorageTarget } from "../types/api";
 
@@ -24,6 +27,7 @@ export function JobsPage() {
   const [sourceMedia, setSourceMedia] = useState<MediaBrowseResult | null>(null);
   const [targetMedia, setTargetMedia] = useState<MediaBrowseResult | null>(null);
   const [formOpen, setFormOpen] = useState(true);
+  const [search, setSearch] = useState("");
 
   const sourceStorage = useMemo(() => storages.find((s) => s.id === form.sourceTargetId), [storages, form.sourceTargetId]);
   const targetStorage = useMemo(() => storages.find((s) => s.id === form.destinationTargetId), [storages, form.destinationTargetId]);
@@ -122,6 +126,17 @@ export function JobsPage() {
     }
   }
 
+  const table = useTablePagination(
+    items,
+    search,
+    useMemo(
+      () =>
+        (row: BackupJob, keyword: string) =>
+          `${row.name} ${row.sourceTargetId} ${row.sourcePath} ${row.destinationTargetId} ${row.destinationPath}`.toLowerCase().includes(keyword),
+      []
+    )
+  );
+
   return (
     <section className="space-y-3">
       <Collapsible.Root open={formOpen} onOpenChange={setFormOpen} className="mp-panel p-4">
@@ -137,12 +152,10 @@ export function JobsPage() {
         <Collapsible.Content>
           <form onSubmit={(e) => void onSubmit(e)} className="mt-3 grid gap-2 sm:grid-cols-2">
             <input className="mp-input sm:col-span-2" placeholder="任务名称" value={form.name} onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))} required />
-
             <select className="mp-select" value={form.sourceTargetId} onChange={(e) => setForm((p) => ({ ...p, sourceTargetId: e.target.value, sourcePath: "" }))} required>
               <option value="">选择备份源存储</option>
               {storages.map((s) => <option key={s.id} value={s.id}>{s.name} ({s.type})</option>)}
             </select>
-
             <select className="mp-select" value={form.destinationTargetId} onChange={(e) => setForm((p) => ({ ...p, destinationTargetId: e.target.value, destinationPath: "" }))} required>
               <option value="">选择备份目标存储</option>
               {storages.map((s) => <option key={s.id} value={s.id}>{s.name} ({s.type})</option>)}
@@ -207,18 +220,34 @@ export function JobsPage() {
         </article>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-        {items.map((j) => (
-          <article key={j.id} className="mp-panel p-4">
-            <div className="flex items-center justify-between">
-              <h3 className="font-medium">{j.name}</h3>
-              <span className="text-xs">{j.enabled ? "启用" : "停用"}</span>
-            </div>
-            <p className="mt-2 text-xs mp-muted">源: {j.sourceTargetId} @ {j.sourcePath}</p>
-            <p className="mt-1 text-xs mp-muted">目标: {j.destinationTargetId} @ {j.destinationPath}</p>
-            <p className="mt-1 text-xs mp-muted">模式: {j.watchMode ? "实时监听" : `定时(${j.schedule})`}</p>
-          </article>
-        ))}
+      <div className="mp-panel p-4">
+        <TableToolbar title="任务列表" search={search} onSearchChange={setSearch} pageSize={table.pageSize} onPageSizeChange={table.setPageSize} totalItems={table.totalItems} />
+        <div className="overflow-auto">
+          <table className="min-w-full text-sm">
+            <thead>
+              <tr className="border-b border-[var(--ark-line)] text-left text-xs mp-muted">
+                <th className="px-2 py-2">任务</th>
+                <th className="px-2 py-2">源</th>
+                <th className="px-2 py-2">目标</th>
+                <th className="px-2 py-2">模式</th>
+                <th className="px-2 py-2">状态</th>
+              </tr>
+            </thead>
+            <tbody>
+              {table.paged.map((j) => (
+                <tr key={j.id} className="border-b border-[var(--ark-line)]/70">
+                  <td className="px-2 py-2 font-medium">{j.name}</td>
+                  <td className="px-2 py-2 text-xs mp-muted">{j.sourceTargetId}<br />{j.sourcePath}</td>
+                  <td className="px-2 py-2 text-xs mp-muted">{j.destinationTargetId}<br />{j.destinationPath}</td>
+                  <td className="px-2 py-2 text-xs">{j.watchMode ? "实时监听" : `定时(${j.schedule})`}</td>
+                  <td className="px-2 py-2">{j.enabled ? "启用" : "停用"}</td>
+                </tr>
+              ))}
+              {!table.paged.length ? <tr><td className="px-2 py-4 text-center text-xs mp-muted" colSpan={5}>暂无数据</td></tr> : null}
+            </tbody>
+          </table>
+        </div>
+        <TablePagination page={table.page} totalPages={table.totalPages} onChange={table.setPage} />
       </div>
     </section>
   );
