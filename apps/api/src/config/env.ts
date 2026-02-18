@@ -26,7 +26,7 @@ const schema = z.object({
   WATCH_USE_POLLING: booleanLike,
   WATCH_POLLING_INTERVAL_MS: z.coerce.number().int().positive().default(1000),
   WATCH_RECONCILE_INTERVAL_MS: z.coerce.number().int().positive().default(30000),
-  APP_VERSION: z.string().default("0.1.1"),
+  APP_VERSION: z.string().default("0.1.2"),
   VERSION_CHECK_REPO: z.string().default("DzAvril/PhotoArk"),
   VERSION_CHECK_TIMEOUT_MS: z.coerce.number().int().positive().default(3500),
   GITHUB_TOKEN: z.string().optional(),

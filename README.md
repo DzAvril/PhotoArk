@@ -136,7 +136,7 @@ docker compose up -d --build app
   - 可通过环境变量 `BACKUP_STATE_FILE` 覆盖
 - WebUI 本地目录下拉浏览范围可通过 `FS_BROWSE_ROOT` 限制（默认 `/`）
 - 版本检查相关环境变量：
-  - `APP_VERSION`：当前代码版本（默认 `0.1.1`）
+  - `APP_VERSION`：当前代码版本（默认 `0.1.2`）
   - `VERSION_CHECK_REPO`：用于检查最新版本的 GitHub 仓库（默认 `DzAvril/PhotoArk`）
   - `VERSION_CHECK_TIMEOUT_MS`：版本检查超时毫秒数（默认 `3500`）
   - `GITHUB_TOKEN`：可选，GitHub API 访问令牌（用于提高版本查询稳定性）
