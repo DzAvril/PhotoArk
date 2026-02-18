@@ -485,14 +485,11 @@ async function executeJob(state: BackupState, jobId: string): Promise<JobRun> {
         destinationAssetIndexByName.set(relativePath, state.assets.length - 1);
       }
 
-      if (nextAsset.kind === "photo" || nextAsset.kind === "live_photo_image") {
-        photoCount += 1;
-      }
-      if (nextAsset.kind === "live_photo_video") {
+      const ext = path.extname(relativePath).toLowerCase();
+      if (VIDEO_EXTENSIONS.has(ext)) {
         videoCount += 1;
-      } else {
-        const ext = path.extname(relativePath).toLowerCase();
-        if (VIDEO_EXTENSIONS.has(ext)) videoCount += 1;
+      } else if (IMAGE_EXTENSIONS.has(ext)) {
+        photoCount += 1;
       }
       if (livePhotoAssetId) {
         copiedLivePhotoIds.add(livePhotoAssetId);
