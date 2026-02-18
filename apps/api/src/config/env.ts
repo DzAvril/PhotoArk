@@ -6,6 +6,7 @@ dotenv.config({ path: ".env" });
 const schema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   API_PORT: z.coerce.number().default(8080),
+  BACKUP_STATE_FILE: z.string().default("./apps/api/data/backup-state.json"),
   MASTER_KEY_BASE64: z.string().min(1),
   TELEGRAM_BOT_TOKEN: z.string().optional(),
   TELEGRAM_CHAT_ID: z.string().optional()

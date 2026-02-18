@@ -1,49 +1,89 @@
 import { randomUUID } from "node:crypto";
 import Fastify from "fastify";
 import cors from "@fastify/cors";
+import type { BackupJob, StorageTarget } from "@photoark/shared";
 import { env } from "./config/env.js";
 import { EncryptionService } from "./modules/crypto/encryption-service.js";
 import { LivePhotoService } from "./modules/livephoto/live-photo-service.js";
-import { backupAssets, backupJobs, storageTargets } from "./modules/backup/mock-data.js";
+import { FileStateRepository } from "./modules/backup/repository/file-state-repository.js";
+import type { BackupAsset, BackupState } from "./modules/backup/repository/types.js";
 
 const app = Fastify({ logger: true });
 await app.register(cors, { origin: true });
 
 const encryption = new EncryptionService(Buffer.from(env.MASTER_KEY_BASE64, "base64"));
 const livePhoto = new LivePhotoService();
+const stateRepo = new FileStateRepository(env.BACKUP_STATE_FILE);
 
 const previewTokens = new Map<string, { assetId: string; expiresAt: number }>();
 const PREVIEW_TOKEN_TTL_MS = 60_000;
 
-app.get("/healthz", async () => ({ ok: true }));
-
-app.get("/api/metrics", async () => {
-  const encryptedAssets = backupAssets.filter((a) => a.encrypted).length;
-  const livePhotoPairs = new Set(backupAssets.map((a) => a.livePhotoAssetId).filter(Boolean)).size;
+function metricSummary(state: BackupState) {
+  const encryptedAssets = state.assets.filter((a) => a.encrypted).length;
+  const livePhotoPairs = new Set(state.assets.map((a) => a.livePhotoAssetId).filter(Boolean)).size;
 
   return {
-    storageTargets: storageTargets.length,
-    backupJobs: backupJobs.length,
+    storageTargets: state.storages.length,
+    backupJobs: state.jobs.length,
     encryptedAssets,
     livePhotoPairs
   };
+}
+
+app.get("/healthz", async () => ({ ok: true }));
+
+app.get("/api/metrics", async () => {
+  const state = await stateRepo.loadState();
+  return metricSummary(state);
 });
 
-app.get("/api/storages", async () => ({ items: storageTargets }));
+app.get("/api/storages", async () => {
+  const state = await stateRepo.loadState();
+  return { items: state.storages };
+});
 
-app.get("/api/jobs", async () => ({ items: backupJobs }));
+app.post<{ Body: Omit<StorageTarget, "id"> }>("/api/storages", async (req) => {
+  const state = await stateRepo.loadState();
+  const item: StorageTarget = { id: `st_${randomUUID()}`, ...req.body };
+  state.storages.push(item);
+  await stateRepo.saveState(state);
+  return item;
+});
+
+app.get("/api/jobs", async () => {
+  const state = await stateRepo.loadState();
+  return { items: state.jobs };
+});
+
+app.post<{ Body: Omit<BackupJob, "id"> }>("/api/jobs", async (req) => {
+  const state = await stateRepo.loadState();
+  const item: BackupJob = { id: `job_${randomUUID()}`, ...req.body };
+  state.jobs.push(item);
+  await stateRepo.saveState(state);
+  return item;
+});
 
 app.get("/api/backups", async () => {
-  const livePhotoPairs = livePhoto.detectPairs(backupAssets.map((a) => a.name));
+  const state = await stateRepo.loadState();
+  const livePhotoPairs = livePhoto.detectPairs(state.assets.map((a) => a.name));
 
   return {
-    items: backupAssets,
+    items: state.assets,
     livePhotoPairs
   };
 });
 
+app.post<{ Body: Omit<BackupAsset, "id"> }>("/api/backups", async (req) => {
+  const state = await stateRepo.loadState();
+  const item: BackupAsset = { id: `asset_${randomUUID()}`, ...req.body };
+  state.assets.push(item);
+  await stateRepo.saveState(state);
+  return item;
+});
+
 app.post<{ Params: { assetId: string } }>("/api/backups/:assetId/preview-token", async (req, reply) => {
-  const asset = backupAssets.find((item) => item.id === req.params.assetId);
+  const state = await stateRepo.loadState();
+  const asset = state.assets.find((item) => item.id === req.params.assetId);
   if (!asset) {
     return reply.code(404).send({ message: "Asset not found" });
   }
@@ -75,7 +115,8 @@ app.get<{ Params: { assetId: string }; Querystring: { token?: string } }>(
       return reply.code(401).send({ message: "Preview token is invalid or expired" });
     }
 
-    const asset = backupAssets.find((item) => item.id === req.params.assetId);
+    const state = await stateRepo.loadState();
+    const asset = state.assets.find((item) => item.id === req.params.assetId);
     if (!asset) {
       return reply.code(404).send({ message: "Asset not found" });
     }
