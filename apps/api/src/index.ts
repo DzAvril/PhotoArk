@@ -491,13 +491,12 @@ async function executeJob(state: BackupState, jobId: string): Promise<JobRun> {
       }
 
       const ext = path.extname(relativePath).toLowerCase();
-      if (VIDEO_EXTENSIONS.has(ext)) {
+      if (livePhotoAssetId) {
+        copiedLivePhotoIds.add(livePhotoAssetId);
+      } else if (VIDEO_EXTENSIONS.has(ext)) {
         videoCount += 1;
       } else if (IMAGE_EXTENSIONS.has(ext)) {
         photoCount += 1;
-      }
-      if (livePhotoAssetId) {
-        copiedLivePhotoIds.add(livePhotoAssetId);
       }
 
       copiedCount += 1;
