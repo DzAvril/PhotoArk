@@ -53,7 +53,9 @@ const storageCreateSchema = z.object({
 const jobCreateSchema = z.object({
   name: z.string().min(1),
   sourceTargetId: z.string().min(1),
+  sourcePath: z.string().min(1),
   destinationTargetId: z.string().min(1),
+  destinationPath: z.string().min(1),
   schedule: z.string().optional(),
   watchMode: z.boolean(),
   enabled: z.boolean()
@@ -86,6 +88,28 @@ function isInBrowseRoot(targetPath: string): boolean {
   const target = path.resolve(targetPath);
   return target === root || target.startsWith(`${root}${path.sep}`);
 }
+
+function isLocalStorage(type: StorageTarget["type"]): boolean {
+  return type === "local_fs" || type === "external_ssd";
+}
+
+function resolvePathInStorage(storage: StorageTarget, inputPath?: string): string {
+  const rootPath = path.resolve(storage.basePath);
+  const targetPath = path.resolve(inputPath ?? rootPath);
+  const inStorage = targetPath === rootPath || targetPath.startsWith(`${rootPath}${path.sep}`);
+
+  if (!inStorage) {
+    throw new Error("Path is outside storage base path");
+  }
+  if (!isInBrowseRoot(targetPath)) {
+    throw new Error("Path is outside browse root");
+  }
+
+  return targetPath;
+}
+
+const IMAGE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".heic", ".webp", ".gif"]);
+const VIDEO_EXTENSIONS = new Set([".mov", ".mp4", ".m4v", ".avi", ".mkv", ".webm"]);
 
 app.get("/healthz", async () => ({ ok: true }));
 
@@ -131,6 +155,88 @@ app.get<{ Querystring: { path?: string } }>("/api/fs/directories", async (req, r
     directories
   };
 });
+
+app.get<{ Params: { storageId: string }; Querystring: { path?: string } }>(
+  "/api/storages/:storageId/directories",
+  async (req, reply) => {
+    const state = await stateRepo.loadState();
+    const storage = state.storages.find((item) => item.id === req.params.storageId);
+    if (!storage) {
+      return reply.code(404).send({ message: "Storage not found" });
+    }
+    if (!isLocalStorage(storage.type)) {
+      return reply.code(400).send({ message: "Directory browse is only supported for local storage types" });
+    }
+
+    let currentPath = "";
+    try {
+      currentPath = resolvePathInStorage(storage, req.query.path);
+    } catch (error) {
+      return reply.code(403).send({ message: (error as Error).message });
+    }
+
+    const rootPath = path.resolve(storage.basePath);
+    const dirEntries = await readdir(currentPath, { withFileTypes: true });
+    const directories = dirEntries
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => ({
+        name: entry.name,
+        path: path.join(currentPath, entry.name)
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    const rawParent = path.dirname(currentPath);
+    const parentPath = rawParent === currentPath ? null : rawParent.startsWith(rootPath) ? rawParent : null;
+
+    return {
+      rootPath,
+      currentPath,
+      parentPath,
+      directories
+    };
+  }
+);
+
+app.get<{ Params: { storageId: string }; Querystring: { path?: string } }>(
+  "/api/storages/:storageId/media",
+  async (req, reply) => {
+    const state = await stateRepo.loadState();
+    const storage = state.storages.find((item) => item.id === req.params.storageId);
+    if (!storage) {
+      return reply.code(404).send({ message: "Storage not found" });
+    }
+    if (!isLocalStorage(storage.type)) {
+      return reply.code(400).send({ message: "Media browse is only supported for local storage types" });
+    }
+
+    let currentPath = "";
+    try {
+      currentPath = resolvePathInStorage(storage, req.query.path);
+    } catch (error) {
+      return reply.code(403).send({ message: (error as Error).message });
+    }
+
+    const entries = await readdir(currentPath, { withFileTypes: true });
+    const files = entries
+      .filter((entry) => entry.isFile())
+      .map((entry) => {
+        const ext = path.extname(entry.name).toLowerCase();
+        const kind = IMAGE_EXTENSIONS.has(ext) ? "image" : VIDEO_EXTENSIONS.has(ext) ? "video" : "other";
+        return {
+          name: entry.name,
+          path: path.join(currentPath, entry.name),
+          kind
+        };
+      })
+      .filter((entry) => entry.kind !== "other");
+
+    return {
+      storageId: storage.id,
+      path: currentPath,
+      files
+    };
+  }
+);
 
 app.post<{ Body: Omit<StorageTarget, "id"> }>("/api/storages", async (req) => {
   const state = await stateRepo.loadState();

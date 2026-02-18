@@ -56,6 +56,8 @@ docker compose up -d
   - `GET /api/backups`
   - `POST /api/backups/:assetId/preview-token`
   - `GET /api/backups/:assetId/preview?token=...`
+  - `GET /api/storages/:storageId/directories?path=...`
+  - `GET /api/storages/:storageId/media?path=...`
 
 ## API 持久化状态
 - 当前 API 使用文件持久化（便于本地调试）：

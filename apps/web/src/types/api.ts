@@ -17,7 +17,9 @@ export interface BackupJob {
   id: string;
   name: string;
   sourceTargetId: string;
+  sourcePath: string;
   destinationTargetId: string;
+  destinationPath: string;
   schedule?: string;
   watchMode: boolean;
   enabled: boolean;
@@ -72,4 +74,16 @@ export interface DirectoryBrowseResult {
   currentPath: string;
   parentPath: string | null;
   directories: DirectoryOption[];
+}
+
+export interface MediaFileItem {
+  name: string;
+  path: string;
+  kind: "image" | "video";
+}
+
+export interface MediaBrowseResult {
+  storageId: string;
+  path: string;
+  files: MediaFileItem[];
 }

@@ -27,7 +27,9 @@
       "id": "job_daily_sync",
       "name": "Daily Full Sync",
       "sourceTargetId": "st_nas_01",
+      "sourcePath": "/volume1/photoark/source",
       "destinationTargetId": "st_115_01",
+      "destinationPath": "115://photoark/daily",
       "schedule": "0 2 * * *",
       "watchMode": false,
       "enabled": true
@@ -36,7 +38,9 @@
       "id": "job_watch_camera",
       "name": "Camera Roll Watch",
       "sourceTargetId": "st_nas_01",
+      "sourcePath": "/volume1/photoark/camera",
       "destinationTargetId": "st_ssd_01",
+      "destinationPath": "/volumeUSB1/usbshare/photoark/camera",
       "watchMode": true,
       "enabled": true
     }

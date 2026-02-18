@@ -2,6 +2,7 @@ import type {
   BackupAsset,
   BackupJob,
   DirectoryBrowseResult,
+  MediaBrowseResult,
   LivePhotoPair,
   LivePhotoDetail,
   Metrics,
@@ -42,6 +43,18 @@ export function browseDirectories(dirPath?: string) {
   if (dirPath) q.set("path", dirPath);
   const suffix = q.toString() ? `?${q.toString()}` : "";
   return fetchJson<DirectoryBrowseResult>(`/api/fs/directories${suffix}`);
+}
+
+export function browseStorageDirectories(storageId: string, dirPath?: string) {
+  const q = new URLSearchParams();
+  if (dirPath) q.set("path", dirPath);
+  const suffix = q.toString() ? `?${q.toString()}` : "";
+  return fetchJson<DirectoryBrowseResult>(`/api/storages/${storageId}/directories${suffix}`);
+}
+
+export function browseStorageMedia(storageId: string, dirPath: string) {
+  const q = new URLSearchParams({ path: dirPath });
+  return fetchJson<MediaBrowseResult>(`/api/storages/${storageId}/media?${q.toString()}`);
 }
 
 export function createStorage(payload: Omit<StorageTarget, "id">) {

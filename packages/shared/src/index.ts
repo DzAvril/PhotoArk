@@ -12,7 +12,9 @@ export interface BackupJob {
   id: string;
   name: string;
   sourceTargetId: string;
+  sourcePath: string;
   destinationTargetId: string;
+  destinationPath: string;
   schedule?: string;
   watchMode: boolean;
   enabled: boolean;
