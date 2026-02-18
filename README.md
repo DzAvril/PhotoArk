@@ -70,8 +70,8 @@ docker compose up --build
 - 构建策略：
   - 按路径变更选择性构建单镜像（`apps/api/**` 或 `apps/web/**` 变更均会构建）
   - tag 与手动触发会构建该单镜像
-- 需要在 GitHub 仓库 Secrets 配置：
-  - `DOCKERHUB_USERNAME`
+- 需要在 GitHub 仓库 `Environment: BuildImage` 下配置 Secrets：
+  - `DOCKERHUB_NAME`
   - `DOCKERHUB_TOKEN`
 - 产物镜像：
   - `dzavril/photoark`
