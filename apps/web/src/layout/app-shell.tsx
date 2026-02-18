@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 
 const tabs = [
@@ -7,7 +8,24 @@ const tabs = [
   { to: "/backups", label: "备份" }
 ];
 
+type ThemeMode = "light" | "dark";
+
 export function AppShell() {
+  const [theme, setTheme] = useState<ThemeMode>("light");
+
+  useEffect(() => {
+    const saved = (localStorage.getItem("ark-theme") as ThemeMode | null) ?? "light";
+    setTheme(saved);
+    document.documentElement.setAttribute("data-theme", saved);
+  }, []);
+
+  function toggleTheme() {
+    const next: ThemeMode = theme === "light" ? "dark" : "light";
+    setTheme(next);
+    localStorage.setItem("ark-theme", next);
+    document.documentElement.setAttribute("data-theme", next);
+  }
+
   return (
     <div className="min-h-screen bg-[var(--ark-bg)] text-[var(--ark-ink)]">
       <div className="mx-auto grid max-w-[1400px] grid-cols-1 gap-4 px-3 py-4 md:grid-cols-[220px_1fr] md:px-5">
@@ -40,23 +58,28 @@ export function AppShell() {
                 <p className="text-xs uppercase tracking-widest text-[var(--ark-primary)]">PhotoArk</p>
                 <h2 className="text-lg font-semibold">NAS 多目标照片备份平台</h2>
               </div>
-              <nav className="flex flex-wrap gap-2 md:hidden">
-                {tabs.map((tab) => (
-                  <NavLink
-                    key={tab.to}
-                    to={tab.to}
-                    className={({ isActive }) =>
-                      `rounded-md border px-3 py-1.5 text-xs ${
-                        isActive
-                          ? "border-[var(--ark-primary)] bg-[var(--ark-primary)] text-white"
-                          : "border-[var(--ark-line)] bg-white text-[var(--ark-ink)]"
-                      }`
-                    }
-                  >
-                    {tab.label}
-                  </NavLink>
-                ))}
-              </nav>
+              <div className="flex items-center gap-2">
+                <button type="button" onClick={toggleTheme} className="mp-btn">
+                  {theme === "light" ? "暗色" : "亮色"}
+                </button>
+                <nav className="flex flex-wrap gap-2 md:hidden">
+                  {tabs.map((tab) => (
+                    <NavLink
+                      key={tab.to}
+                      to={tab.to}
+                      className={({ isActive }) =>
+                        `rounded-md border px-3 py-1.5 text-xs ${
+                          isActive
+                            ? "border-[var(--ark-primary)] bg-[var(--ark-primary)] text-white"
+                            : "border-[var(--ark-line)] bg-white text-[var(--ark-ink)]"
+                        }`
+                      }
+                    >
+                      {tab.label}
+                    </NavLink>
+                  ))}
+                </nav>
+              </div>
             </div>
           </header>
 

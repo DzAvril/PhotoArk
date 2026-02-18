@@ -1,3 +1,4 @@
+import * as Collapsible from "@radix-ui/react-collapsible";
 import { useEffect, useState, type FormEvent } from "react";
 import { createBackupAsset, createPreviewToken, getBackups, getLivePhotoDetail, getPreview } from "../lib/api";
 import type { BackupAsset, LivePhotoDetail, PreviewResult } from "../types/api";
@@ -19,6 +20,7 @@ export function BackupsPage() {
   const [error, setError] = useState("");
   const [preview, setPreview] = useState<PreviewResult | null>(null);
   const [liveDetail, setLiveDetail] = useState<LivePhotoDetail["pair"]>(null);
+  const [formOpen, setFormOpen] = useState(true);
 
   async function load() {
     try {
@@ -64,25 +66,32 @@ export function BackupsPage() {
 
   return (
     <section className="space-y-3">
-      <div className="mp-panel p-4">
-        <h2 className="mp-section-title">备份浏览</h2>
-        <p className="mt-1 text-xs mp-muted">115 加密对象预览采用一次性 token + 内存解密流</p>
+      <Collapsible.Root open={formOpen} onOpenChange={setFormOpen} className="mp-panel p-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="mp-section-title">备份浏览</h2>
+            <p className="mt-1 text-xs mp-muted">115 加密对象预览采用一次性 token + 内存解密流</p>
+          </div>
+          <Collapsible.Trigger className="mp-btn">{formOpen ? "收起" : "展开"}</Collapsible.Trigger>
+        </div>
         {error ? <p className="mp-error mt-3">{error}</p> : null}
 
-        <form onSubmit={(e) => void onSubmit(e)} className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-          <input className="mp-input" placeholder="文件名" value={form.name} onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))} required />
-          <input className="mp-input" placeholder="storageTargetId" value={form.storageTargetId} onChange={(e) => setForm((p) => ({ ...p, storageTargetId: e.target.value }))} required />
-          <select className="mp-select" value={form.kind} onChange={(e) => setForm((p) => ({ ...p, kind: e.target.value as BackupAsset["kind"] }))}>
-            <option value="photo">photo</option>
-            <option value="live_photo_image">live_photo_image</option>
-            <option value="live_photo_video">live_photo_video</option>
-          </select>
-          <input className="mp-input" type="number" placeholder="sizeBytes" value={form.sizeBytes} onChange={(e) => setForm((p) => ({ ...p, sizeBytes: Number(e.target.value) }))} required />
-          <input className="mp-input" placeholder="livePhotoAssetId (可选)" value={form.livePhotoAssetId ?? ""} onChange={(e) => setForm((p) => ({ ...p, livePhotoAssetId: e.target.value }))} />
-          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.encrypted} onChange={(e) => setForm((p) => ({ ...p, encrypted: e.target.checked }))} />加密</label>
-          <button type="submit" className="mp-btn mp-btn-primary sm:col-span-2 lg:col-span-3">新增资产</button>
-        </form>
-      </div>
+        <Collapsible.Content>
+          <form onSubmit={(e) => void onSubmit(e)} className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            <input className="mp-input" placeholder="文件名" value={form.name} onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))} required />
+            <input className="mp-input" placeholder="storageTargetId" value={form.storageTargetId} onChange={(e) => setForm((p) => ({ ...p, storageTargetId: e.target.value }))} required />
+            <select className="mp-select" value={form.kind} onChange={(e) => setForm((p) => ({ ...p, kind: e.target.value as BackupAsset["kind"] }))}>
+              <option value="photo">photo</option>
+              <option value="live_photo_image">live_photo_image</option>
+              <option value="live_photo_video">live_photo_video</option>
+            </select>
+            <input className="mp-input" type="number" placeholder="sizeBytes" value={form.sizeBytes} onChange={(e) => setForm((p) => ({ ...p, sizeBytes: Number(e.target.value) }))} required />
+            <input className="mp-input" placeholder="livePhotoAssetId (可选)" value={form.livePhotoAssetId ?? ""} onChange={(e) => setForm((p) => ({ ...p, livePhotoAssetId: e.target.value }))} />
+            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.encrypted} onChange={(e) => setForm((p) => ({ ...p, encrypted: e.target.checked }))} />加密</label>
+            <button type="submit" className="mp-btn mp-btn-primary sm:col-span-2 lg:col-span-3">新增资产</button>
+          </form>
+        </Collapsible.Content>
+      </Collapsible.Root>
 
       {preview ? (
         <article className="mp-panel p-4 text-xs">
