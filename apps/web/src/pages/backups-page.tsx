@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { TablePagination } from "../components/table/table-pagination";
 import { TableToolbar } from "../components/table/table-toolbar";
 import { useTablePagination } from "../components/table/use-table-pagination";
-import { getJobs, getRuns } from "../lib/api";
+import { deleteRun, getJobs, getRuns } from "../lib/api";
 import type { BackupJob, JobRun } from "../types/api";
 
 type SortKey = "finishedAt" | "status" | "copiedCount";
@@ -14,6 +14,7 @@ export function BackupsPage() {
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("finishedAt");
   const [sortAsc, setSortAsc] = useState(false);
+  const [deletingRunIds, setDeletingRunIds] = useState<Set<string>>(new Set());
 
   const jobById = useMemo(() => Object.fromEntries(jobs.map((j) => [j.id, j])), [jobs]);
 
@@ -36,6 +37,23 @@ export function BackupsPage() {
     else {
       setSortKey(nextKey);
       setSortAsc(true);
+    }
+  }
+
+  async function handleDeleteRun(runId: string) {
+    setError("");
+    setDeletingRunIds((prev) => new Set(prev).add(runId));
+    try {
+      await deleteRun(runId);
+      setRuns((prev) => prev.filter((run) => run.id !== runId));
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setDeletingRunIds((prev) => {
+        const next = new Set(prev);
+        next.delete(runId);
+        return next;
+      });
     }
   }
 
@@ -83,6 +101,7 @@ export function BackupsPage() {
                 <th className="px-2 py-2 cursor-pointer" onClick={() => toggleSort("status")}>状态</th>
                 <th className="px-2 py-2 cursor-pointer" onClick={() => toggleSort("copiedCount")}>成功/失败</th>
                 <th className="px-2 py-2">摘要</th>
+                <th className="px-2 py-2">操作</th>
               </tr>
             </thead>
             <tbody>
@@ -118,10 +137,20 @@ export function BackupsPage() {
                       <div>照片 {run.photoCount ?? 0}，视频 {run.videoCount ?? 0}，Live Photo {run.livePhotoPairCount ?? 0}</div>
                       {run.errors[0] ? <div className="mt-1 text-red-500">首个错误：{run.errors[0].path} - {run.errors[0].error}</div> : null}
                     </td>
+                    <td className="px-2 py-2">
+                      <button
+                        type="button"
+                        className="mp-btn"
+                        disabled={deletingRunIds.has(run.id)}
+                        onClick={() => void handleDeleteRun(run.id)}
+                      >
+                        {deletingRunIds.has(run.id) ? "删除中" : "删除"}
+                      </button>
+                    </td>
                   </tr>
                 );
               })}
-              {!table.paged.length ? <tr><td className="px-2 py-4 text-center text-xs mp-muted" colSpan={6}>暂无记录</td></tr> : null}
+              {!table.paged.length ? <tr><td className="px-2 py-4 text-center text-xs mp-muted" colSpan={7}>暂无记录</td></tr> : null}
             </tbody>
           </table>
         </div>

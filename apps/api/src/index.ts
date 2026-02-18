@@ -1077,6 +1077,17 @@ app.get<{ Params: { jobId: string } }>("/api/jobs/:jobId/runs", async (req, repl
   return { items: state.jobRuns.filter((run) => run.jobId === req.params.jobId).map(normalizeJobRun) };
 });
 
+app.delete<{ Params: { runId: string } }>("/api/runs/:runId", async (req, reply) => {
+  const state = await stateRepo.loadState();
+  const before = state.jobRuns.length;
+  state.jobRuns = state.jobRuns.filter((run) => run.id !== req.params.runId);
+  if (state.jobRuns.length === before) {
+    return reply.code(404).send({ message: "Run not found" });
+  }
+  await stateRepo.saveState(state);
+  return { ok: true };
+});
+
 app.post<{ Params: { jobId: string } }>("/api/jobs/:jobId/run", async (req, reply) => {
   try {
     const run = await executeJobAndPersist(req.params.jobId, "manual");

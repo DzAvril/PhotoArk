@@ -123,6 +123,10 @@ export function getRuns() {
   return fetchJson<{ items: JobRun[] }>("/api/runs");
 }
 
+export function deleteRun(runId: string) {
+  return fetchJson<{ ok: true }>(`/api/runs/${runId}`, { method: "DELETE" });
+}
+
 export function getBackups() {
   return fetchJson<{ items: BackupAsset[]; livePhotoPairs: LivePhotoPair[] }>("/api/backups");
 }
