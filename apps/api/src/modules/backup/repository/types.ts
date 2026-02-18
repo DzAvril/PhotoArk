@@ -22,6 +22,8 @@ export interface JobRun {
   status: "success" | "failed";
   startedAt: string;
   finishedAt: string;
+  scannedCount: number;
+  skippedCount: number;
   copiedCount: number;
   failedCount: number;
   photoCount: number;

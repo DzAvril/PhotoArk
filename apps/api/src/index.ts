@@ -399,51 +399,90 @@ async function executeJob(state: BackupState, jobId: string): Promise<JobRun> {
   const sourceRoot = resolvePathInStorage(sourceStorage, job.sourcePath);
   const destinationRoot = resolvePathInStorage(destinationStorage, job.destinationPath);
   const startedAt = new Date().toISOString();
+  const sourceFiles = await collectMediaFiles(sourceRoot);
+  const relativePaths = sourceFiles.map((fullPath) => toPosixPath(path.relative(sourceRoot, fullPath)));
+  const livePhotoMap = buildLivePhotoIdByRelativePath(relativePaths);
 
   const copiedSamples: string[] = [];
   const errors: JobRun["errors"] = [];
+  const scannedCount = sourceFiles.length;
+  let skippedCount = 0;
   let copiedCount = 0;
   let failedCount = 0;
   let photoCount = 0;
   let videoCount = 0;
   const copiedLivePhotoIds = new Set<string>();
+  const destinationAssetIndexByName = new Map<string, number>();
 
-  const sourceFiles = await collectMediaFiles(sourceRoot);
-  const relativePaths = sourceFiles.map((fullPath) => toPosixPath(path.relative(sourceRoot, fullPath)));
-  const livePhotoMap = buildLivePhotoIdByRelativePath(relativePaths);
+  for (let idx = 0; idx < state.assets.length; idx += 1) {
+    const asset = state.assets[idx];
+    if (asset.storageTargetId === destinationStorage.id) {
+      destinationAssetIndexByName.set(asset.name, idx);
+    }
+  }
 
   for (let i = 0; i < sourceFiles.length; i += 1) {
     const sourceFile = sourceFiles[i];
     const relativePath = relativePaths[i];
     const destinationFile = path.join(destinationRoot, relativePath);
     try {
+      const sourceStat = await stat(sourceFile);
+      const sourceCapturedAt = sourceStat.mtime.toISOString();
+      const livePhotoAssetId = livePhotoMap.get(relativePath);
+      const nextKind = detectAssetKind(relativePath, livePhotoAssetId);
+      const existingIdx = destinationAssetIndexByName.get(relativePath);
+      const existing = existingIdx === undefined ? undefined : state.assets[existingIdx];
+      const destinationStat = await stat(destinationFile).catch(() => null);
+      const destinationExists = Boolean(destinationStat?.isFile());
+      if (
+        existing &&
+        existingIdx !== undefined &&
+        destinationExists &&
+        existing.sizeBytes === sourceStat.size &&
+        existing.capturedAt === sourceCapturedAt &&
+        existing.encrypted === destinationStorage.encrypted
+      ) {
+        const nextAsset: BackupAsset = {
+          id: existing.id,
+          name: relativePath,
+          kind: nextKind,
+          storageTargetId: destinationStorage.id,
+          encrypted: destinationStorage.encrypted,
+          sizeBytes: sourceStat.size,
+          capturedAt: sourceCapturedAt,
+          livePhotoAssetId
+        };
+        if (
+          existing.kind !== nextAsset.kind ||
+          (existing.livePhotoAssetId ?? undefined) !== (nextAsset.livePhotoAssetId ?? undefined)
+        ) {
+          state.assets[existingIdx] = nextAsset;
+        }
+        skippedCount += 1;
+        continue;
+      }
+
       const sourceBlob = await readFile(sourceFile);
       const plainContent = sourceStorage.encrypted ? encryption.decrypt(sourceBlob) : sourceBlob;
       const output = destinationStorage.encrypted ? encryption.encrypt(plainContent) : plainContent;
       await mkdir(path.dirname(destinationFile), { recursive: true });
       await writeFile(destinationFile, output);
-
-      const st = await stat(sourceFile);
-      const livePhotoAssetId = livePhotoMap.get(relativePath);
-      const existing = state.assets.find(
-        (asset) => asset.storageTargetId === destinationStorage.id && asset.name === relativePath
-      );
       const nextAsset: BackupAsset = {
         id: existing?.id ?? `asset_${randomUUID()}`,
         name: relativePath,
-        kind: detectAssetKind(relativePath, livePhotoAssetId),
+        kind: nextKind,
         storageTargetId: destinationStorage.id,
         encrypted: destinationStorage.encrypted,
-        sizeBytes: st.size,
-        capturedAt: st.mtime.toISOString(),
+        sizeBytes: sourceStat.size,
+        capturedAt: sourceCapturedAt,
         livePhotoAssetId
       };
 
-      if (existing) {
-        const idx = state.assets.findIndex((asset) => asset.id === existing.id);
-        state.assets[idx] = nextAsset;
+      if (existingIdx !== undefined) {
+        state.assets[existingIdx] = nextAsset;
       } else {
         state.assets.push(nextAsset);
+        destinationAssetIndexByName.set(relativePath, state.assets.length - 1);
       }
 
       if (nextAsset.kind === "photo" || nextAsset.kind === "live_photo_image") {
@@ -476,6 +515,8 @@ async function executeJob(state: BackupState, jobId: string): Promise<JobRun> {
     status: failedCount === 0 ? "success" : "failed",
     startedAt,
     finishedAt,
+    scannedCount,
+    skippedCount,
     copiedCount,
     failedCount,
     photoCount,
@@ -483,7 +524,7 @@ async function executeJob(state: BackupState, jobId: string): Promise<JobRun> {
     livePhotoPairCount: copiedLivePhotoIds.size,
     copiedSamples,
     errors,
-    message: `照片 ${photoCount}，视频 ${videoCount}，Live Photo ${copiedLivePhotoIds.size}，失败 ${failedCount}`
+    message: `扫描 ${scannedCount}，同步 ${copiedCount}，跳过 ${skippedCount}，失败 ${failedCount}；照片 ${photoCount}，视频 ${videoCount}，Live Photo ${copiedLivePhotoIds.size}`
   };
   state.jobRuns.unshift(run);
   state.jobRuns = state.jobRuns.slice(0, 200);
