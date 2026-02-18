@@ -33,7 +33,7 @@ export function JobsPage() {
   const [form, setForm] = useState<JobForm>(initialForm);
   const [editingJobId, setEditingJobId] = useState<string | null>(null);
   const [error, setError] = useState("");
-  const [formOpen, setFormOpen] = useState(true);
+  const [formOpen, setFormOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("name");
   const [sortAsc, setSortAsc] = useState(true);
@@ -92,6 +92,7 @@ export function JobsPage() {
         await createJob(payload);
       }
       resetForm();
+      setFormOpen(false);
       await load();
     } catch (err) {
       setError((err as Error).message);
@@ -204,7 +205,7 @@ export function JobsPage() {
             <h2 className="mp-section-title">备份任务</h2>
             <p className="mt-1 text-xs mp-muted">选择源存储和目标存储即可创建同步任务</p>
           </div>
-          <Collapsible.Trigger className="mp-btn">{formOpen ? "收起" : "展开"}</Collapsible.Trigger>
+          <Collapsible.Trigger className="mp-btn">{formOpen ? "收起" : "新增任务"}</Collapsible.Trigger>
         </div>
         {error ? <p className="mp-error mt-3">{error}</p> : null}
 

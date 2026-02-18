@@ -1,3 +1,4 @@
+import * as Collapsible from "@radix-ui/react-collapsible";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { PathPicker } from "../components/path-picker";
 import { TablePagination } from "../components/table/table-pagination";
@@ -19,6 +20,7 @@ export function StoragesPage() {
   const [items, setItems] = useState<StorageTarget[]>([]);
   const [form, setForm] = useState(initialForm);
   const [error, setError] = useState("");
+  const [formOpen, setFormOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("name");
   const [sortAsc, setSortAsc] = useState(true);
@@ -44,6 +46,7 @@ export function StoragesPage() {
     try {
       await createStorage(form);
       setForm(initialForm);
+      setFormOpen(false);
       await load();
     } catch (err) {
       setError((err as Error).message);
@@ -97,42 +100,49 @@ export function StoragesPage() {
 
   return (
     <section className="space-y-3">
-      <div className="mp-panel p-4">
-        <h2 className="mp-section-title">目标存储</h2>
-        <p className="mt-1 text-xs mp-muted">支持本地目录下拉选择和手动输入路径</p>
+      <Collapsible.Root open={formOpen} onOpenChange={setFormOpen} className="mp-panel p-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="mp-section-title">目标存储</h2>
+            <p className="mt-1 text-xs mp-muted">支持本地目录下拉选择和手动输入路径</p>
+          </div>
+          <Collapsible.Trigger className="mp-btn">{formOpen ? "收起" : "新增存储"}</Collapsible.Trigger>
+        </div>
         {error ? <p className="mp-error mt-3">{error}</p> : null}
 
-        <form onSubmit={(e) => void onSubmit(e)} className="mt-3 grid gap-2 sm:grid-cols-2">
-          <input className="mp-input" placeholder="名称" value={form.name} onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))} required />
-          <select className="mp-select" value={form.type} onChange={(e) => setForm((p) => ({ ...p, type: e.target.value as StorageTarget["type"] }))}>
-            <option value="local_fs">local_fs</option>
-            <option value="external_ssd">external_ssd</option>
-            <option value="cloud_115">cloud_115</option>
-          </select>
-          <div className="sm:col-span-2">
-            {isLocalType ? (
-              <PathPicker
-                value={form.basePath}
-                onChange={(basePath) => setForm((p) => ({ ...p, basePath }))}
-                placeholder="输入本地目录路径，或点右侧选择路径"
-                browse={browseDirectories}
-                required
-              />
-            ) : (
-              <input
-                className="mp-input"
-                placeholder="115://photoark 或其他 URI"
-                value={form.basePath}
-                onChange={(e) => setForm((p) => ({ ...p, basePath: e.target.value }))}
-                required
-              />
-            )}
-          </div>
+        <Collapsible.Content>
+          <form onSubmit={(e) => void onSubmit(e)} className="mt-3 grid gap-2 sm:grid-cols-2">
+            <input className="mp-input" placeholder="名称" value={form.name} onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))} required />
+            <select className="mp-select" value={form.type} onChange={(e) => setForm((p) => ({ ...p, type: e.target.value as StorageTarget["type"] }))}>
+              <option value="local_fs">local_fs</option>
+              <option value="external_ssd">external_ssd</option>
+              <option value="cloud_115">cloud_115</option>
+            </select>
+            <div className="sm:col-span-2">
+              {isLocalType ? (
+                <PathPicker
+                  value={form.basePath}
+                  onChange={(basePath) => setForm((p) => ({ ...p, basePath }))}
+                  placeholder="输入本地目录路径，或点右侧选择路径"
+                  browse={browseDirectories}
+                  required
+                />
+              ) : (
+                <input
+                  className="mp-input"
+                  placeholder="115://photoark 或其他 URI"
+                  value={form.basePath}
+                  onChange={(e) => setForm((p) => ({ ...p, basePath: e.target.value }))}
+                  required
+                />
+              )}
+            </div>
 
-          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.encrypted} onChange={(e) => setForm((p) => ({ ...p, encrypted: e.target.checked }))} />加密存储</label>
-          <button type="submit" className="mp-btn mp-btn-primary sm:col-span-2">新增存储</button>
-        </form>
-      </div>
+            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.encrypted} onChange={(e) => setForm((p) => ({ ...p, encrypted: e.target.checked }))} />加密存储</label>
+            <button type="submit" className="mp-btn mp-btn-primary sm:col-span-2">新增存储</button>
+          </form>
+        </Collapsible.Content>
+      </Collapsible.Root>
 
       <div className="mp-panel p-4">
         <div className="mb-2 flex items-center justify-between">
