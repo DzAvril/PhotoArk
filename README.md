@@ -67,6 +67,9 @@ docker compose up --build
   - push 到 `main`
   - push tag（`v*.*.*`）
   - 手动触发（workflow_dispatch）
+- 构建策略：
+  - 按路径变更选择性构建（`apps/api/**` 只构建 API 镜像，`apps/web/**` 只构建 Web 镜像）
+  - tag 与手动触发会构建两个镜像
 - 需要在 GitHub 仓库 Secrets 配置：
   - `DOCKERHUB_USERNAME`
   - `DOCKERHUB_TOKEN`
