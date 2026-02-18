@@ -97,7 +97,7 @@ const jobCreateSchema = z.object({
 
 const assetCreateSchema = z.object({
   name: z.string().min(1),
-  kind: z.enum(["photo", "live_photo_image", "live_photo_video"]),
+  kind: z.enum(["photo", "video", "live_photo_image", "live_photo_video"]),
   storageTargetId: z.string().min(1),
   encrypted: z.boolean(),
   sizeBytes: z.number().int().nonnegative(),
@@ -335,7 +335,7 @@ function isMediaFile(fileName: string): boolean {
 
 function detectAssetKind(fileName: string, livePhotoAssetId: string | undefined): BackupAsset["kind"] {
   const ext = path.extname(fileName).toLowerCase();
-  if (!livePhotoAssetId) return "photo";
+  if (!livePhotoAssetId) return VIDEO_EXTENSIONS.has(ext) ? "video" : "photo";
   return VIDEO_EXTENSIONS.has(ext) ? "live_photo_video" : "live_photo_image";
 }
 
@@ -493,6 +493,9 @@ async function executeJob(state: BackupState, jobId: string, trigger: JobRunTrig
       const ext = path.extname(relativePath).toLowerCase();
       if (livePhotoAssetId) {
         copiedLivePhotoIds.add(livePhotoAssetId);
+        if (IMAGE_EXTENSIONS.has(ext)) {
+          photoCount += 1;
+        }
       } else if (VIDEO_EXTENSIONS.has(ext)) {
         videoCount += 1;
       } else if (IMAGE_EXTENSIONS.has(ext)) {
