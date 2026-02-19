@@ -1,7 +1,7 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { createReadStream } from "node:fs";
-import { mkdir, readdir, readFile, stat, statfs, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readdir, readFile, stat, statfs, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import Fastify, { type FastifyReply } from "fastify";
@@ -249,6 +249,41 @@ function resolvePathInStorage(storage: StorageTarget, inputPath?: string): strin
   }
 
   return targetPath;
+}
+
+function isSameOrSubPath(basePath: string, candidatePath: string): boolean {
+  const normalizedBase = path.resolve(basePath);
+  const normalizedCandidate = path.resolve(candidatePath);
+  return normalizedCandidate === normalizedBase || normalizedCandidate.startsWith(`${normalizedBase}${path.sep}`);
+}
+
+function hasOverlappingPaths(sourceRoot: string, destinationRoot: string): boolean {
+  return isSameOrSubPath(sourceRoot, destinationRoot) || isSameOrSubPath(destinationRoot, sourceRoot);
+}
+
+function validateJobPathSafety(state: BackupState, body: Omit<BackupJob, "id">): string | null {
+  const sourceStorage = state.storages.find((item) => item.id === body.sourceTargetId);
+  const destinationStorage = state.storages.find((item) => item.id === body.destinationTargetId);
+  if (!sourceStorage || !destinationStorage) {
+    return "Storage target for this job is missing";
+  }
+  if (!isLocalStorage(sourceStorage.type) || !isLocalStorage(destinationStorage.type)) {
+    return null;
+  }
+
+  let sourceRoot = "";
+  let destinationRoot = "";
+  try {
+    sourceRoot = resolvePathInStorage(sourceStorage, body.sourcePath);
+    destinationRoot = resolvePathInStorage(destinationStorage, body.destinationPath);
+  } catch (error) {
+    return (error as Error).message;
+  }
+
+  if (hasOverlappingPaths(sourceRoot, destinationRoot)) {
+    return "Source path and destination path cannot overlap";
+  }
+  return null;
 }
 
 const IMAGE_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".heic", ".webp", ".gif"]);
@@ -639,6 +674,9 @@ async function executeJob(state: BackupState, jobId: string, trigger: JobRunTrig
 
   const sourceRoot = resolvePathInStorage(sourceStorage, job.sourcePath);
   const destinationRoot = resolvePathInStorage(destinationStorage, job.destinationPath);
+  if (hasOverlappingPaths(sourceRoot, destinationRoot)) {
+    throw new Error("Source path and destination path cannot overlap");
+  }
   const startedAt = new Date().toISOString();
   const sourceFiles = await collectMediaFiles(sourceRoot);
   const relativePaths = sourceFiles.map((fullPath) => toPosixPath(path.relative(sourceRoot, fullPath)));
@@ -703,11 +741,15 @@ async function executeJob(state: BackupState, jobId: string, trigger: JobRunTrig
         continue;
       }
 
-      const sourceBlob = await readFile(sourceFile);
-      const plainContent = sourceStorage.encrypted ? encryption.decrypt(sourceBlob) : sourceBlob;
-      const output = destinationStorage.encrypted ? encryption.encrypt(plainContent) : plainContent;
       await mkdir(path.dirname(destinationFile), { recursive: true });
-      await writeFile(destinationFile, output);
+      if (!sourceStorage.encrypted && !destinationStorage.encrypted) {
+        await copyFile(sourceFile, destinationFile);
+      } else {
+        const sourceBlob = await readFile(sourceFile);
+        const plainContent = sourceStorage.encrypted ? encryption.decrypt(sourceBlob) : sourceBlob;
+        const output = destinationStorage.encrypted ? encryption.encrypt(plainContent) : plainContent;
+        await writeFile(destinationFile, output);
+      }
       const nextAsset: BackupAsset = {
         id: existing?.id ?? `asset_${randomUUID()}`,
         name: relativePath,
@@ -857,7 +899,12 @@ function resolveWatchSourceRoot(state: BackupState, job: BackupJob): string | nu
   }
 
   try {
-    return resolvePathInStorage(sourceStorage, job.sourcePath);
+    const sourceRoot = resolvePathInStorage(sourceStorage, job.sourcePath);
+    const destinationRoot = resolvePathInStorage(destinationStorage, job.destinationPath);
+    if (hasOverlappingPaths(sourceRoot, destinationRoot)) {
+      return null;
+    }
+    return sourceRoot;
   } catch {
     return null;
   }
@@ -1559,9 +1606,13 @@ app.get("/api/jobs", async () => {
   return { items: state.jobs };
 });
 
-app.post<{ Body: Omit<BackupJob, "id"> }>("/api/jobs", async (req) => {
+app.post<{ Body: Omit<BackupJob, "id"> }>("/api/jobs", async (req, reply) => {
   const state = await stateRepo.loadState();
   const body = jobCreateSchema.parse(req.body);
+  const pathSafetyError = validateJobPathSafety(state, body);
+  if (pathSafetyError) {
+    return reply.code(400).send({ message: pathSafetyError });
+  }
   const item: BackupJob = { id: `job_${randomUUID()}`, ...body };
   state.jobs.push(item);
   await stateRepo.saveState(state);
@@ -1572,6 +1623,10 @@ app.post<{ Body: Omit<BackupJob, "id"> }>("/api/jobs", async (req) => {
 app.put<{ Params: { jobId: string }; Body: Omit<BackupJob, "id"> }>("/api/jobs/:jobId", async (req, reply) => {
   const state = await stateRepo.loadState();
   const body = jobCreateSchema.parse(req.body);
+  const pathSafetyError = validateJobPathSafety(state, body);
+  if (pathSafetyError) {
+    return reply.code(400).send({ message: pathSafetyError });
+  }
   const idx = state.jobs.findIndex((j) => j.id === req.params.jobId);
   if (idx < 0) {
     return reply.code(404).send({ message: "Job not found" });
