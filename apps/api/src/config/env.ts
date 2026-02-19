@@ -29,7 +29,7 @@ const schema = z.object({
   WATCH_SETTLE_DELAY_MS: z.coerce.number().int().min(1000).default(120000),
   WATCH_BATCH_MAX_WAIT_MS: z.coerce.number().int().min(1000).default(600000),
   AUTH_SESSION_TTL_HOURS: z.coerce.number().int().positive().default(168),
-  APP_VERSION: z.string().default("0.1.2"),
+  APP_VERSION: z.string().default("0.1.3"),
   VERSION_CHECK_REPO: z.string().default("DzAvril/PhotoArk"),
   VERSION_CHECK_TIMEOUT_MS: z.coerce.number().int().positive().default(3500),
   GITHUB_TOKEN: z.string().optional(),
