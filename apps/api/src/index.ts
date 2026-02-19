@@ -1,7 +1,7 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { createReadStream } from "node:fs";
-import { copyFile, mkdir, readdir, readFile, stat, statfs, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readdir, readFile, stat, statfs, utimes } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import Fastify, { type FastifyReply } from "fastify";
@@ -744,12 +744,14 @@ async function executeJob(state: BackupState, jobId: string, trigger: JobRunTrig
       await mkdir(path.dirname(destinationFile), { recursive: true });
       if (!sourceStorage.encrypted && !destinationStorage.encrypted) {
         await copyFile(sourceFile, destinationFile);
+      } else if (!sourceStorage.encrypted && destinationStorage.encrypted) {
+        await encryption.encryptFile(sourceFile, destinationFile);
+      } else if (sourceStorage.encrypted && !destinationStorage.encrypted) {
+        await encryption.decryptFile(sourceFile, destinationFile);
       } else {
-        const sourceBlob = await readFile(sourceFile);
-        const plainContent = sourceStorage.encrypted ? encryption.decrypt(sourceBlob) : sourceBlob;
-        const output = destinationStorage.encrypted ? encryption.encrypt(plainContent) : plainContent;
-        await writeFile(destinationFile, output);
+        await encryption.reencryptFile(sourceFile, destinationFile);
       }
+      await utimes(destinationFile, sourceStat.atime, sourceStat.mtime).catch(() => undefined);
       const nextAsset: BackupAsset = {
         id: existing?.id ?? `asset_${randomUUID()}`,
         name: relativePath,

@@ -158,12 +158,17 @@ docker compose up -d --build app
 
 ## 加密机制与避坑
 - 加密算法：AES-256-GCM，每个文件独立随机 IV。
-- 新格式封装：`[MAGIC:PARK][VER:1][KEY_ID(8)][IV(12)][TAG(16)][CIPHERTEXT]`。
-- 兼容旧格式：仍可读取历史的 `[IV][TAG][CIPHERTEXT]` 文件。
+- 当前写入格式（流式）：`[MAGIC:PARK][VER:2][KEY_ID(8)][IV(12)][CIPHERTEXT][TAG(16)]`。
+- 兼容读取历史格式：
+  - `VER:1`：`[MAGIC:PARK][VER:1][KEY_ID(8)][IV(12)][TAG(16)][CIPHERTEXT]`
+  - 旧格式：`[IV][TAG][CIPHERTEXT]`
 - 任务同步策略：
   - 源存储加密：先解密为明文
   - 目标存储加密：再加密后写入
   - 目标存储不加密：写入明文
+- 文件元数据说明：
+  - 文件内容按字节还原，EXIF（拍摄时间、机型、地理信息等）会保留
+  - 同步时会尽量保留文件系统时间戳（atime/mtime）
 - WebUI 预览：
   - 存储媒体预览与备份预览均支持加密文件
   - 解密仅在 API 内存中进行，不写临时明文文件
