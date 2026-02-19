@@ -96,8 +96,8 @@ export function BackupsPage() {
   return (
     <section className="space-y-3">
       <div className="mp-panel p-4">
-        <h2 className="mp-section-title">备份历史</h2>
-        <p className="mt-1 text-xs mp-muted">每次任务执行都会在这里生成一条记录</p>
+        <h2 className="mp-section-title">记录</h2>
+        <p className="mt-1 text-xs mp-muted">每次任务执行都会生成一条执行记录</p>
         {error ? <p className="mp-error mt-3">{error}</p> : null}
       </div>
 

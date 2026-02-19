@@ -5,10 +5,8 @@ import type { VersionInfo } from "../types/api";
 
 const tabs = [
   { to: "/", label: "总览", short: "总" },
-  { to: "/storages", label: "存储", short: "存" },
-  { to: "/jobs", label: "任务", short: "任" },
   { to: "/media", label: "媒体", short: "媒" },
-  { to: "/backups", label: "备份", short: "备" },
+  { to: "/records", label: "记录", short: "记" },
   { to: "/settings", label: "配置", short: "配" }
 ];
 
@@ -99,7 +97,7 @@ export function AppShell() {
 
       <nav className="fixed inset-x-3 bottom-3 z-50 md:hidden">
         <div className="mp-panel px-2 py-1.5">
-          <ul className="grid grid-cols-6 gap-1">
+          <ul className="grid grid-cols-4 gap-1">
             {tabs.map((tab) => (
               <li key={tab.to}>
                 <NavLink
