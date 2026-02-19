@@ -84,6 +84,7 @@ function getFocusableElements(container: HTMLElement): HTMLElement[] {
 
 function MediaPane({ storages }: MediaPaneProps) {
   const [storageId, setStorageId] = useLocalStorageState("ark-last-media-storage-id", "");
+  const [thumbSize, setThumbSize] = useLocalStorageState("ark-media-thumb-size", 170);
   const [media, setMedia] = useState<MediaBrowseResult | null>(null);
   const [kindFilter, setKindFilter] = useState<"all" | "image" | "video" | "live">("all");
   const [error, setError] = useState("");
@@ -249,8 +250,13 @@ function MediaPane({ storages }: MediaPaneProps) {
 
   useEffect(() => () => clearLivePressTimer(), []);
 
+  const normalizedThumbSize = Math.max(110, Math.min(260, Number(thumbSize) || 170));
+  const mediaGridStyle = {
+    gridTemplateColumns: `repeat(auto-fill, minmax(${normalizedThumbSize}px, 1fr))`
+  };
+
   return (
-    <article className="mp-panel p-4">
+    <article className="mp-panel flex min-h-[calc(100vh-12rem)] flex-col p-4">
       <h3 className="text-base font-semibold">存储媒体</h3>
       {error ? <p className="mp-error mt-2">{error}</p> : null}
 
@@ -275,18 +281,34 @@ function MediaPane({ storages }: MediaPaneProps) {
 
       </div>
 
-      <div className="mt-3 max-h-[28rem] overflow-auto rounded-lg border border-[var(--ark-line)] p-2">
-        <div className="mb-2 flex items-center justify-between gap-2">
-          <div className="flex gap-1 text-sm">
+      <div className="mt-3 flex min-h-0 flex-1 flex-col rounded-lg border border-[var(--ark-line)] p-2">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap gap-1 text-sm">
             <button type="button" className={`mp-btn ${kindFilter === "all" ? "mp-btn-primary" : ""}`} onClick={() => setKindFilter("all")}>全部</button>
             <button type="button" className={`mp-btn ${kindFilter === "image" ? "mp-btn-primary" : ""}`} onClick={() => setKindFilter("image")}>图片</button>
             <button type="button" className={`mp-btn ${kindFilter === "video" ? "mp-btn-primary" : ""}`} onClick={() => setKindFilter("video")}>视频</button>
             <button type="button" className={`mp-btn ${kindFilter === "live" ? "mp-btn-primary" : ""}`} onClick={() => setKindFilter("live")}>Live</button>
           </div>
-          <span className="text-sm mp-muted">{displayItems.length} 项</span>
+          <div className="flex items-center gap-2 text-sm">
+            <span className="text-sm mp-muted">{displayItems.length} 项</span>
+            <label htmlFor="media-zoom" className="text-xs mp-muted">缩放</label>
+            <input
+              id="media-zoom"
+              type="range"
+              min={110}
+              max={260}
+              step={10}
+              value={normalizedThumbSize}
+              onChange={(e) => setThumbSize(Number(e.target.value))}
+              className="h-2 w-28 cursor-pointer accent-[var(--ark-primary)]"
+            />
+            <button type="button" className="mp-btn px-2" onClick={() => setThumbSize(140)}>紧凑</button>
+            <button type="button" className="mp-btn px-2" onClick={() => setThumbSize(210)}>放大</button>
+          </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-2 md:grid-cols-3">
+        <div className="min-h-0 flex-1 overflow-auto">
+          <div className="grid gap-2" style={mediaGridStyle}>
           {selectedStorage && displayItems.map((item) => {
             const streamUrl = getStorageMediaStreamUrl(selectedStorage.id, item.file.path);
             const isLivePhoto = Boolean(item.livePair);
@@ -324,13 +346,14 @@ function MediaPane({ storages }: MediaPaneProps) {
               </button>
             );
           })}
-        </div>
+          </div>
 
-        {!displayItems.length ? (
-          <p className="py-4 text-center text-sm mp-muted">
-            {selectedStorage ? "该位置暂无可浏览媒体，可尝试切换筛选类型。" : "请先选择存储后再浏览媒体。"}
-          </p>
-        ) : null}
+          {!displayItems.length ? (
+            <p className="py-4 text-center text-sm mp-muted">
+              {selectedStorage ? "该位置暂无可浏览媒体，可尝试切换筛选类型。" : "请先选择存储后再浏览媒体。"}
+            </p>
+          ) : null}
+        </div>
       </div>
 
       {selectedStorage && activeItem ? (
