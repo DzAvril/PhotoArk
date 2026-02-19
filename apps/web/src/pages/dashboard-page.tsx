@@ -101,22 +101,10 @@ export function DashboardPage() {
       </motion.div>
 
       <motion.article
-        className="mp-panel mp-panel-soft p-4"
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.05, duration: 0.2, ease: "easeOut" }}
-      >
-        <h3 className="text-base font-semibold">系统状态</h3>
-        <p className="mt-2 text-sm mp-muted">
-          当前共有 {metrics.storageTargets} 个目标存储，{metrics.backupJobs} 个备份任务，其中 {metrics.encryptedAssets} 个对象已启用加密。
-        </p>
-      </motion.article>
-
-      <motion.article
         className="mp-panel p-4"
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.1, duration: 0.2, ease: "easeOut" }}
+        transition={{ delay: 0.05, duration: 0.2, ease: "easeOut" }}
       >
         <h3 className="text-base font-semibold">存储盘容量</h3>
         <div className="mt-3 space-y-3">
