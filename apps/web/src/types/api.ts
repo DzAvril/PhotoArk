@@ -35,6 +35,19 @@ export interface StorageTarget {
   encrypted: boolean;
 }
 
+export interface StorageCapacityItem {
+  storageId: string;
+  storageName: string;
+  storageType: StorageTarget["type"];
+  basePath: string;
+  available: boolean;
+  reason: string | null;
+  totalBytes: number | null;
+  usedBytes: number | null;
+  freeBytes: number | null;
+  usedPercent: number | null;
+}
+
 export interface BackupJob {
   id: string;
   name: string;

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { createReadStream } from "node:fs";
-import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, stat, statfs, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import Fastify, { type FastifyReply } from "fastify";
@@ -202,6 +202,50 @@ function resolveMimeType(filePath: string): string {
   return MIME_BY_EXT[ext] ?? "application/octet-stream";
 }
 
+function buildUnavailableStorageCapacityItem(storage: StorageTarget, reason: string): StorageCapacityItem {
+  return {
+    storageId: storage.id,
+    storageName: storage.name,
+    storageType: storage.type,
+    basePath: storage.basePath,
+    available: false,
+    reason,
+    totalBytes: null,
+    usedBytes: null,
+    freeBytes: null,
+    usedPercent: null
+  };
+}
+
+async function buildStorageCapacityItem(storage: StorageTarget): Promise<StorageCapacityItem> {
+  if (!isLocalStorage(storage.type)) {
+    return buildUnavailableStorageCapacityItem(storage, "云存储暂不支持容量读取");
+  }
+
+  try {
+    const fsStats = await statfs(path.resolve(storage.basePath));
+    const totalBytes = fsStats.blocks * fsStats.bsize;
+    const freeBytes = fsStats.bavail * fsStats.bsize;
+    const usedBytes = Math.max(0, totalBytes - freeBytes);
+    const usedPercent = totalBytes > 0 ? Number(((usedBytes / totalBytes) * 100).toFixed(1)) : 0;
+
+    return {
+      storageId: storage.id,
+      storageName: storage.name,
+      storageType: storage.type,
+      basePath: storage.basePath,
+      available: true,
+      reason: null,
+      totalBytes,
+      usedBytes,
+      freeBytes,
+      usedPercent
+    };
+  } catch (error) {
+    return buildUnavailableStorageCapacityItem(storage, `读取失败: ${(error as Error).message}`);
+  }
+}
+
 function sendBufferWithRange(reply: FastifyReply, plain: Buffer, mimeType: string, rangeHeader: string | undefined) {
   const parsed = parseByteRange(rangeHeader, plain.length);
   if (parsed.error) {
@@ -276,6 +320,19 @@ let runExecutionQueue: Promise<unknown> = Promise.resolve();
 let watcherReconcileTimer: NodeJS.Timeout | null = null;
 
 type VersionSource = "github_release" | "github_tag" | "unavailable";
+
+type StorageCapacityItem = {
+  storageId: string;
+  storageName: string;
+  storageType: StorageTarget["type"];
+  basePath: string;
+  available: boolean;
+  reason: string | null;
+  totalBytes: number | null;
+  usedBytes: number | null;
+  freeBytes: number | null;
+  usedPercent: number | null;
+};
 
 function normalizeVersion(input: string): string {
   return input.trim().replace(/^v/i, "");
@@ -917,6 +974,12 @@ app.post("/api/settings/telegram/test", async (_req, reply) => {
 app.get("/api/storages", async () => {
   const state = await stateRepo.loadState();
   return { items: state.storages };
+});
+
+app.get("/api/storages/capacity", async () => {
+  const state = await stateRepo.loadState();
+  const items = await Promise.all(state.storages.map((storage) => buildStorageCapacityItem(storage)));
+  return { items };
 });
 
 app.get<{ Querystring: { path?: string } }>("/api/fs/directories", async (req, reply) => {

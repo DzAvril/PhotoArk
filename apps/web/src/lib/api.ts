@@ -10,6 +10,7 @@ import type {
   Metrics,
   PreviewResult,
   PreviewTokenResult,
+  StorageCapacityItem,
   StorageTarget,
   VersionInfo
 } from "../types/api";
@@ -68,6 +69,10 @@ export function sendTelegramTest() {
 
 export function getStorages() {
   return fetchJson<{ items: StorageTarget[] }>("/api/storages");
+}
+
+export function getStorageCapacities() {
+  return fetchJson<{ items: StorageCapacityItem[] }>("/api/storages/capacity");
 }
 
 export function browseDirectories(dirPath?: string) {
