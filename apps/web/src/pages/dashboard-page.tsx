@@ -121,11 +121,11 @@ export function DashboardPage() {
         <h3 className="text-base font-semibold">存储盘容量</h3>
         <div className="mt-3 space-y-3">
           {capacities.map((item) => (
-            <div key={item.storageId} className="rounded-xl border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-3">
+            <div key={item.id} className="rounded-xl border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
-                  <p className="text-sm font-semibold">{item.storageName}</p>
-                  <p className="text-sm mp-muted">{item.storageType} · {item.basePath}</p>
+                  <p className="text-sm font-semibold break-all">{item.storageNames.join("、")}</p>
+                  <p className="text-sm mp-muted">{item.storageNames.length} 个配置存储</p>
                 </div>
                 {item.available ? (
                   <span className="text-sm">{item.usedPercent}% 已用</span>

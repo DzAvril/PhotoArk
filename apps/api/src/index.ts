@@ -202,12 +202,27 @@ function resolveMimeType(filePath: string): string {
   return MIME_BY_EXT[ext] ?? "application/octet-stream";
 }
 
-function buildUnavailableStorageCapacityItem(storage: StorageTarget, reason: string): StorageCapacityItem {
+type StorageCapacitySnapshot = {
+  storageId: string;
+  storageName: string;
+  groupKey: string;
+  available: boolean;
+  reason: string | null;
+  totalBytes: number | null;
+  usedBytes: number | null;
+  freeBytes: number | null;
+  usedPercent: number | null;
+};
+
+function buildUnavailableStorageCapacitySnapshot(
+  storage: StorageTarget,
+  reason: string,
+  groupKey = `storage:${storage.id}`
+): StorageCapacitySnapshot {
   return {
     storageId: storage.id,
     storageName: storage.name,
-    storageType: storage.type,
-    basePath: storage.basePath,
+    groupKey,
     available: false,
     reason,
     totalBytes: null,
@@ -217,13 +232,14 @@ function buildUnavailableStorageCapacityItem(storage: StorageTarget, reason: str
   };
 }
 
-async function buildStorageCapacityItem(storage: StorageTarget): Promise<StorageCapacityItem> {
+async function buildStorageCapacitySnapshot(storage: StorageTarget): Promise<StorageCapacitySnapshot> {
   if (!isLocalStorage(storage.type)) {
-    return buildUnavailableStorageCapacityItem(storage, "云存储暂不支持容量读取");
+    return buildUnavailableStorageCapacitySnapshot(storage, "云存储暂不支持容量读取");
   }
 
   try {
-    const fsStats = await statfs(path.resolve(storage.basePath));
+    const targetPath = path.resolve(storage.basePath);
+    const [pathStats, fsStats] = await Promise.all([stat(targetPath), statfs(targetPath)]);
     const totalBytes = fsStats.blocks * fsStats.bsize;
     const freeBytes = fsStats.bavail * fsStats.bsize;
     const usedBytes = Math.max(0, totalBytes - freeBytes);
@@ -232,8 +248,7 @@ async function buildStorageCapacityItem(storage: StorageTarget): Promise<Storage
     return {
       storageId: storage.id,
       storageName: storage.name,
-      storageType: storage.type,
-      basePath: storage.basePath,
+      groupKey: `dev:${pathStats.dev}`,
       available: true,
       reason: null,
       totalBytes,
@@ -242,8 +257,53 @@ async function buildStorageCapacityItem(storage: StorageTarget): Promise<Storage
       usedPercent
     };
   } catch (error) {
-    return buildUnavailableStorageCapacityItem(storage, `读取失败: ${(error as Error).message}`);
+    return buildUnavailableStorageCapacitySnapshot(storage, `读取失败: ${(error as Error).message}`);
   }
+}
+
+function mergeStorageCapacitySnapshots(snapshots: StorageCapacitySnapshot[]): StorageCapacityItem[] {
+  const groups = new Map<string, StorageCapacityItem>();
+
+  for (const snapshot of snapshots) {
+    const existing = groups.get(snapshot.groupKey);
+    if (!existing) {
+      groups.set(snapshot.groupKey, {
+        id: snapshot.groupKey,
+        storageIds: [snapshot.storageId],
+        storageNames: [snapshot.storageName],
+        available: snapshot.available,
+        reason: snapshot.reason,
+        totalBytes: snapshot.totalBytes,
+        usedBytes: snapshot.usedBytes,
+        freeBytes: snapshot.freeBytes,
+        usedPercent: snapshot.usedPercent
+      });
+      continue;
+    }
+
+    existing.storageIds.push(snapshot.storageId);
+    existing.storageNames.push(snapshot.storageName);
+    if (!existing.available && snapshot.available) {
+      existing.available = true;
+      existing.reason = null;
+      existing.totalBytes = snapshot.totalBytes;
+      existing.usedBytes = snapshot.usedBytes;
+      existing.freeBytes = snapshot.freeBytes;
+      existing.usedPercent = snapshot.usedPercent;
+    }
+  }
+
+  const items = [...groups.values()].map((item) => ({
+    ...item,
+    storageNames: [...item.storageNames].sort((a, b) => a.localeCompare(b, "zh-CN")),
+    storageIds: [...item.storageIds].sort((a, b) => a.localeCompare(b))
+  }));
+
+  items.sort((a, b) => {
+    if (a.available !== b.available) return a.available ? -1 : 1;
+    return (a.storageNames[0] ?? "").localeCompare(b.storageNames[0] ?? "", "zh-CN");
+  });
+  return items;
 }
 
 function sendBufferWithRange(reply: FastifyReply, plain: Buffer, mimeType: string, rangeHeader: string | undefined) {
@@ -322,10 +382,9 @@ let watcherReconcileTimer: NodeJS.Timeout | null = null;
 type VersionSource = "github_release" | "github_tag" | "unavailable";
 
 type StorageCapacityItem = {
-  storageId: string;
-  storageName: string;
-  storageType: StorageTarget["type"];
-  basePath: string;
+  id: string;
+  storageIds: string[];
+  storageNames: string[];
   available: boolean;
   reason: string | null;
   totalBytes: number | null;
@@ -978,7 +1037,8 @@ app.get("/api/storages", async () => {
 
 app.get("/api/storages/capacity", async () => {
   const state = await stateRepo.loadState();
-  const items = await Promise.all(state.storages.map((storage) => buildStorageCapacityItem(storage)));
+  const snapshots = await Promise.all(state.storages.map((storage) => buildStorageCapacitySnapshot(storage)));
+  const items = mergeStorageCapacitySnapshots(snapshots);
   return { items };
 });
 

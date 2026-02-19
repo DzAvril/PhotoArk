@@ -36,10 +36,9 @@ export interface StorageTarget {
 }
 
 export interface StorageCapacityItem {
-  storageId: string;
-  storageName: string;
-  storageType: StorageTarget["type"];
-  basePath: string;
+  id: string;
+  storageIds: string[];
+  storageNames: string[];
   available: boolean;
   reason: string | null;
   totalBytes: number | null;
