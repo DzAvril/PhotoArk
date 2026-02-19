@@ -273,10 +273,6 @@ function MediaPane({ storages }: MediaPaneProps) {
           {storages.map((s) => <option key={s.id} value={s.id}>{s.name} ({s.type})</option>)}
         </select>
 
-        <div className="rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-2 text-sm">
-          <div className="mp-muted">路径</div>
-          <div className="mt-1 break-all">{selectedStorage?.basePath || "请先选择存储"}</div>
-        </div>
       </div>
 
       <div className="mt-3 max-h-[28rem] overflow-auto rounded-lg border border-[var(--ark-line)] p-2">
@@ -451,12 +447,7 @@ export function MediaPage() {
 
   return (
     <section className="space-y-3">
-      <div className="mp-panel mp-panel-soft p-4">
-        <h2 className="mp-section-title">媒体预览</h2>
-        <p className="mt-1 text-sm mp-muted">选择存储后可直接查看该存储下的图片和视频</p>
-        {error ? <p className="mp-error mt-2">{error}</p> : null}
-      </div>
-
+      {error ? <p className="mp-error">{error}</p> : null}
       <MediaPane storages={storages} />
     </section>
   );

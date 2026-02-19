@@ -354,11 +354,6 @@ export function JobsPage() {
               </select>
             </div>
 
-            <div className="rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-2 text-sm sm:col-span-2">
-              <p>源路径：{sourceStorage?.basePath || "-"}</p>
-              <p className="mt-1">目标路径：{destinationStorage?.basePath || "-"}</p>
-            </div>
-
             <div className="space-y-1">
               <label htmlFor="job-schedule" className="text-sm font-medium">
                 cron 表达式
