@@ -142,7 +142,8 @@ const settingsSchema = z.object({
   telegram: z.object({
     enabled: z.boolean(),
     botToken: z.string().trim(),
-    chatId: z.string().trim()
+    chatId: z.string().trim(),
+    proxyUrl: z.string().trim()
   })
 });
 
@@ -151,7 +152,8 @@ function normalizeSettings(input: Partial<AppSettings> | undefined): AppSettings
     telegram: {
       enabled: Boolean(input?.telegram?.enabled),
       botToken: input?.telegram?.botToken?.trim() ?? "",
-      chatId: input?.telegram?.chatId?.trim() ?? ""
+      chatId: input?.telegram?.chatId?.trim() ?? "",
+      proxyUrl: input?.telegram?.proxyUrl?.trim() ?? ""
     }
   };
 }
@@ -822,7 +824,8 @@ async function sendTelegramRunSummaryIfEnabled(state: BackupState, run: JobRun):
 
   const telegram = new TelegramService({
     botToken: settings.telegram.botToken,
-    chatId: settings.telegram.chatId
+    chatId: settings.telegram.chatId,
+    proxyUrl: settings.telegram.proxyUrl
   });
   await telegram.send(buildRunTelegramSummary(state, run));
 }
@@ -1320,7 +1323,8 @@ app.post("/api/settings/telegram/test", async (_req, reply) => {
   try {
     const telegram = new TelegramService({
       botToken: settings.telegram.botToken,
-      chatId: settings.telegram.chatId
+      chatId: settings.telegram.chatId,
+      proxyUrl: settings.telegram.proxyUrl
     });
     await telegram.send(
       `PhotoArk 测试通知\n时间: ${new Date().toLocaleString("zh-CN", { hour12: false })}\n状态: Telegram 配置可用`

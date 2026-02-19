@@ -7,7 +7,8 @@ function createDefaultSettings(): AppSettings {
     telegram: {
       enabled: false,
       botToken: "",
-      chatId: ""
+      chatId: "",
+      proxyUrl: ""
     }
   };
 }
@@ -41,7 +42,8 @@ export class FileStateRepository {
           telegram: {
             enabled: parsedTelegram?.enabled ?? defaultState.settings.telegram.enabled,
             botToken: parsedTelegram?.botToken ?? defaultState.settings.telegram.botToken,
-            chatId: parsedTelegram?.chatId ?? defaultState.settings.telegram.chatId
+            chatId: parsedTelegram?.chatId ?? defaultState.settings.telegram.chatId,
+            proxyUrl: parsedTelegram?.proxyUrl ?? defaultState.settings.telegram.proxyUrl
           }
         }
       };

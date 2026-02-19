@@ -9,6 +9,7 @@ export interface TelegramSettings {
   enabled: boolean;
   botToken: string;
   chatId: string;
+  proxyUrl: string;
 }
 
 export interface AppSettings {

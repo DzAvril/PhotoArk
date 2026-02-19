@@ -6,7 +6,8 @@ const defaultSettings: AppSettings = {
   telegram: {
     enabled: false,
     botToken: "",
-    chatId: ""
+    chatId: "",
+    proxyUrl: ""
   }
 };
 
@@ -141,6 +142,29 @@ export function SettingsPage() {
             />
             <p className="text-sm mp-muted">填写接收通知的个人或群组 Chat ID。</p>
           </div>
+        </div>
+
+        <div className="space-y-1">
+          <label htmlFor="telegram-proxy-url" className="text-sm font-medium">
+            代理地址（可选）
+          </label>
+          <input
+            id="telegram-proxy-url"
+            className="mp-input"
+            autoComplete="off"
+            placeholder="例如 http://127.0.0.1:7890"
+            value={form.telegram.proxyUrl}
+            disabled={!form.telegram.enabled}
+            onChange={(e) =>
+              setForm((prev) => ({
+                ...prev,
+                telegram: { ...prev.telegram, proxyUrl: e.target.value }
+              }))
+            }
+          />
+          <p className="text-sm mp-muted">
+            当 NAS 无法直连 Telegram 时填写 HTTP/HTTPS 代理地址；留空则直接连接 Telegram API。
+          </p>
         </div>
 
         <div className="flex flex-wrap gap-2">

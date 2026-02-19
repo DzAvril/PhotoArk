@@ -128,6 +128,7 @@ docker compose up -d --build app
 - 路径选择问题：路径组件支持继续进入下级目录，只有点击“选中当前目录”才会确认。
 - 实时监听未触发：先确认任务已勾选“实时监听 + 启用”；若 NAS 挂载盘事件不稳定，可将 `WATCH_USE_POLLING=true` 后重启 API。
 - 实时监听触发太频繁：可增大 `WATCH_SETTLE_DELAY_MS`；若长时间连续写入导致迟迟不触发，可减小 `WATCH_BATCH_MAX_WAIT_MS`。
+- Telegram 通知发送失败：可在“配置 -> 通知配置”里设置“代理地址（可选）”，格式示例 `http://127.0.0.1:7890`，留空表示直连。
 
 ## WebUI 路由与联调
 - 路由：`/`（总览）、`/storages`、`/jobs`、`/media`、`/backups`
