@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { createReadStream } from "node:fs";
 import { mkdir, readdir, readFile, stat, statfs, writeFile } from "node:fs/promises";
@@ -14,8 +14,17 @@ import { env } from "./config/env.js";
 import { EncryptionService } from "./modules/crypto/encryption-service.js";
 import { LivePhotoService } from "./modules/livephoto/live-photo-service.js";
 import { TelegramService } from "./modules/notification/telegram-service.js";
+import { PasswordService } from "./modules/auth/password-service.js";
 import { FileStateRepository } from "./modules/backup/repository/file-state-repository.js";
-import type { AppSettings, BackupAsset, BackupState, JobRun, JobRunTrigger } from "./modules/backup/repository/types.js";
+import type {
+  AppSettings,
+  AuthSession,
+  AuthUser,
+  BackupAsset,
+  BackupState,
+  JobRun,
+  JobRunTrigger
+} from "./modules/backup/repository/types.js";
 
 const app = Fastify({ logger: true });
 await app.register(cors, { origin: true });
@@ -71,11 +80,35 @@ const encryption = new EncryptionService(
   parseLegacyKeys(env.LEGACY_MASTER_KEYS_BASE64)
 );
 const livePhoto = new LivePhotoService();
+const passwordService = new PasswordService();
 const stateRepo = new FileStateRepository(env.BACKUP_STATE_FILE);
 
 const previewTokens = new Map<string, { assetId: string; expiresAt: number }>();
 const previewTickets = new Map<string, { assetId: string; expiresAt: number }>();
 const PREVIEW_TOKEN_TTL_MS = 60_000;
+const usernamePattern = /^[A-Za-z0-9._-]{3,32}$/;
+
+declare module "fastify" {
+  interface FastifyRequest {
+    authUser?: AuthUser;
+    authTokenHash?: string;
+  }
+}
+
+const authBootstrapSchema = z.object({
+  username: z
+    .string()
+    .trim()
+    .regex(usernamePattern, "Username must be 3-32 chars and contain only letters, numbers, . _ -"),
+  password: z.string().min(8).max(128)
+});
+
+const authLoginSchema = authBootstrapSchema;
+
+const authUpdatePasswordSchema = z.object({
+  currentPassword: z.string().min(1),
+  newPassword: z.string().min(8).max(128)
+});
 
 const storageCreateSchema = z.object({
   name: z.string().min(1),
@@ -122,6 +155,71 @@ function normalizeSettings(input: Partial<AppSettings> | undefined): AppSettings
     }
   };
 }
+
+type PublicAuthUser = Pick<AuthUser, "id" | "username" | "role" | "createdAt" | "updatedAt" | "lastLoginAt">;
+
+function toPublicAuthUser(user: AuthUser): PublicAuthUser {
+  return {
+    id: user.id,
+    username: user.username,
+    role: user.role,
+    createdAt: user.createdAt,
+    updatedAt: user.updatedAt,
+    lastLoginAt: user.lastLoginAt
+  };
+}
+
+function normalizeUsername(input: string): string {
+  return input.trim().toLowerCase();
+}
+
+function hashAccessToken(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
+}
+
+function issueSession(state: BackupState, userId: string): { session: AuthSession; token: string } {
+  const nowMs = Date.now();
+  const createdAt = new Date(nowMs).toISOString();
+  const expiresAt = new Date(nowMs + env.AUTH_SESSION_TTL_HOURS * 60 * 60 * 1000).toISOString();
+  const token = randomBytes(32).toString("base64url");
+  const tokenHash = hashAccessToken(token);
+
+  const session: AuthSession = {
+    id: `sess_${randomUUID()}`,
+    userId,
+    tokenHash,
+    createdAt,
+    expiresAt
+  };
+  state.sessions.push(session);
+  return { session, token };
+}
+
+function pruneExpiredSessions(state: BackupState): boolean {
+  const now = Date.now();
+  const before = state.sessions.length;
+  state.sessions = state.sessions.filter((session) => {
+    const expiresAtMs = Date.parse(session.expiresAt);
+    return Number.isFinite(expiresAtMs) && expiresAtMs > now;
+  });
+  return state.sessions.length !== before;
+}
+
+function extractBearerToken(headerValue: string | undefined): string | null {
+  if (!headerValue) return null;
+  const [scheme, token] = headerValue.split(" ");
+  if ((scheme ?? "").toLowerCase() !== "bearer" || !token) {
+    return null;
+  }
+  return token.trim();
+}
+
+const publicApiRoutes = new Set<string>([
+  "/api/version",
+  "/api/auth/status",
+  "/api/auth/bootstrap",
+  "/api/auth/login"
+]);
 
 function metricSummary(state: BackupState) {
   const encryptedAssets = state.assets.filter((a) => a.encrypted).length;
@@ -989,6 +1087,56 @@ async function reloadAndReconcileWatchers() {
   await reconcileJobWatchers(state);
 }
 
+app.addHook("onRequest", async (req, reply) => {
+  const rawUrl = req.raw.url ?? "";
+  const pathname = rawUrl.split("?")[0];
+  if (!pathname.startsWith("/api/")) {
+    return;
+  }
+  if (publicApiRoutes.has(pathname)) {
+    return;
+  }
+
+  const state = await stateRepo.loadState();
+  const cleaned = pruneExpiredSessions(state);
+  if (cleaned) {
+    await stateRepo.saveState(state);
+  }
+
+  if (!state.users.length) {
+    return reply.code(428).send({
+      message: "User system is not initialized. Please create the first admin account.",
+      code: "AUTH_BOOTSTRAP_REQUIRED"
+    });
+  }
+
+  let token = extractBearerToken(req.headers.authorization);
+  if (!token && req.method === "GET") {
+    try {
+      const requestUrl = new URL(rawUrl, "http://photoark.local");
+      token = requestUrl.searchParams.get("access_token")?.trim() || null;
+    } catch {
+      token = null;
+    }
+  }
+  if (!token) {
+    return reply.code(401).send({ message: "Authentication required", code: "AUTH_REQUIRED" });
+  }
+  const tokenHash = hashAccessToken(token);
+  const session = state.sessions.find((item) => item.tokenHash === tokenHash);
+  if (!session) {
+    return reply.code(401).send({ message: "Session is invalid or expired", code: "AUTH_INVALID_TOKEN" });
+  }
+
+  const user = state.users.find((item) => item.id === session.userId);
+  if (!user) {
+    return reply.code(401).send({ message: "Session user not found", code: "AUTH_INVALID_USER" });
+  }
+
+  req.authUser = user;
+  req.authTokenHash = tokenHash;
+});
+
 app.get("/healthz", async () => ({ ok: true }));
 
 app.get("/api/metrics", async () => {
@@ -1025,6 +1173,129 @@ app.get("/api/version", async () => {
       error: (error as Error).message
     };
   }
+});
+
+app.get("/api/auth/status", async () => {
+  const state = await stateRepo.loadState();
+  const cleaned = pruneExpiredSessions(state);
+  if (cleaned) {
+    await stateRepo.saveState(state);
+  }
+  return {
+    enabled: true,
+    hasUsers: state.users.length > 0
+  };
+});
+
+app.post<{ Body: { username: string; password: string } }>("/api/auth/bootstrap", async (req, reply) => {
+  const state = await stateRepo.loadState();
+  if (state.users.length > 0) {
+    return reply.code(409).send({ message: "User system has already been initialized" });
+  }
+
+  const body = authBootstrapSchema.parse(req.body);
+  const now = new Date().toISOString();
+  const { saltHex, hashHex } = passwordService.hashPassword(body.password);
+  const user: AuthUser = {
+    id: `usr_${randomUUID()}`,
+    username: body.username.trim(),
+    role: "admin",
+    passwordSalt: saltHex,
+    passwordHash: hashHex,
+    createdAt: now,
+    updatedAt: now,
+    lastLoginAt: now
+  };
+
+  state.users = [user];
+  state.sessions = [];
+  const { session, token } = issueSession(state, user.id);
+  await stateRepo.saveState(state);
+
+  return {
+    user: toPublicAuthUser(user),
+    token,
+    expiresAt: session.expiresAt
+  };
+});
+
+app.post<{ Body: { username: string; password: string } }>("/api/auth/login", async (req, reply) => {
+  const state = await stateRepo.loadState();
+  if (!state.users.length) {
+    return reply.code(428).send({ message: "No users configured yet, please bootstrap first" });
+  }
+
+  const body = authLoginSchema.parse(req.body);
+  const normalizedInputUsername = normalizeUsername(body.username);
+  const user = state.users.find((item) => normalizeUsername(item.username) === normalizedInputUsername);
+  if (!user) {
+    return reply.code(401).send({ message: "Invalid username or password" });
+  }
+  const ok = passwordService.verifyPassword(body.password, user.passwordSalt, user.passwordHash);
+  if (!ok) {
+    return reply.code(401).send({ message: "Invalid username or password" });
+  }
+
+  const now = new Date().toISOString();
+  user.lastLoginAt = now;
+  user.updatedAt = now;
+  pruneExpiredSessions(state);
+  const { session, token } = issueSession(state, user.id);
+  await stateRepo.saveState(state);
+
+  return {
+    user: toPublicAuthUser(user),
+    token,
+    expiresAt: session.expiresAt
+  };
+});
+
+app.get("/api/auth/me", async (req, reply) => {
+  const authUser = req.authUser;
+  if (!authUser) {
+    return reply.code(401).send({ message: "Authentication required" });
+  }
+  return { user: toPublicAuthUser(authUser) };
+});
+
+app.post("/api/auth/logout", async (req, reply) => {
+  const authTokenHash = req.authTokenHash;
+  if (!authTokenHash) {
+    return reply.code(401).send({ message: "Authentication required" });
+  }
+  const state = await stateRepo.loadState();
+  const before = state.sessions.length;
+  state.sessions = state.sessions.filter((session) => session.tokenHash !== authTokenHash);
+  if (state.sessions.length !== before) {
+    await stateRepo.saveState(state);
+  }
+  return { ok: true };
+});
+
+app.put<{ Body: { currentPassword: string; newPassword: string } }>("/api/auth/password", async (req, reply) => {
+  const authUser = req.authUser;
+  if (!authUser) {
+    return reply.code(401).send({ message: "Authentication required" });
+  }
+  const state = await stateRepo.loadState();
+  const user = state.users.find((item) => item.id === authUser.id);
+  if (!user) {
+    return reply.code(404).send({ message: "User not found" });
+  }
+
+  const body = authUpdatePasswordSchema.parse(req.body);
+  const ok = passwordService.verifyPassword(body.currentPassword, user.passwordSalt, user.passwordHash);
+  if (!ok) {
+    return reply.code(400).send({ message: "Current password is incorrect" });
+  }
+
+  const { saltHex, hashHex } = passwordService.hashPassword(body.newPassword);
+  user.passwordSalt = saltHex;
+  user.passwordHash = hashHex;
+  user.updatedAt = new Date().toISOString();
+  state.sessions = state.sessions.filter((session) => session.userId !== user.id);
+  await stateRepo.saveState(state);
+  return { ok: true };
 });
 
 app.get("/api/settings", async () => {
@@ -1170,18 +1441,38 @@ app.get<{ Params: { storageId: string }; Querystring: { path?: string } }>(
     if (!entries) {
       return reply.code(404).send({ message: "Directory not found" });
     }
-    const files = entries
-      .filter((entry) => entry.isFile())
-      .map((entry) => {
-        const ext = path.extname(entry.name).toLowerCase();
-        const kind = IMAGE_EXTENSIONS.has(ext) ? "image" : VIDEO_EXTENSIONS.has(ext) ? "video" : "other";
-        return {
-          name: entry.name,
-          path: path.join(currentPath, entry.name),
-          kind
-        };
-      })
-      .filter((entry) => entry.kind !== "other");
+    const files = (
+      await Promise.all(
+        entries
+          .filter((entry) => entry.isFile())
+          .map(async (entry) => {
+            const ext = path.extname(entry.name).toLowerCase();
+            const kind = IMAGE_EXTENSIONS.has(ext) ? "image" : VIDEO_EXTENSIONS.has(ext) ? "video" : "other";
+            if (kind === "other") return null;
+
+            const fullPath = path.join(currentPath, entry.name);
+            const fileStat = await stat(fullPath).catch(() => null);
+            const modifiedAt = fileStat?.mtime?.toISOString() ?? null;
+            const capturedAt =
+              fileStat && Number.isFinite(fileStat.birthtimeMs) && fileStat.birthtimeMs > 0
+                ? fileStat.birthtime.toISOString()
+                : modifiedAt;
+
+            return {
+              name: entry.name,
+              path: fullPath,
+              kind,
+              sizeBytes: fileStat?.size ?? null,
+              modifiedAt,
+              capturedAt,
+              latitude: null,
+              longitude: null
+            };
+          })
+      )
+    )
+      .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))
+      .sort((a, b) => a.name.localeCompare(b.name));
 
     return {
       storageId: storage.id,

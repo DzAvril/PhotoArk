@@ -48,6 +48,7 @@ cp .env.example .env
 - `WATCH_RECONCILE_INTERVAL_MS`：监听器自愈重建间隔毫秒（默认 `30000`）
 - `WATCH_SETTLE_DELAY_MS`：监听到变更后静默多久再触发同步（默认 `120000`，即 2 分钟）
 - `WATCH_BATCH_MAX_WAIT_MS`：单个变更批次最长等待多久必须触发（默认 `600000`，即 10 分钟）
+- `AUTH_SESSION_TTL_HOURS`：登录会话有效期（小时，默认 `168`，即 7 天）
 
 生成主密钥示例：
 
@@ -80,6 +81,16 @@ npm run dev -w @photoark/web
 - WebUI: `http://localhost:5173`
 - API 健康检查: `http://localhost:8080/healthz`
 - 版本接口: `http://localhost:8080/api/version`
+
+### 3.1) 首次初始化管理员账号
+
+首次启动时系统没有用户，访问 WebUI 会进入初始化页：
+
+1. 输入管理员用户名（默认建议 `admin`）
+2. 输入密码（至少 8 位）
+3. 点击“创建管理员并登录”
+
+后续登录需使用该账号密码，所有 `/api/**` 业务接口都需要登录后访问。
 
 ### 4) 本地功能验证建议
 

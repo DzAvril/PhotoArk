@@ -17,7 +17,9 @@ const defaultState: BackupState = {
   jobs: [],
   assets: [],
   jobRuns: [],
-  settings: createDefaultSettings()
+  settings: createDefaultSettings(),
+  users: [],
+  sessions: []
 };
 
 export class FileStateRepository {
@@ -33,6 +35,8 @@ export class FileStateRepository {
         jobs: parsed.jobs ?? [],
         assets: parsed.assets ?? [],
         jobRuns: parsed.jobRuns ?? [],
+        users: parsed.users ?? [],
+        sessions: parsed.sessions ?? [],
         settings: {
           telegram: {
             enabled: parsedTelegram?.enabled ?? defaultState.settings.telegram.enabled,

@@ -15,6 +15,26 @@ export interface AppSettings {
   telegram: TelegramSettings;
 }
 
+export interface AuthUser {
+  id: string;
+  username: string;
+  role: "admin";
+  createdAt: string;
+  updatedAt: string;
+  lastLoginAt: string | null;
+}
+
+export interface AuthStatus {
+  enabled: true;
+  hasUsers: boolean;
+}
+
+export interface AuthResult {
+  user: AuthUser;
+  token: string;
+  expiresAt: string;
+}
+
 export interface VersionInfo {
   currentVersion: string;
   latestVersion: string | null;
@@ -140,6 +160,11 @@ export interface MediaFileItem {
   name: string;
   path: string;
   kind: "image" | "video";
+  sizeBytes: number | null;
+  modifiedAt: string | null;
+  capturedAt: string | null;
+  latitude: number | null;
+  longitude: number | null;
 }
 
 export interface MediaBrowseResult {

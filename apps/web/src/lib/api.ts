@@ -1,4 +1,7 @@
 import type {
+  AuthResult,
+  AuthStatus,
+  AuthUser,
   AppSettings,
   BackupAsset,
   BackupJob,
@@ -16,11 +19,65 @@ import type {
 } from "../types/api";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
+const AUTH_TOKEN_KEY = "photoark-auth-token";
+const AUTH_REQUIRED_EVENT = "photoark-auth-required";
+
+export class ApiRequestError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code?: string
+  ) {
+    super(message);
+    this.name = "ApiRequestError";
+  }
+}
+
+export function getStoredAuthToken(): string | null {
+  if (typeof window === "undefined") return null;
+  const value = window.localStorage.getItem(AUTH_TOKEN_KEY);
+  return value ? value.trim() : null;
+}
+
+export function setStoredAuthToken(token: string | null) {
+  if (typeof window === "undefined") return;
+  if (token) {
+    window.localStorage.setItem(AUTH_TOKEN_KEY, token);
+    return;
+  }
+  window.localStorage.removeItem(AUTH_TOKEN_KEY);
+}
+
+function notifyAuthRequired() {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new Event(AUTH_REQUIRED_EVENT));
+}
+
+export function onAuthRequired(handler: () => void): () => void {
+  if (typeof window === "undefined") {
+    return () => undefined;
+  }
+  const wrapped = () => handler();
+  window.addEventListener(AUTH_REQUIRED_EVENT, wrapped);
+  return () => window.removeEventListener(AUTH_REQUIRED_EVENT, wrapped);
+}
+
+function withAccessToken(url: string): string {
+  const token = getStoredAuthToken();
+  if (!token) return url;
+  const hasQuery = url.includes("?");
+  const encoded = encodeURIComponent(token);
+  return `${url}${hasQuery ? "&" : "?"}access_token=${encoded}`;
+}
 
 async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers ?? {});
   if (init?.body !== undefined && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
+  }
+  const token = getStoredAuthToken();
+  if (token && !headers.has("Authorization")) {
+    headers.set("Authorization", `Bearer ${token}`);
   }
 
   const res = await fetch(`${API_BASE}${path}`, {
@@ -30,18 +87,59 @@ async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
 
   if (!res.ok) {
     const text = await res.text();
+    let message = `Request failed: ${res.status}`;
+    let code: string | undefined;
     if (text) {
       try {
-        const json = JSON.parse(text) as { message?: string };
-        throw new Error(json.message || text);
+        const json = JSON.parse(text) as { message?: string; code?: string };
+        message = json.message || message;
+        code = json.code;
       } catch {
-        throw new Error(text);
+        message = text;
       }
     }
-    throw new Error(`Request failed: ${res.status}`);
+    const error = new ApiRequestError(message, res.status, code);
+    if (res.status === 401 || code === "AUTH_REQUIRED" || code === "AUTH_INVALID_TOKEN") {
+      setStoredAuthToken(null);
+      notifyAuthRequired();
+    }
+    throw error;
   }
 
   return (await res.json()) as T;
+}
+
+export function getAuthStatus() {
+  return fetchJson<AuthStatus>("/api/auth/status");
+}
+
+export function bootstrapAdmin(payload: { username: string; password: string }) {
+  return fetchJson<AuthResult>("/api/auth/bootstrap", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function login(payload: { username: string; password: string }) {
+  return fetchJson<AuthResult>("/api/auth/login", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function getCurrentUser() {
+  return fetchJson<{ user: AuthUser }>("/api/auth/me");
+}
+
+export function logout() {
+  return fetchJson<{ ok: true }>("/api/auth/logout", { method: "POST" });
+}
+
+export function updateMyPassword(payload: { currentPassword: string; newPassword: string }) {
+  return fetchJson<{ ok: true }>("/api/auth/password", {
+    method: "PUT",
+    body: JSON.stringify(payload)
+  });
 }
 
 export function getMetrics() {
@@ -96,7 +194,7 @@ export function browseStorageMedia(storageId: string, dirPath: string) {
 
 export function getStorageMediaStreamUrl(storageId: string, filePath: string) {
   const q = new URLSearchParams({ path: filePath });
-  return `${API_BASE}/api/storages/${storageId}/media/stream?${q.toString()}`;
+  return withAccessToken(`${API_BASE}/api/storages/${storageId}/media/stream?${q.toString()}`);
 }
 
 export function createStorage(payload: Omit<StorageTarget, "id">) {
@@ -173,5 +271,8 @@ export function createPreviewToken(assetId: string) {
 
 export function getPreview(assetId: string, token: string) {
   const q = new URLSearchParams({ token });
-  return fetchJson<PreviewResult>(`/api/backups/${assetId}/preview?${q.toString()}`);
+  return fetchJson<PreviewResult>(`/api/backups/${assetId}/preview?${q.toString()}`).then((result) => ({
+    ...result,
+    streamUrl: withAccessToken(result.streamUrl)
+  }));
 }

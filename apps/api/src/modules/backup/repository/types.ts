@@ -10,6 +10,25 @@ export interface AppSettings {
   telegram: TelegramSettings;
 }
 
+export interface AuthUser {
+  id: string;
+  username: string;
+  role: "admin";
+  passwordSalt: string;
+  passwordHash: string;
+  createdAt: string;
+  updatedAt: string;
+  lastLoginAt: string | null;
+}
+
+export interface AuthSession {
+  id: string;
+  userId: string;
+  tokenHash: string;
+  createdAt: string;
+  expiresAt: string;
+}
+
 export interface BackupAsset {
   id: string;
   name: string;
@@ -53,4 +72,6 @@ export interface BackupState {
   assets: BackupAsset[];
   jobRuns: JobRun[];
   settings: AppSettings;
+  users: AuthUser[];
+  sessions: AuthSession[];
 }
