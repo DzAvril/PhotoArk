@@ -1,6 +1,8 @@
 import * as Collapsible from "@radix-ui/react-collapsible";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { ConfirmDialog } from "../components/confirm-dialog";
 import { TablePagination } from "../components/table/table-pagination";
+import { SortableHeader } from "../components/table/sortable-header";
 import { TableToolbar } from "../components/table/table-toolbar";
 import { useTablePagination } from "../components/table/use-table-pagination";
 import { useLocalStorageState } from "../hooks/use-local-storage-state";
@@ -18,6 +20,12 @@ type JobForm = {
   enabled: boolean;
 };
 
+type PendingDeleteAction = {
+  mode: "single" | "batch";
+  ids: string[];
+  label: string;
+};
+
 function createInitialForm(sourceTargetId = "", destinationTargetId = ""): JobForm {
   return {
     name: "",
@@ -27,6 +35,11 @@ function createInitialForm(sourceTargetId = "", destinationTargetId = ""): JobFo
     watchMode: false,
     enabled: true
   };
+}
+
+function getAriaSort(active: boolean, asc: boolean): "ascending" | "descending" | "none" {
+  if (!active) return "none";
+  return asc ? "ascending" : "descending";
 }
 
 export function JobsPage() {
@@ -41,12 +54,16 @@ export function JobsPage() {
   const [form, setForm] = useState<JobForm>(() => createInitialForm(lastSourceTargetId, lastDestinationTargetId));
   const [editingJobId, setEditingJobId] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
   const [formOpen, setFormOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("name");
   const [sortAsc, setSortAsc] = useState(true);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [runningJobIds, setRunningJobIds] = useState<Set<string>>(new Set());
+  const [deletingJobIds, setDeletingJobIds] = useState<Set<string>>(new Set());
+  const [deletingSelected, setDeletingSelected] = useState(false);
+  const [pendingDeleteAction, setPendingDeleteAction] = useState<PendingDeleteAction | null>(null);
 
   const storageById = useMemo(() => Object.fromEntries(storages.map((s) => [s.id, s])), [storages]);
   const sourceStorage = form.sourceTargetId ? storageById[form.sourceTargetId] : undefined;
@@ -87,6 +104,7 @@ export function JobsPage() {
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setError("");
+    setMessage("");
 
     if (!sourceStorage || !destinationStorage) {
       setError("请选择源存储和目标存储");
@@ -116,6 +134,7 @@ export function JobsPage() {
       setEditingJobId(null);
       setFormOpen(false);
       await load();
+      setMessage(editingJobId ? "任务已更新。" : "任务已创建。");
     } catch (err) {
       setError((err as Error).message);
     }
@@ -134,31 +153,58 @@ export function JobsPage() {
     setFormOpen(true);
   }
 
-  async function handleDeleteSelected() {
+  async function confirmDeleteJobs(action: PendingDeleteAction) {
+    if (!action.ids.length) return;
     setError("");
-    try {
-      await Promise.all([...selected].map((id) => deleteJob(id)));
-      await load();
-    } catch (err) {
-      setError((err as Error).message);
+    setMessage("");
+    if (action.mode === "single") {
+      setDeletingJobIds((prev) => new Set(prev).add(action.ids[0]));
+    } else {
+      setDeletingSelected(true);
     }
-  }
-
-  async function handleDeleteOne(jobId: string) {
-    setError("");
     try {
-      await deleteJob(jobId);
-      if (editingJobId === jobId) {
+      const results = await Promise.allSettled(action.ids.map((id) => deleteJob(id)));
+      const failedIds: string[] = [];
+      results.forEach((result, index) => {
+        if (result.status === "rejected") {
+          failedIds.push(action.ids[index]);
+        }
+      });
+      const successIds = action.ids.filter((id) => !failedIds.includes(id));
+      const successCount = successIds.length;
+      if (successIds.includes(editingJobId ?? "")) {
         resetForm();
       }
-      await load();
+      if (successCount > 0) {
+        await load();
+      }
+      if (failedIds.length) {
+        setError(`已删除 ${successCount} 个任务，${failedIds.length} 个删除失败。`);
+        if (action.mode === "batch") {
+          setSelected(new Set(failedIds));
+        }
+      } else {
+        setMessage(action.mode === "single" ? `${action.label}已删除。` : `已删除 ${successCount} 个任务。`);
+      }
+      setPendingDeleteAction(null);
     } catch (err) {
       setError((err as Error).message);
+    } finally {
+      if (action.mode === "single") {
+        setDeletingJobIds((prev) => {
+          const next = new Set(prev);
+          next.delete(action.ids[0]);
+          return next;
+        });
+      } else {
+        setDeletingSelected(false);
+      }
     }
   }
 
   async function handleRunJob(jobId: string) {
     setError("");
+    setMessage("");
     setRunningJobIds((prev) => new Set(prev).add(jobId));
     try {
       const run = await runJob(jobId);
@@ -213,7 +259,14 @@ export function JobsPage() {
   const latestRunByJobId = useMemo(() => {
     const out: Record<string, JobRun | undefined> = {};
     for (const run of runs) {
-      if (!out[run.jobId]) out[run.jobId] = run;
+      const existing = out[run.jobId];
+      if (!existing) {
+        out[run.jobId] = run;
+        continue;
+      }
+      if (new Date(run.finishedAt).getTime() > new Date(existing.finishedAt).getTime()) {
+        out[run.jobId] = run;
+      }
     }
     return out;
   }, [runs]);
@@ -222,77 +275,103 @@ export function JobsPage() {
 
   return (
     <section className="space-y-3">
-      <Collapsible.Root open={formOpen} onOpenChange={setFormOpen} className="mp-panel p-4">
+      <Collapsible.Root open={formOpen} onOpenChange={setFormOpen} className="mp-panel mp-panel-soft p-4">
         <div className="flex items-center justify-between">
           <div>
             <h2 className="mp-section-title">备份任务</h2>
-            <p className="mt-1 text-xs mp-muted">选择源存储和目标存储即可创建同步任务</p>
+            <p className="mt-1 text-sm mp-muted">选择源存储和目标存储即可创建同步任务</p>
           </div>
           <Collapsible.Trigger className="mp-btn">{formOpen ? "收起" : "新增任务"}</Collapsible.Trigger>
         </div>
+        {message ? <p className="mt-3 text-sm mp-status-success">{message}</p> : null}
         {error ? <p className="mp-error mt-3">{error}</p> : null}
 
         <Collapsible.Content>
           <form onSubmit={(e) => void onSubmit(e)} className="mt-3 grid gap-2 sm:grid-cols-2">
-            <input
-              className="mp-input sm:col-span-2"
-              placeholder="任务名称"
-              value={form.name}
-              onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
-              required
-            />
+            <div className="space-y-1 sm:col-span-2">
+              <label htmlFor="job-name" className="text-sm font-medium">
+                任务名称
+              </label>
+              <input
+                id="job-name"
+                className="mp-input"
+                placeholder="例如：每日增量备份"
+                value={form.name}
+                onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
+                required
+              />
+            </div>
 
-            <select
-              className="mp-select"
-              value={form.sourceTargetId}
-              onChange={(e) => {
-                const next = e.target.value;
-                setForm((p) => ({ ...p, sourceTargetId: next }));
-                if (next) {
-                  setLastSourceTargetId(next);
-                }
-              }}
-              required
-            >
-              <option value="">选择备份源存储</option>
-              {storages.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name} ({s.type})
-                </option>
-              ))}
-            </select>
+            <div className="space-y-1">
+              <label htmlFor="job-source-target" className="text-sm font-medium">
+                源存储
+              </label>
+              <select
+                id="job-source-target"
+                className="mp-select"
+                value={form.sourceTargetId}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setForm((p) => ({ ...p, sourceTargetId: next }));
+                  if (next) {
+                    setLastSourceTargetId(next);
+                  }
+                }}
+                required
+              >
+                <option value="">选择备份源存储</option>
+                {storages.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name} ({s.type})
+                  </option>
+                ))}
+              </select>
+            </div>
 
-            <select
-              className="mp-select"
-              value={form.destinationTargetId}
-              onChange={(e) => {
-                const next = e.target.value;
-                setForm((p) => ({ ...p, destinationTargetId: next }));
-                if (next) {
-                  setLastDestinationTargetId(next);
-                }
-              }}
-              required
-            >
-              <option value="">选择备份目标存储</option>
-              {storages.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name} ({s.type})
-                </option>
-              ))}
-            </select>
+            <div className="space-y-1">
+              <label htmlFor="job-destination-target" className="text-sm font-medium">
+                目标存储
+              </label>
+              <select
+                id="job-destination-target"
+                className="mp-select"
+                value={form.destinationTargetId}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setForm((p) => ({ ...p, destinationTargetId: next }));
+                  if (next) {
+                    setLastDestinationTargetId(next);
+                  }
+                }}
+                required
+              >
+                <option value="">选择备份目标存储</option>
+                {storages.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name} ({s.type})
+                  </option>
+                ))}
+              </select>
+            </div>
 
-            <div className="rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-2 text-xs sm:col-span-2">
+            <div className="rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-2 text-sm sm:col-span-2">
               <p>源路径：{sourceStorage?.basePath || "-"}</p>
               <p className="mt-1">目标路径：{destinationStorage?.basePath || "-"}</p>
             </div>
 
-            <input
-              className="mp-input"
-              placeholder="cron（监听模式可留默认）"
-              value={form.schedule ?? ""}
-              onChange={(e) => setForm((p) => ({ ...p, schedule: e.target.value }))}
-            />
+            <div className="space-y-1">
+              <label htmlFor="job-schedule" className="text-sm font-medium">
+                cron 表达式
+              </label>
+              <input
+                id="job-schedule"
+                className="mp-input"
+                placeholder="例如：0 2 * * *"
+                value={form.schedule ?? ""}
+                onChange={(e) => setForm((p) => ({ ...p, schedule: e.target.value }))}
+              />
+              <p className="text-sm mp-muted">按服务器本地时区执行，例如每天 02:00 使用 `0 2 * * *`。</p>
+            </div>
             <div className="flex items-center gap-4 text-sm">
               <label className="flex items-center gap-2">
                 <input
@@ -334,8 +413,19 @@ export function JobsPage() {
           totalItems={table.totalItems}
         />
         <div className="mb-2 flex justify-end">
-          <button className="mp-btn" type="button" disabled={!selected.size} onClick={() => void handleDeleteSelected()}>
-            批量删除 ({selected.size})
+          <button
+            className="mp-btn"
+            type="button"
+            disabled={!selected.size || deletingSelected}
+            onClick={() =>
+              setPendingDeleteAction({
+                mode: "batch",
+                ids: [...selected],
+                label: `选中的 ${selected.size} 个任务`
+              })
+            }
+          >
+            {deletingSelected ? "删除中..." : `批量删除 (${selected.size})`}
           </button>
         </div>
 
@@ -361,9 +451,9 @@ export function JobsPage() {
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center justify-between gap-2">
                       <h4 className="truncate text-sm font-semibold">{j.name}</h4>
-                      <span className={j.enabled ? "text-xs text-emerald-600" : "text-xs text-red-500"}>{j.enabled ? "启用" : "停用"}</span>
+                      <span className={j.enabled ? "text-sm mp-status-success" : "text-sm mp-status-danger"}>{j.enabled ? "启用" : "停用"}</span>
                     </div>
-                    <p className="mt-0.5 text-xs mp-muted">{j.watchMode ? "实时监听" : "仅定时"}</p>
+                    <p className="mt-0.5 text-sm mp-muted">{j.watchMode ? "实时监听" : "仅定时"}</p>
                   </div>
                 </div>
 
@@ -382,7 +472,7 @@ export function JobsPage() {
                   <dd>
                     {latest ? (
                       <>
-                        <span className={latest.status === "success" ? "text-emerald-600" : "text-red-500"}>
+                        <span className={latest.status === "success" ? "mp-status-success" : "mp-status-danger"}>
                           {latest.status === "success" ? "成功" : "失败"}
                         </span>
                         <span className="ml-2 mp-muted">{new Date(latest.finishedAt).toLocaleString()}</span>
@@ -405,20 +495,31 @@ export function JobsPage() {
                   <button type="button" className="mp-btn" onClick={() => startEdit(j)}>
                     编辑
                   </button>
-                  <button type="button" className="mp-btn" onClick={() => void handleDeleteOne(j.id)}>
-                    删除
+                  <button
+                    type="button"
+                    className="mp-btn"
+                    disabled={deletingJobIds.has(j.id)}
+                    onClick={() =>
+                      setPendingDeleteAction({
+                        mode: "single",
+                        ids: [j.id],
+                        label: `任务“${j.name}”`
+                      })
+                    }
+                  >
+                    {deletingJobIds.has(j.id) ? "删除中" : "删除"}
                   </button>
                 </div>
               </article>
             );
           })}
-          {!table.paged.length ? <p className="py-4 text-center text-xs mp-muted">暂无数据</p> : null}
+          {!table.paged.length ? <p className="py-4 text-center text-sm mp-muted">暂无数据</p> : null}
         </div>
 
         <div className="hidden overflow-auto md:block">
-          <table className="min-w-full text-sm">
+          <table className="min-w-full text-base">
             <thead>
-              <tr className="border-b border-[var(--ark-line)] text-left text-xs mp-muted">
+              <tr className="border-b border-[var(--ark-line)] text-left text-sm mp-muted">
                 <th className="px-2 py-2">
                   <input
                     type="checkbox"
@@ -431,10 +532,33 @@ export function JobsPage() {
                     }}
                   />
                 </th>
-                <th className="cursor-pointer px-2 py-2" onClick={() => toggleSort("name")}>任务</th>
-                <th className="cursor-pointer px-2 py-2" onClick={() => toggleSort("sourceTargetId")}>源存储</th>
-                <th className="cursor-pointer px-2 py-2" onClick={() => toggleSort("destinationTargetId")}>目标存储</th>
-                <th className="cursor-pointer px-2 py-2" onClick={() => toggleSort("enabled")}>状态</th>
+                <th className="px-2 py-2" aria-sort={getAriaSort(sortKey === "name", sortAsc)}>
+                  <SortableHeader label="任务" active={sortKey === "name"} ascending={sortAsc} onToggle={() => toggleSort("name")} />
+                </th>
+                <th className="px-2 py-2" aria-sort={getAriaSort(sortKey === "sourceTargetId", sortAsc)}>
+                  <SortableHeader
+                    label="源存储"
+                    active={sortKey === "sourceTargetId"}
+                    ascending={sortAsc}
+                    onToggle={() => toggleSort("sourceTargetId")}
+                  />
+                </th>
+                <th className="px-2 py-2" aria-sort={getAriaSort(sortKey === "destinationTargetId", sortAsc)}>
+                  <SortableHeader
+                    label="目标存储"
+                    active={sortKey === "destinationTargetId"}
+                    ascending={sortAsc}
+                    onToggle={() => toggleSort("destinationTargetId")}
+                  />
+                </th>
+                <th className="px-2 py-2" aria-sort={getAriaSort(sortKey === "enabled", sortAsc)}>
+                  <SortableHeader
+                    label="状态"
+                    active={sortKey === "enabled"}
+                    ascending={sortAsc}
+                    onToggle={() => toggleSort("enabled")}
+                  />
+                </th>
                 <th className="px-2 py-2">监听</th>
                 <th className="px-2 py-2">最近执行</th>
                 <th className="px-2 py-2">操作</th>
@@ -461,20 +585,20 @@ export function JobsPage() {
                       />
                     </td>
                     <td className="px-2 py-2 font-medium">{j.name}</td>
-                    <td className="px-2 py-2 text-xs">
+                    <td className="px-2 py-2 text-sm">
                       <div>{src?.name ?? j.sourceTargetId}</div>
                       <div className="break-all mp-muted">{src?.basePath ?? j.sourcePath}</div>
                     </td>
-                    <td className="px-2 py-2 text-xs">
+                    <td className="px-2 py-2 text-sm">
                       <div>{dst?.name ?? j.destinationTargetId}</div>
                       <div className="break-all mp-muted">{dst?.basePath ?? j.destinationPath}</div>
                     </td>
                     <td className="px-2 py-2">{j.enabled ? "启用" : "停用"}</td>
                     <td className="px-2 py-2">{j.watchMode ? "实时监听" : "关闭"}</td>
-                    <td className="px-2 py-2 text-xs">
+                    <td className="px-2 py-2 text-sm">
                       {latest ? (
                         <div>
-                          <div className={latest.status === "success" ? "text-emerald-600" : "text-red-500"}>
+                          <div className={latest.status === "success" ? "mp-status-success" : "mp-status-danger"}>
                             {latest.status === "success" ? "成功" : "失败"}
                           </div>
                           <div className="mp-muted">{new Date(latest.finishedAt).toLocaleString()}</div>
@@ -496,8 +620,19 @@ export function JobsPage() {
                         <button type="button" className="mp-btn" onClick={() => startEdit(j)}>
                           编辑
                         </button>
-                        <button type="button" className="mp-btn" onClick={() => void handleDeleteOne(j.id)}>
-                          删除
+                        <button
+                          type="button"
+                          className="mp-btn"
+                          disabled={deletingJobIds.has(j.id)}
+                          onClick={() =>
+                            setPendingDeleteAction({
+                              mode: "single",
+                              ids: [j.id],
+                              label: `任务“${j.name}”`
+                            })
+                          }
+                        >
+                          {deletingJobIds.has(j.id) ? "删除中" : "删除"}
                         </button>
                       </div>
                     </td>
@@ -506,7 +641,7 @@ export function JobsPage() {
               })}
               {!table.paged.length ? (
                 <tr>
-                  <td className="px-2 py-4 text-center text-xs mp-muted" colSpan={8}>暂无数据</td>
+                  <td className="px-2 py-4 text-center text-sm mp-muted" colSpan={8}>暂无数据</td>
                 </tr>
               ) : null}
             </tbody>
@@ -514,7 +649,35 @@ export function JobsPage() {
         </div>
 
         <TablePagination page={table.page} totalPages={table.totalPages} onChange={table.setPage} />
+        {!table.totalItems ? (
+          <div className="mt-3 flex justify-center md:justify-end">
+            <button type="button" className="mp-btn" onClick={() => setFormOpen(true)}>
+              去新增任务
+            </button>
+          </div>
+        ) : null}
       </div>
+
+      <ConfirmDialog
+        open={Boolean(pendingDeleteAction)}
+        title="删除任务"
+        description={
+          pendingDeleteAction?.mode === "single"
+            ? `将删除${pendingDeleteAction.label}，删除后不可恢复。`
+            : `将删除 ${pendingDeleteAction?.ids.length ?? 0} 个任务，删除后不可恢复。`
+        }
+        confirmText="确认删除"
+        busy={
+          pendingDeleteAction?.mode === "single"
+            ? Boolean(pendingDeleteAction.ids[0] && deletingJobIds.has(pendingDeleteAction.ids[0]))
+            : deletingSelected
+        }
+        onCancel={() => setPendingDeleteAction(null)}
+        onConfirm={() => {
+          if (!pendingDeleteAction) return;
+          void confirmDeleteJobs(pendingDeleteAction);
+        }}
+      />
     </section>
   );
 }

@@ -1,7 +1,8 @@
+import { motion } from "framer-motion";
 import { useEffect, useState } from "react";
 import { MetricCard } from "../components/metric-card";
-import { getMetrics, getStorageCapacities, getVersionInfo } from "../lib/api";
-import type { Metrics, StorageCapacityItem, VersionInfo } from "../types/api";
+import { getMetrics, getStorageCapacities } from "../lib/api";
+import type { Metrics, StorageCapacityItem } from "../types/api";
 
 const emptyMetrics: Metrics = {
   storageTargets: 0,
@@ -12,15 +13,13 @@ const emptyMetrics: Metrics = {
 
 export function DashboardPage() {
   const [metrics, setMetrics] = useState<Metrics>(emptyMetrics);
-  const [version, setVersion] = useState<VersionInfo | null>(null);
   const [capacities, setCapacities] = useState<StorageCapacityItem[]>([]);
   const [error, setError] = useState<string>("");
 
   useEffect(() => {
-    Promise.all([getMetrics(), getVersionInfo(), getStorageCapacities()])
-      .then(([m, v, c]) => {
+    Promise.all([getMetrics(), getStorageCapacities()])
+      .then(([m, c]) => {
         setMetrics(m);
-        setVersion(v);
         setCapacities(c.items);
       })
       .catch((err: Error) => setError(err.message));
@@ -41,35 +40,97 @@ export function DashboardPage() {
   return (
     <section className="space-y-3">
       {error ? <p className="mp-error">{error}</p> : null}
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <MetricCard title="目标存储" value={String(metrics.storageTargets)} meta="NAS / SSD / 115" icon={<span>◫</span>} />
-        <MetricCard title="备份任务" value={String(metrics.backupJobs)} meta="定时 + 文件监听" icon={<span>◎</span>} />
-        <MetricCard title="加密对象" value={String(metrics.encryptedAssets)} meta="AES-256-GCM" icon={<span>◍</span>} />
-        <MetricCard title="Live Photo 对" value={String(metrics.livePhotoPairs)} meta="HEIC/JPG + MOV" icon={<span>◌</span>} />
-      </div>
-      <article className="mp-panel p-4">
-        <h3 className="text-sm font-semibold">版本检查</h3>
-        <p className="mt-2 text-xs mp-muted">当前版本: {version?.currentVersion ?? "..."}</p>
-        <p className="mt-1 text-xs mp-muted">最新版本: {version?.latestVersion ?? "未知"}</p>
-        <p className="mt-1 text-xs">
-          {version?.hasUpdate ? "发现新版本，请升级。" : version?.upToDate ? "当前已经是最新版本。" : "暂时无法检查更新。"}
-        </p>
-      </article>
+      <motion.div
+        className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"
+        initial="hidden"
+        animate="show"
+        variants={{ hidden: {}, show: { transition: { staggerChildren: 0.06 } } }}
+      >
+        <motion.div variants={{ hidden: { opacity: 0, y: 8 }, show: { opacity: 1, y: 0 } }}>
+          <MetricCard
+            title="目标存储"
+            value={String(metrics.storageTargets)}
+            meta="NAS / SSD / 115"
+            icon={
+              <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" aria-hidden="true">
+                <path d="M4 7.5h16v9H4z" stroke="currentColor" strokeWidth="1.7" />
+                <path d="M8 11h.01M12 11h.01M16 11h.01" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
+              </svg>
+            }
+          />
+        </motion.div>
+        <motion.div variants={{ hidden: { opacity: 0, y: 8 }, show: { opacity: 1, y: 0 } }}>
+          <MetricCard
+            title="备份任务"
+            value={String(metrics.backupJobs)}
+            meta="定时 + 文件监听"
+            icon={
+              <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" aria-hidden="true">
+                <circle cx="12" cy="12" r="8" stroke="currentColor" strokeWidth="1.7" />
+                <path d="M12 8v4l2.6 2.1" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            }
+          />
+        </motion.div>
+        <motion.div variants={{ hidden: { opacity: 0, y: 8 }, show: { opacity: 1, y: 0 } }}>
+          <MetricCard
+            title="加密对象"
+            value={String(metrics.encryptedAssets)}
+            meta="AES-256-GCM"
+            icon={
+              <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" aria-hidden="true">
+                <rect x="5" y="10" width="14" height="10" rx="2" stroke="currentColor" strokeWidth="1.7" />
+                <path d="M8.5 10V8a3.5 3.5 0 1 1 7 0v2" stroke="currentColor" strokeWidth="1.7" />
+              </svg>
+            }
+          />
+        </motion.div>
+        <motion.div variants={{ hidden: { opacity: 0, y: 8 }, show: { opacity: 1, y: 0 } }}>
+          <MetricCard
+            title="Live Photo 对"
+            value={String(metrics.livePhotoPairs)}
+            meta="HEIC/JPG + MOV"
+            icon={
+              <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" aria-hidden="true">
+                <circle cx="12" cy="12" r="7.5" stroke="currentColor" strokeWidth="1.7" />
+                <circle cx="12" cy="12" r="3.2" stroke="currentColor" strokeWidth="1.7" />
+              </svg>
+            }
+          />
+        </motion.div>
+      </motion.div>
 
-      <article className="mp-panel p-4">
-        <h3 className="text-sm font-semibold">存储盘容量</h3>
+      <motion.article
+        className="mp-panel mp-panel-soft p-4"
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.05, duration: 0.2, ease: "easeOut" }}
+      >
+        <h3 className="text-base font-semibold">系统状态</h3>
+        <p className="mt-2 text-sm mp-muted">
+          当前共有 {metrics.storageTargets} 个目标存储，{metrics.backupJobs} 个备份任务，其中 {metrics.encryptedAssets} 个对象已启用加密。
+        </p>
+      </motion.article>
+
+      <motion.article
+        className="mp-panel p-4"
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.1, duration: 0.2, ease: "easeOut" }}
+      >
+        <h3 className="text-base font-semibold">存储盘容量</h3>
         <div className="mt-3 space-y-3">
           {capacities.map((item) => (
             <div key={item.storageId} className="rounded-xl border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <p className="text-sm font-semibold">{item.storageName}</p>
-                  <p className="text-xs mp-muted">{item.storageType} · {item.basePath}</p>
+                  <p className="text-sm mp-muted">{item.storageType} · {item.basePath}</p>
                 </div>
                 {item.available ? (
-                  <span className="text-xs">{item.usedPercent}% 已用</span>
+                  <span className="text-sm">{item.usedPercent}% 已用</span>
                 ) : (
-                  <span className="text-xs text-amber-600">不可读取</span>
+                  <span className="text-sm mp-status-warning">不可读取</span>
                 )}
               </div>
 
@@ -81,18 +142,18 @@ export function DashboardPage() {
                       style={{ width: `${Math.min(100, Math.max(0, item.usedPercent ?? 0))}%` }}
                     />
                   </div>
-                  <p className="mt-2 text-xs mp-muted">
+                  <p className="mt-2 text-sm mp-muted">
                     已用 {formatBytes(item.usedBytes)} / 总量 {formatBytes(item.totalBytes)} · 可用 {formatBytes(item.freeBytes)}
                   </p>
                 </>
               ) : (
-                <p className="mt-2 text-xs mp-muted">{item.reason ?? "无法读取该存储容量"}</p>
+                <p className="mt-2 text-sm mp-muted">{item.reason ?? "无法读取该存储容量"}</p>
               )}
             </div>
           ))}
-          {!capacities.length ? <p className="text-xs mp-muted">暂无存储</p> : null}
+          {!capacities.length ? <p className="text-sm mp-muted">暂无存储</p> : null}
         </div>
-      </article>
+      </motion.article>
     </section>
   );
 }

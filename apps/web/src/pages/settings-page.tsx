@@ -15,6 +15,7 @@ export function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
+  const [showBotToken, setShowBotToken] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
 
@@ -66,12 +67,12 @@ export function SettingsPage() {
   }
 
   return (
-    <div className="mp-panel p-4">
-      <h3 className="text-sm font-semibold">Telegram 通知</h3>
-      <p className="mt-1 text-xs mp-muted">启用后每次备份执行都会自动发送摘要</p>
-      {loading ? <p className="mt-3 text-xs mp-muted">加载中...</p> : null}
+    <div className="mp-panel mp-panel-soft p-4">
+      <h3 className="text-base font-semibold">Telegram 通知</h3>
+      <p className="mt-1 text-sm mp-muted">启用后每次备份执行都会自动发送摘要</p>
+      {loading ? <p className="mt-3 text-sm mp-muted">加载中...</p> : null}
       {error ? <p className="mp-error mt-3">{error}</p> : null}
-      {message ? <p className="mt-3 text-xs text-emerald-600">{message}</p> : null}
+      {message ? <p className="mt-3 text-sm mp-status-success">{message}</p> : null}
 
       <form onSubmit={(e) => void onSubmit(e)} className="mt-3 space-y-3">
         <label className="flex items-center gap-2 text-sm">
@@ -89,28 +90,57 @@ export function SettingsPage() {
         </label>
 
         <div className="grid gap-2 sm:grid-cols-2">
-          <input
-            className="mp-input"
-            placeholder="Bot Token"
-            value={form.telegram.botToken}
-            onChange={(e) =>
-              setForm((prev) => ({
-                ...prev,
-                telegram: { ...prev.telegram, botToken: e.target.value }
-              }))
-            }
-          />
-          <input
-            className="mp-input"
-            placeholder="Chat ID"
-            value={form.telegram.chatId}
-            onChange={(e) =>
-              setForm((prev) => ({
-                ...prev,
-                telegram: { ...prev.telegram, chatId: e.target.value }
-              }))
-            }
-          />
+          <div className="space-y-1">
+            <label htmlFor="telegram-bot-token" className="text-sm font-medium">
+              Bot Token
+            </label>
+            <div className="flex gap-2">
+              <input
+                id="telegram-bot-token"
+                className="mp-input"
+                type={showBotToken ? "text" : "password"}
+                autoComplete="off"
+                placeholder="输入 Telegram Bot Token"
+                value={form.telegram.botToken}
+                disabled={!form.telegram.enabled}
+                onChange={(e) =>
+                  setForm((prev) => ({
+                    ...prev,
+                    telegram: { ...prev.telegram, botToken: e.target.value }
+                  }))
+                }
+              />
+              <button
+                type="button"
+                className="mp-btn shrink-0"
+                onClick={() => setShowBotToken((prev) => !prev)}
+                disabled={!form.telegram.enabled}
+              >
+                {showBotToken ? "隐藏" : "显示"}
+              </button>
+            </div>
+            <p className="text-sm mp-muted">可在 Telegram BotFather 创建机器人并获取 Token。</p>
+          </div>
+          <div className="space-y-1">
+            <label htmlFor="telegram-chat-id" className="text-sm font-medium">
+              Chat ID
+            </label>
+            <input
+              id="telegram-chat-id"
+              className="mp-input"
+              autoComplete="off"
+              placeholder="输入接收消息的 Chat ID"
+              value={form.telegram.chatId}
+              disabled={!form.telegram.enabled}
+              onChange={(e) =>
+                setForm((prev) => ({
+                  ...prev,
+                  telegram: { ...prev.telegram, chatId: e.target.value }
+                }))
+              }
+            />
+            <p className="text-sm mp-muted">填写接收通知的个人或群组 Chat ID。</p>
+          </div>
         </div>
 
         <div className="flex flex-wrap gap-2">

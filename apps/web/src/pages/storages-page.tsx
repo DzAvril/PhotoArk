@@ -1,7 +1,9 @@
 import * as Collapsible from "@radix-ui/react-collapsible";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { ConfirmDialog } from "../components/confirm-dialog";
 import { PathPicker } from "../components/path-picker";
 import { TablePagination } from "../components/table/table-pagination";
+import { SortableHeader } from "../components/table/sortable-header";
 import { TableToolbar } from "../components/table/table-toolbar";
 import { useTablePagination } from "../components/table/use-table-pagination";
 import { useLocalStorageState } from "../hooks/use-local-storage-state";
@@ -19,6 +21,11 @@ function createInitialForm(type: StorageTarget["type"] = "local_fs"): Omit<Stora
   };
 }
 
+function getAriaSort(active: boolean, asc: boolean): "ascending" | "descending" | "none" {
+  if (!active) return "none";
+  return asc ? "ascending" : "descending";
+}
+
 export function StoragesPage() {
   const [items, setItems] = useState<StorageTarget[]>([]);
   const [lastStorageType, setLastStorageType] = useLocalStorageState<StorageTarget["type"]>(
@@ -27,11 +34,14 @@ export function StoragesPage() {
   );
   const [form, setForm] = useState<Omit<StorageTarget, "id">>(() => createInitialForm(lastStorageType));
   const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
   const [formOpen, setFormOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("name");
   const [sortAsc, setSortAsc] = useState(true);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [deletingSelected, setDeletingSelected] = useState(false);
+  const [pendingDeleteStorageIds, setPendingDeleteStorageIds] = useState<string[] | null>(null);
 
   async function load() {
     try {
@@ -50,6 +60,7 @@ export function StoragesPage() {
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setError("");
+    setMessage("");
     try {
       await createStorage(form);
       setLastStorageType(form.type);
@@ -62,12 +73,33 @@ export function StoragesPage() {
   }
 
   async function handleDeleteSelected() {
+    if (!pendingDeleteStorageIds?.length) return;
     setError("");
+    setMessage("");
+    setDeletingSelected(true);
     try {
-      await Promise.all([...selected].map((id) => deleteStorage(id)));
-      await load();
+      const results = await Promise.allSettled(pendingDeleteStorageIds.map((id) => deleteStorage(id)));
+      const failedIds: string[] = [];
+      results.forEach((result, index) => {
+        if (result.status === "rejected") {
+          failedIds.push(pendingDeleteStorageIds[index]);
+        }
+      });
+      const successCount = pendingDeleteStorageIds.length - failedIds.length;
+      if (successCount > 0) {
+        await load();
+      }
+      if (failedIds.length) {
+        setError(`已删除 ${successCount} 个存储，${failedIds.length} 个删除失败。`);
+        setSelected(new Set(failedIds));
+      } else {
+        setMessage(`已删除 ${successCount} 个存储。`);
+      }
+      setPendingDeleteStorageIds(null);
     } catch (err) {
       setError((err as Error).message);
+    } finally {
+      setDeletingSelected(false);
     }
   }
 
@@ -108,39 +140,53 @@ export function StoragesPage() {
 
   return (
     <section className="space-y-3">
-      <Collapsible.Root open={formOpen} onOpenChange={setFormOpen} className="mp-panel p-4">
+      <Collapsible.Root open={formOpen} onOpenChange={setFormOpen} className="mp-panel mp-panel-soft p-4">
         <div className="flex items-center justify-between">
           <div>
             <h2 className="mp-section-title">目标存储</h2>
-            <p className="mt-1 text-xs mp-muted">支持本地目录下拉选择和手动输入路径</p>
+            <p className="mt-1 text-sm mp-muted">支持本地目录下拉选择和手动输入路径</p>
           </div>
           <Collapsible.Trigger className="mp-btn">{formOpen ? "收起" : "新增存储"}</Collapsible.Trigger>
         </div>
+        {message ? <p className="mt-3 text-sm mp-status-success">{message}</p> : null}
         {error ? <p className="mp-error mt-3">{error}</p> : null}
 
         <Collapsible.Content>
           <form onSubmit={(e) => void onSubmit(e)} className="mt-3 grid gap-2 sm:grid-cols-2">
-            <input
-              className="mp-input"
-              placeholder="名称"
-              value={form.name}
-              onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
-              required
-            />
-            <select
-              className="mp-select"
-              value={form.type}
-              onChange={(e) => {
-                const nextType = e.target.value as StorageTarget["type"];
-                setForm((p) => ({ ...p, type: nextType }));
-                setLastStorageType(nextType);
-              }}
-            >
-              <option value="local_fs">local_fs</option>
-              <option value="external_ssd">external_ssd</option>
-              <option value="cloud_115">cloud_115</option>
-            </select>
+            <div className="space-y-1">
+              <label htmlFor="storage-name" className="text-sm font-medium">
+                名称
+              </label>
+              <input
+                id="storage-name"
+                className="mp-input"
+                placeholder="例如：NAS-主盘"
+                value={form.name}
+                onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
+                required
+              />
+            </div>
+            <div className="space-y-1">
+              <label htmlFor="storage-type" className="text-sm font-medium">
+                类型
+              </label>
+              <select
+                id="storage-type"
+                className="mp-select"
+                value={form.type}
+                onChange={(e) => {
+                  const nextType = e.target.value as StorageTarget["type"];
+                  setForm((p) => ({ ...p, type: nextType }));
+                  setLastStorageType(nextType);
+                }}
+              >
+                <option value="local_fs">local_fs</option>
+                <option value="external_ssd">external_ssd</option>
+                <option value="cloud_115">cloud_115</option>
+              </select>
+            </div>
             <div className="sm:col-span-2">
+              <label className="mb-1 block text-sm font-medium">路径</label>
               {isLocalType ? (
                 <PathPicker
                   value={form.basePath}
@@ -158,6 +204,7 @@ export function StoragesPage() {
                   required
                 />
               )}
+              <p className="mt-1 text-sm mp-muted">本地路径建议使用绝对路径；云端路径请使用完整 URI。</p>
             </div>
 
             <label className="flex items-center gap-2 text-sm">
@@ -183,8 +230,13 @@ export function StoragesPage() {
           totalItems={table.totalItems}
         />
         <div className="mb-2 flex justify-end">
-          <button className="mp-btn" type="button" disabled={!selected.size} onClick={() => void handleDeleteSelected()}>
-            批量删除 ({selected.size})
+          <button
+            className="mp-btn"
+            type="button"
+            disabled={!selected.size || deletingSelected}
+            onClick={() => setPendingDeleteStorageIds([...selected])}
+          >
+            {deletingSelected ? "删除中..." : `批量删除 (${selected.size})`}
           </button>
         </div>
 
@@ -205,9 +257,9 @@ export function StoragesPage() {
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center justify-between gap-2">
                     <h4 className="truncate text-sm font-semibold">{s.name}</h4>
-                    <span className={s.encrypted ? "text-xs text-emerald-600" : "text-xs mp-muted"}>{s.encrypted ? "加密" : "未加密"}</span>
+                    <span className={s.encrypted ? "text-sm mp-status-success" : "text-sm mp-muted"}>{s.encrypted ? "加密" : "未加密"}</span>
                   </div>
-                  <p className="mt-0.5 text-xs mp-muted">{s.type}</p>
+                  <p className="mt-0.5 text-sm mp-muted">{s.type}</p>
                 </div>
               </div>
 
@@ -217,13 +269,13 @@ export function StoragesPage() {
               </dl>
             </article>
           ))}
-          {!table.paged.length ? <p className="py-4 text-center text-xs mp-muted">暂无数据</p> : null}
+          {!table.paged.length ? <p className="py-4 text-center text-sm mp-muted">暂无数据</p> : null}
         </div>
 
         <div className="hidden overflow-auto md:block">
-          <table className="min-w-full text-sm">
+          <table className="min-w-full text-base">
             <thead>
-              <tr className="border-b border-[var(--ark-line)] text-left text-xs mp-muted">
+              <tr className="border-b border-[var(--ark-line)] text-left text-sm mp-muted">
                 <th className="px-2 py-2">
                   <input
                     type="checkbox"
@@ -236,10 +288,28 @@ export function StoragesPage() {
                     }}
                   />
                 </th>
-                <th className="cursor-pointer px-2 py-2" onClick={() => toggleSort("name")}>名称</th>
-                <th className="cursor-pointer px-2 py-2" onClick={() => toggleSort("type")}>类型</th>
-                <th className="cursor-pointer px-2 py-2" onClick={() => toggleSort("basePath")}>路径</th>
-                <th className="cursor-pointer px-2 py-2" onClick={() => toggleSort("encrypted")}>加密</th>
+                <th className="px-2 py-2" aria-sort={getAriaSort(sortKey === "name", sortAsc)}>
+                  <SortableHeader label="名称" active={sortKey === "name"} ascending={sortAsc} onToggle={() => toggleSort("name")} />
+                </th>
+                <th className="px-2 py-2" aria-sort={getAriaSort(sortKey === "type", sortAsc)}>
+                  <SortableHeader label="类型" active={sortKey === "type"} ascending={sortAsc} onToggle={() => toggleSort("type")} />
+                </th>
+                <th className="px-2 py-2" aria-sort={getAriaSort(sortKey === "basePath", sortAsc)}>
+                  <SortableHeader
+                    label="路径"
+                    active={sortKey === "basePath"}
+                    ascending={sortAsc}
+                    onToggle={() => toggleSort("basePath")}
+                  />
+                </th>
+                <th className="px-2 py-2" aria-sort={getAriaSort(sortKey === "encrypted", sortAsc)}>
+                  <SortableHeader
+                    label="加密"
+                    active={sortKey === "encrypted"}
+                    ascending={sortAsc}
+                    onToggle={() => toggleSort("encrypted")}
+                  />
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -259,13 +329,13 @@ export function StoragesPage() {
                   </td>
                   <td className="px-2 py-2 font-medium">{s.name}</td>
                   <td className="px-2 py-2">{s.type}</td>
-                  <td className="break-all px-2 py-2 text-xs mp-muted">{s.basePath}</td>
+                  <td className="break-all px-2 py-2 text-sm mp-muted">{s.basePath}</td>
                   <td className="px-2 py-2">{s.encrypted ? "是" : "否"}</td>
                 </tr>
               ))}
               {!table.paged.length ? (
                 <tr>
-                  <td className="px-2 py-4 text-center text-xs mp-muted" colSpan={5}>暂无数据</td>
+                  <td className="px-2 py-4 text-center text-sm mp-muted" colSpan={5}>暂无数据</td>
                 </tr>
               ) : null}
             </tbody>
@@ -273,7 +343,24 @@ export function StoragesPage() {
         </div>
 
         <TablePagination page={table.page} totalPages={table.totalPages} onChange={table.setPage} />
+        {!table.totalItems ? (
+          <div className="mt-3 flex justify-center md:justify-end">
+            <button type="button" className="mp-btn" onClick={() => setFormOpen(true)}>
+              去新增存储
+            </button>
+          </div>
+        ) : null}
       </div>
+
+      <ConfirmDialog
+        open={Boolean(pendingDeleteStorageIds?.length)}
+        title="删除存储"
+        description={`将删除 ${pendingDeleteStorageIds?.length ?? 0} 个存储，删除后不可恢复。`}
+        confirmText="确认删除"
+        busy={deletingSelected}
+        onCancel={() => setPendingDeleteStorageIds(null)}
+        onConfirm={() => void handleDeleteSelected()}
+      />
     </section>
   );
 }

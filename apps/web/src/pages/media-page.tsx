@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { browseStorageMedia, getStorageMediaStreamUrl, getStorages } from "../lib/api";
 import { useLocalStorageState } from "../hooks/use-local-storage-state";
 import type { MediaBrowseResult, MediaFileItem, StorageTarget } from "../types/api";
@@ -74,6 +74,14 @@ function buildDisplayItems(
   return items;
 }
 
+function getFocusableElements(container: HTMLElement): HTMLElement[] {
+  return Array.from(
+    container.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    )
+  );
+}
+
 function MediaPane({ storages }: MediaPaneProps) {
   const [storageId, setStorageId] = useLocalStorageState("ark-last-media-storage-id", "");
   const [media, setMedia] = useState<MediaBrowseResult | null>(null);
@@ -84,6 +92,11 @@ function MediaPane({ storages }: MediaPaneProps) {
   const [brokenThumbImagePaths, setBrokenThumbImagePaths] = useState<Set<string>>(new Set());
   const [brokenViewerImagePaths, setBrokenViewerImagePaths] = useState<Set<string>>(new Set());
   const livePressTimerRef = useRef<number | null>(null);
+  const previewDialogRef = useRef<HTMLDivElement | null>(null);
+  const previewCloseButtonRef = useRef<HTMLButtonElement | null>(null);
+  const openerElementRef = useRef<HTMLElement | null>(null);
+  const previewTitleId = useId();
+  const previewHintId = useId();
 
   const selectedStorage = storages.find((s) => s.id === storageId);
 
@@ -133,8 +146,12 @@ function MediaPane({ storages }: MediaPaneProps) {
   const activePair = activeItem?.livePair ?? null;
   const activeList = displayItems;
   const activeIndex = activeItem ? activeList.findIndex((item) => item.file.path === activeItem.file.path) : -1;
+  const previewOpen = Boolean(selectedStorage && activeItem);
 
-  function openByPath(nextPath: string) {
+  function openByPath(nextPath: string, options?: { preserveOpener?: boolean }) {
+    if (!options?.preserveOpener) {
+      openerElementRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    }
     setActivePath(nextPath);
     setPlayingLiveVideo(false);
   }
@@ -145,23 +162,59 @@ function MediaPane({ storages }: MediaPaneProps) {
   }
   function openPrev() {
     if (activeIndex <= 0) return;
-    openByPath(activeList[activeIndex - 1].file.path);
+    openByPath(activeList[activeIndex - 1].file.path, { preserveOpener: true });
   }
   function openNext() {
     if (activeIndex < 0 || activeIndex >= activeList.length - 1) return;
-    openByPath(activeList[activeIndex + 1].file.path);
+    openByPath(activeList[activeIndex + 1].file.path, { preserveOpener: true });
   }
+
+  useEffect(() => {
+    if (!previewOpen) return;
+    const previousBodyOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    window.requestAnimationFrame(() => previewCloseButtonRef.current?.focus());
+    return () => {
+      document.body.style.overflow = previousBodyOverflow;
+      openerElementRef.current?.focus();
+    };
+  }, [previewOpen]);
 
   useEffect(() => {
     function onKeydown(e: KeyboardEvent) {
       if (!activeItem) return;
+      if (e.key === "Tab") {
+        const dialog = previewDialogRef.current;
+        if (!dialog) return;
+        const focusable = getFocusableElements(dialog);
+        if (!focusable.length) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+        if (e.shiftKey) {
+          if (!active || active === first || !dialog.contains(active)) {
+            e.preventDefault();
+            last.focus();
+          }
+          return;
+        }
+        if (active === last) {
+          e.preventDefault();
+          first.focus();
+        }
+        return;
+      }
       if (e.key === "Escape") closePreview();
       if (e.key === "ArrowLeft") openPrev();
       if (e.key === "ArrowRight") openNext();
+      if ((e.key === " " || e.key.toLowerCase() === "l") && activePair) {
+        e.preventDefault();
+        setPlayingLiveVideo((prev) => !prev);
+      }
     }
     window.addEventListener("keydown", onKeydown);
     return () => window.removeEventListener("keydown", onKeydown);
-  }, [activeItem, activeIndex, activeList]);
+  }, [activeItem, activeIndex, activeList, activePair]);
 
   const activeViewerImagePath = activePair ? activePair.image.path : activeItem?.file.path ?? null;
   const activeViewerVideoPath = activePair
@@ -198,11 +251,15 @@ function MediaPane({ storages }: MediaPaneProps) {
 
   return (
     <article className="mp-panel p-4">
-      <h3 className="text-sm font-semibold">存储媒体</h3>
+      <h3 className="text-base font-semibold">存储媒体</h3>
       {error ? <p className="mp-error mt-2">{error}</p> : null}
 
       <div className="mt-3 space-y-2">
+        <label htmlFor="media-storage-select" className="block text-sm font-medium">
+          选择存储
+        </label>
         <select
+          id="media-storage-select"
           className="mp-select"
           value={storageId}
           onChange={(e) => {
@@ -216,7 +273,7 @@ function MediaPane({ storages }: MediaPaneProps) {
           {storages.map((s) => <option key={s.id} value={s.id}>{s.name} ({s.type})</option>)}
         </select>
 
-        <div className="rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-2 text-xs">
+        <div className="rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-2 text-sm">
           <div className="mp-muted">路径</div>
           <div className="mt-1 break-all">{selectedStorage?.basePath || "请先选择存储"}</div>
         </div>
@@ -224,13 +281,13 @@ function MediaPane({ storages }: MediaPaneProps) {
 
       <div className="mt-3 max-h-[28rem] overflow-auto rounded-lg border border-[var(--ark-line)] p-2">
         <div className="mb-2 flex items-center justify-between gap-2">
-          <div className="flex gap-1 text-xs">
+          <div className="flex gap-1 text-sm">
             <button type="button" className={`mp-btn ${kindFilter === "all" ? "mp-btn-primary" : ""}`} onClick={() => setKindFilter("all")}>全部</button>
             <button type="button" className={`mp-btn ${kindFilter === "image" ? "mp-btn-primary" : ""}`} onClick={() => setKindFilter("image")}>图片</button>
             <button type="button" className={`mp-btn ${kindFilter === "video" ? "mp-btn-primary" : ""}`} onClick={() => setKindFilter("video")}>视频</button>
             <button type="button" className={`mp-btn ${kindFilter === "live" ? "mp-btn-primary" : ""}`} onClick={() => setKindFilter("live")}>Live</button>
           </div>
-          <span className="text-xs mp-muted">{displayItems.length} 项</span>
+          <span className="text-sm mp-muted">{displayItems.length} 项</span>
         </div>
 
         <div className="grid grid-cols-2 gap-2 md:grid-cols-3">
@@ -243,7 +300,7 @@ function MediaPane({ storages }: MediaPaneProps) {
                 <div className="relative aspect-square bg-black/10">
                   {item.file.kind === "image" ? (
                     thumbBroken ? (
-                      <div className="flex h-full w-full items-center justify-center px-3 text-center text-xs text-white/80">图片预览不可用</div>
+                      <div className="flex h-full w-full items-center justify-center px-3 text-center text-sm text-white/80">图片预览不可用</div>
                     ) : (
                       <img
                         src={streamUrl}
@@ -262,31 +319,57 @@ function MediaPane({ storages }: MediaPaneProps) {
                   ) : (
                     <video src={streamUrl} className="h-full w-full object-cover" preload="metadata" />
                   )}
-                  {isLivePhoto ? <span className="absolute left-1.5 top-1.5 rounded bg-black/70 px-1.5 py-0.5 text-[10px] text-white">Live</span> : null}
+                  {isLivePhoto ? <span className="absolute left-1.5 top-1.5 rounded bg-black/70 px-1.5 py-0.5 text-[11px] text-white">Live</span> : null}
                 </div>
                 <div className="flex items-center justify-between gap-2 px-2 py-1.5">
-                  <span className="truncate text-xs">{item.file.name}</span>
-                  <span className="shrink-0 rounded border border-[var(--ark-line)] px-1 py-0.5 text-[10px] uppercase">{isLivePhoto ? "live" : item.file.kind}</span>
+                  <span className="truncate text-sm">{item.file.name}</span>
+                  <span className="shrink-0 rounded border border-[var(--ark-line)] px-1.5 py-0.5 text-[11px] uppercase">{isLivePhoto ? "live" : item.file.kind}</span>
                 </div>
               </button>
             );
           })}
         </div>
 
-        {!displayItems.length ? <p className="py-4 text-center text-xs mp-muted">暂无数据</p> : null}
+        {!displayItems.length ? (
+          <p className="py-4 text-center text-sm mp-muted">
+            {selectedStorage ? "该位置暂无可浏览媒体，可尝试切换筛选类型。" : "请先选择存储后再浏览媒体。"}
+          </p>
+        ) : null}
       </div>
 
       {selectedStorage && activeItem ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-3" onClick={closePreview}>
-          <div className="w-full max-w-5xl rounded-xl bg-[var(--ark-surface)] p-3" onClick={(e) => e.stopPropagation()}>
+          <div
+            ref={previewDialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={previewTitleId}
+            aria-describedby={activePair ? previewHintId : undefined}
+            className="w-full max-w-5xl rounded-xl bg-[var(--ark-surface)] p-3"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="mb-2 flex items-center justify-between gap-2">
               <div className="min-w-0">
-                <p className="truncate text-sm font-medium">{activeItem.file.name}</p>
-                <p className="text-xs mp-muted">{activeIndex + 1} / {activeList.length}</p>
-                {activePair ? <p className="text-xs mp-muted">长按画面播放 Live Photo</p> : null}
+                <p id={previewTitleId} className="truncate text-sm font-medium">{activeItem.file.name}</p>
+                <p className="text-sm mp-muted">{activeIndex + 1} / {activeList.length}</p>
+                {activePair ? (
+                  <p id={previewHintId} className="text-sm mp-muted">点击“播放动态”或长按画面可预览 Live Photo（快捷键：L）</p>
+                ) : null}
               </div>
               <div className="flex items-center gap-2">
-                <button type="button" className="mp-btn" onClick={closePreview}>关闭</button>
+                {activePair ? (
+                  <button
+                    type="button"
+                    className={`mp-btn ${playingLiveVideo ? "mp-btn-primary" : ""}`}
+                    aria-label={playingLiveVideo ? "切换到静态图像" : "播放 Live Photo 动态部分"}
+                    onClick={() => setPlayingLiveVideo((prev) => !prev)}
+                  >
+                    {playingLiveVideo ? "查看静态" : "播放动态"}
+                  </button>
+                ) : null}
+                <button ref={previewCloseButtonRef} type="button" className="mp-btn" aria-label="关闭预览" onClick={closePreview}>
+                  关闭
+                </button>
               </div>
             </div>
 
@@ -327,13 +410,29 @@ function MediaPane({ storages }: MediaPaneProps) {
                 ) : (
                   <div className="px-4 text-center text-sm text-white/80">
                     当前浏览器无法预览该图片格式
-                    {activePair ? "，可长按画面播放动态部分" : ""}
+                    {activePair ? "，可点击“播放动态”查看 Live Photo 动态部分" : ""}
                   </div>
                 )
               )}
 
-              <button type="button" className="absolute left-2 top-1/2 -translate-y-1/2 rounded-full border border-white/20 bg-black/50 px-3 py-1.5 text-sm text-white" onClick={openPrev} disabled={activeIndex <= 0}>上一张</button>
-              <button type="button" className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full border border-white/20 bg-black/50 px-3 py-1.5 text-sm text-white" onClick={openNext} disabled={activeIndex >= activeList.length - 1}>下一张</button>
+              <button
+                type="button"
+                className="absolute left-2 top-1/2 -translate-y-1/2 rounded-full border border-white/20 bg-black/50 px-3 py-1.5 text-base text-white"
+                aria-label="查看上一张"
+                onClick={openPrev}
+                disabled={activeIndex <= 0}
+              >
+                上一张
+              </button>
+              <button
+                type="button"
+                className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full border border-white/20 bg-black/50 px-3 py-1.5 text-base text-white"
+                aria-label="查看下一张"
+                onClick={openNext}
+                disabled={activeIndex >= activeList.length - 1}
+              >
+                下一张
+              </button>
             </div>
           </div>
         </div>
@@ -352,9 +451,9 @@ export function MediaPage() {
 
   return (
     <section className="space-y-3">
-      <div className="mp-panel p-4">
+      <div className="mp-panel mp-panel-soft p-4">
         <h2 className="mp-section-title">媒体预览</h2>
-        <p className="mt-1 text-xs mp-muted">选择存储后可直接查看该存储下的图片和视频</p>
+        <p className="mt-1 text-sm mp-muted">选择存储后可直接查看该存储下的图片和视频</p>
         {error ? <p className="mp-error mt-2">{error}</p> : null}
       </div>
 

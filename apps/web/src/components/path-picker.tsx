@@ -57,7 +57,7 @@ export function PathPicker({ value, onChange, placeholder, browse, disabled, req
 
       {open ? (
         <div className="rounded-xl border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-2">
-          <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-xs">
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-sm">
             <div className="min-w-0">
               <div className="mp-muted">当前目录</div>
               <div className="truncate font-medium">{(browser?.currentPath ?? value) || "-"}</div>
@@ -96,12 +96,12 @@ export function PathPicker({ value, onChange, placeholder, browse, disabled, req
           {error ? <p className="mp-error mb-2">{error}</p> : null}
 
           <div className="max-h-56 overflow-auto rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface)] p-1">
-            {!hasDirs && !loading ? <p className="px-2 py-3 text-xs mp-muted">当前目录下没有子目录</p> : null}
+            {!hasDirs && !loading ? <p className="px-2 py-3 text-sm mp-muted">当前目录下没有子目录</p> : null}
             {browser?.directories.map((d) => (
               <button
                 key={d.path}
                 type="button"
-                className="block w-full rounded-md px-2 py-1.5 text-left text-xs hover:bg-[var(--ark-surface-soft)]"
+                className="block w-full rounded-md px-2 py-1.5 text-left text-sm hover:bg-[var(--ark-surface-soft)]"
                 onClick={() => {
                   void load(d.path);
                 }}
@@ -109,7 +109,7 @@ export function PathPicker({ value, onChange, placeholder, browse, disabled, req
                 {d.path}
               </button>
             ))}
-            {loading ? <p className="px-2 py-3 text-xs mp-muted">读取中...</p> : null}
+            {loading ? <p className="px-2 py-3 text-sm mp-muted">读取中...</p> : null}
           </div>
         </div>
       ) : null}
