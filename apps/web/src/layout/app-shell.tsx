@@ -4,12 +4,12 @@ import { getVersionInfo } from "../lib/api";
 import type { VersionInfo } from "../types/api";
 
 const tabs = [
-  { to: "/", label: "总览" },
-  { to: "/storages", label: "存储" },
-  { to: "/jobs", label: "任务" },
-  { to: "/media", label: "媒体预览" },
-  { to: "/backups", label: "备份" },
-  { to: "/settings", label: "配置" }
+  { to: "/", label: "总览", short: "总" },
+  { to: "/storages", label: "存储", short: "存" },
+  { to: "/jobs", label: "任务", short: "任" },
+  { to: "/media", label: "媒体", short: "媒" },
+  { to: "/backups", label: "备份", short: "备" },
+  { to: "/settings", label: "配置", short: "配" }
 ];
 
 type ThemeMode = "light" | "dark";
@@ -37,76 +37,87 @@ export function AppShell() {
 
   return (
     <div className="min-h-screen bg-[var(--ark-bg)] text-[var(--ark-ink)]">
-      <div className="mx-auto grid max-w-[1400px] grid-cols-1 gap-4 px-3 py-4 md:grid-cols-[220px_1fr] md:px-5">
-        <aside className="mp-panel hidden p-4 md:block">
-          <div className="mb-6">
-            <h1 className="text-xl font-bold">PhotoArk</h1>
-            <p className="mt-1 text-xs mp-muted">Backup Control Center</p>
-          </div>
-          <nav className="space-y-2">
-            {tabs.map((tab) => (
-              <NavLink
-                key={tab.to}
-                to={tab.to}
-                className={({ isActive }) =>
-                  `block rounded-lg px-3 py-2 text-sm ${
-                    isActive ? "bg-[var(--ark-primary)] text-white" : "text-[var(--ark-ink)] hover:bg-[var(--ark-surface-soft)]"
-                  }`
-                }
-              >
-                {tab.label}
-              </NavLink>
-            ))}
-          </nav>
-        </aside>
+      <div className="mx-auto max-w-[1440px] px-3 pb-24 pt-3 md:px-5 md:pb-5 md:pt-4">
+        <div className="grid gap-4 md:grid-cols-[230px_minmax(0,1fr)]">
+          <aside className="mp-panel hidden self-start p-4 md:sticky md:top-4 md:block">
+            <div className="mb-5">
+              <h1 className="text-xl font-bold">PhotoArk</h1>
+              <p className="mt-1 text-xs mp-muted">Backup Control Center</p>
+            </div>
+            <nav className="space-y-1.5">
+              {tabs.map((tab) => (
+                <NavLink
+                  key={tab.to}
+                  to={tab.to}
+                  className={({ isActive }) =>
+                    `block rounded-xl px-3 py-2.5 text-sm transition-colors ${
+                      isActive ? "bg-[var(--ark-primary)] text-white" : "text-[var(--ark-ink)] hover:bg-[var(--ark-surface-soft)]"
+                    }`
+                  }
+                >
+                  {tab.label}
+                </NavLink>
+              ))}
+            </nav>
+          </aside>
 
-        <section>
-          <header className="mp-panel mb-4 p-4">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <p className="text-xs uppercase tracking-widest text-[var(--ark-primary)]">PhotoArk</p>
-                <h2 className="text-lg font-semibold">NAS 多目标照片备份平台</h2>
-                <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
-                  <span className="mp-muted">版本 {version?.currentVersion ?? "..."}</span>
-                  {version?.hasUpdate ? (
-                    <a className="rounded-full border border-amber-400 bg-amber-50 px-2 py-0.5 text-amber-700" href={version.latestUrl ?? undefined} target="_blank" rel="noreferrer">
-                      有新版本 {version.latestVersion}
-                    </a>
-                  ) : version?.upToDate ? (
-                    <span className="rounded-full border border-emerald-400 bg-emerald-50 px-2 py-0.5 text-emerald-700">已是最新</span>
-                  ) : version ? (
-                    <span className="rounded-full border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] px-2 py-0.5">无法检查更新</span>
-                  ) : null}
+          <section className="min-w-0">
+            <header className="mp-panel mb-4 p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-xs uppercase tracking-[0.22em] text-[var(--ark-primary)]">PhotoArk</p>
+                  <h2 className="mt-1 text-lg font-bold tracking-tight sm:text-2xl">NAS 多目标照片备份平台</h2>
+                  <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                    <span className="mp-chip mp-muted">版本 {version?.currentVersion ?? "..."}</span>
+                    {version?.hasUpdate ? (
+                      <a
+                        className="mp-chip border-amber-300 bg-amber-50 text-amber-700"
+                        href={version.latestUrl ?? undefined}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        有新版本 {version.latestVersion}
+                      </a>
+                    ) : version?.upToDate ? (
+                      <span className="mp-chip border-emerald-400 bg-emerald-50 text-emerald-700">已是最新</span>
+                    ) : version ? (
+                      <span className="mp-chip">无法检查更新</span>
+                    ) : null}
+                  </div>
                 </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <button type="button" onClick={toggleTheme} className="mp-btn">
+                <button type="button" onClick={toggleTheme} className="mp-btn shrink-0">
                   {theme === "light" ? "暗色" : "亮色"}
                 </button>
-                <nav className="flex flex-wrap gap-2 md:hidden">
-                  {tabs.map((tab) => (
-                    <NavLink
-                      key={tab.to}
-                      to={tab.to}
-                      className={({ isActive }) =>
-                        `rounded-md border px-3 py-1.5 text-xs ${
-                          isActive
-                            ? "border-[var(--ark-primary)] bg-[var(--ark-primary)] text-white"
-                            : "border-[var(--ark-line)] bg-white text-[var(--ark-ink)]"
-                        }`
-                      }
-                    >
-                      {tab.label}
-                    </NavLink>
-                  ))}
-                </nav>
               </div>
-            </div>
-          </header>
 
-          <Outlet />
-        </section>
+            </header>
+
+            <Outlet />
+          </section>
+        </div>
       </div>
+
+      <nav className="fixed inset-x-3 bottom-3 z-50 md:hidden">
+        <div className="mp-panel px-2 py-1.5">
+          <ul className="grid grid-cols-6 gap-1">
+            {tabs.map((tab) => (
+              <li key={tab.to}>
+                <NavLink
+                  to={tab.to}
+                  className={({ isActive }) =>
+                    `flex flex-col items-center rounded-lg px-1 py-1.5 text-[10px] transition-colors ${
+                      isActive ? "bg-[var(--ark-primary)] text-white" : "text-[var(--ark-ink-soft)]"
+                    }`
+                  }
+                >
+                  <span className="text-xs font-semibold">{tab.short}</span>
+                  <span className="mt-0.5">{tab.label}</span>
+                </NavLink>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </nav>
     </div>
   );
 }

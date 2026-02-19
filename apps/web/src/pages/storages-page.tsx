@@ -98,8 +98,7 @@ export function StoragesPage() {
     search,
     useMemo(
       () =>
-        (row: StorageTarget, keyword: string) =>
-          `${row.name} ${row.type} ${row.basePath}`.toLowerCase().includes(keyword),
+        (row: StorageTarget, keyword: string) => `${row.name} ${row.type} ${row.basePath}`.toLowerCase().includes(keyword),
       []
     ),
     { pageSizeStorageKey: "ark-storages-page-size" }
@@ -121,7 +120,13 @@ export function StoragesPage() {
 
         <Collapsible.Content>
           <form onSubmit={(e) => void onSubmit(e)} className="mt-3 grid gap-2 sm:grid-cols-2">
-            <input className="mp-input" placeholder="名称" value={form.name} onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))} required />
+            <input
+              className="mp-input"
+              placeholder="名称"
+              value={form.name}
+              onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
+              required
+            />
             <select
               className="mp-select"
               value={form.type}
@@ -155,55 +160,118 @@ export function StoragesPage() {
               )}
             </div>
 
-            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.encrypted} onChange={(e) => setForm((p) => ({ ...p, encrypted: e.target.checked }))} />加密存储</label>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={form.encrypted}
+                onChange={(e) => setForm((p) => ({ ...p, encrypted: e.target.checked }))}
+              />
+              加密存储
+            </label>
             <button type="submit" className="mp-btn mp-btn-primary sm:col-span-2">新增存储</button>
           </form>
         </Collapsible.Content>
       </Collapsible.Root>
 
       <div className="mp-panel p-4">
-        <div className="mb-2 flex items-center justify-between">
-          <TableToolbar title="存储列表" search={search} onSearchChange={setSearch} pageSize={table.pageSize} onPageSizeChange={table.setPageSize} totalItems={table.totalItems} />
-        </div>
+        <TableToolbar
+          title="存储列表"
+          search={search}
+          onSearchChange={setSearch}
+          pageSize={table.pageSize}
+          onPageSizeChange={table.setPageSize}
+          totalItems={table.totalItems}
+        />
         <div className="mb-2 flex justify-end">
           <button className="mp-btn" type="button" disabled={!selected.size} onClick={() => void handleDeleteSelected()}>
             批量删除 ({selected.size})
           </button>
         </div>
-        <div className="overflow-auto">
+
+        <div className="space-y-2 md:hidden">
+          {table.paged.map((s) => (
+            <article key={s.id} className="mp-mobile-card">
+              <div className="flex items-start gap-2">
+                <input
+                  type="checkbox"
+                  checked={selected.has(s.id)}
+                  onChange={(e) => {
+                    const next = new Set(selected);
+                    if (e.target.checked) next.add(s.id);
+                    else next.delete(s.id);
+                    setSelected(next);
+                  }}
+                />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <h4 className="truncate text-sm font-semibold">{s.name}</h4>
+                    <span className={s.encrypted ? "text-xs text-emerald-600" : "text-xs mp-muted"}>{s.encrypted ? "加密" : "未加密"}</span>
+                  </div>
+                  <p className="mt-0.5 text-xs mp-muted">{s.type}</p>
+                </div>
+              </div>
+
+              <dl className="mp-kv mt-3">
+                <dt>路径</dt>
+                <dd className="break-all">{s.basePath}</dd>
+              </dl>
+            </article>
+          ))}
+          {!table.paged.length ? <p className="py-4 text-center text-xs mp-muted">暂无数据</p> : null}
+        </div>
+
+        <div className="hidden overflow-auto md:block">
           <table className="min-w-full text-sm">
             <thead>
               <tr className="border-b border-[var(--ark-line)] text-left text-xs mp-muted">
-                <th className="px-2 py-2"><input type="checkbox" checked={allCurrentPageSelected} onChange={(e) => {
-                  const next = new Set(selected);
-                  if (e.target.checked) table.paged.forEach((s) => next.add(s.id));
-                  else table.paged.forEach((s) => next.delete(s.id));
-                  setSelected(next);
-                }} /></th>
-                <th className="px-2 py-2 cursor-pointer" onClick={() => toggleSort("name")}>名称</th>
-                <th className="px-2 py-2 cursor-pointer" onClick={() => toggleSort("type")}>类型</th>
-                <th className="px-2 py-2 cursor-pointer" onClick={() => toggleSort("basePath")}>路径</th>
-                <th className="px-2 py-2 cursor-pointer" onClick={() => toggleSort("encrypted")}>加密</th>
+                <th className="px-2 py-2">
+                  <input
+                    type="checkbox"
+                    checked={allCurrentPageSelected}
+                    onChange={(e) => {
+                      const next = new Set(selected);
+                      if (e.target.checked) table.paged.forEach((s) => next.add(s.id));
+                      else table.paged.forEach((s) => next.delete(s.id));
+                      setSelected(next);
+                    }}
+                  />
+                </th>
+                <th className="cursor-pointer px-2 py-2" onClick={() => toggleSort("name")}>名称</th>
+                <th className="cursor-pointer px-2 py-2" onClick={() => toggleSort("type")}>类型</th>
+                <th className="cursor-pointer px-2 py-2" onClick={() => toggleSort("basePath")}>路径</th>
+                <th className="cursor-pointer px-2 py-2" onClick={() => toggleSort("encrypted")}>加密</th>
               </tr>
             </thead>
             <tbody>
               {table.paged.map((s) => (
                 <tr key={s.id} className="border-b border-[var(--ark-line)]/70">
-                  <td className="px-2 py-2"><input type="checkbox" checked={selected.has(s.id)} onChange={(e) => {
-                    const next = new Set(selected);
-                    if (e.target.checked) next.add(s.id); else next.delete(s.id);
-                    setSelected(next);
-                  }} /></td>
+                  <td className="px-2 py-2">
+                    <input
+                      type="checkbox"
+                      checked={selected.has(s.id)}
+                      onChange={(e) => {
+                        const next = new Set(selected);
+                        if (e.target.checked) next.add(s.id);
+                        else next.delete(s.id);
+                        setSelected(next);
+                      }}
+                    />
+                  </td>
                   <td className="px-2 py-2 font-medium">{s.name}</td>
                   <td className="px-2 py-2">{s.type}</td>
-                  <td className="px-2 py-2 break-all text-xs mp-muted">{s.basePath}</td>
+                  <td className="break-all px-2 py-2 text-xs mp-muted">{s.basePath}</td>
                   <td className="px-2 py-2">{s.encrypted ? "是" : "否"}</td>
                 </tr>
               ))}
-              {!table.paged.length ? <tr><td className="px-2 py-4 text-center text-xs mp-muted" colSpan={5}>暂无数据</td></tr> : null}
+              {!table.paged.length ? (
+                <tr>
+                  <td className="px-2 py-4 text-center text-xs mp-muted" colSpan={5}>暂无数据</td>
+                </tr>
+              ) : null}
             </tbody>
           </table>
         </div>
+
         <TablePagination page={table.page} totalPages={table.totalPages} onChange={table.setPage} />
       </div>
     </section>

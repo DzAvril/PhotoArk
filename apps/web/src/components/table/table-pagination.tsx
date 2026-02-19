@@ -6,7 +6,7 @@ interface TablePaginationProps {
 
 export function TablePagination({ page, totalPages, onChange }: TablePaginationProps) {
   return (
-    <div className="mt-3 flex items-center justify-end gap-2 text-xs">
+    <div className="mt-3 flex items-center justify-center gap-2 text-xs md:justify-end">
       <button className="mp-btn" type="button" disabled={page <= 1} onClick={() => onChange(page - 1)}>
         上一页
       </button>

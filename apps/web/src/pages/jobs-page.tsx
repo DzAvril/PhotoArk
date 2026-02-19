@@ -38,9 +38,7 @@ export function JobsPage() {
     "ark-last-job-destination-target-id",
     ""
   );
-  const [form, setForm] = useState<JobForm>(() =>
-    createInitialForm(lastSourceTargetId, lastDestinationTargetId)
-  );
+  const [form, setForm] = useState<JobForm>(() => createInitialForm(lastSourceTargetId, lastDestinationTargetId));
   const [editingJobId, setEditingJobId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [formOpen, setFormOpen] = useState(false);
@@ -257,7 +255,11 @@ export function JobsPage() {
               required
             >
               <option value="">选择备份源存储</option>
-              {storages.map((s) => <option key={s.id} value={s.id}>{s.name} ({s.type})</option>)}
+              {storages.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name} ({s.type})
+                </option>
+              ))}
             </select>
 
             <select
@@ -273,10 +275,14 @@ export function JobsPage() {
               required
             >
               <option value="">选择备份目标存储</option>
-              {storages.map((s) => <option key={s.id} value={s.id}>{s.name} ({s.type})</option>)}
+              {storages.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name} ({s.type})
+                </option>
+              ))}
             </select>
 
-            <div className="sm:col-span-2 rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-2 text-xs">
+            <div className="rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-2 text-xs sm:col-span-2">
               <p>源路径：{sourceStorage?.basePath || "-"}</p>
               <p className="mt-1">目标路径：{destinationStorage?.basePath || "-"}</p>
             </div>
@@ -288,35 +294,147 @@ export function JobsPage() {
               onChange={(e) => setForm((p) => ({ ...p, schedule: e.target.value }))}
             />
             <div className="flex items-center gap-4 text-sm">
-              <label className="flex items-center gap-2"><input type="checkbox" checked={form.watchMode} onChange={(e) => setForm((p) => ({ ...p, watchMode: e.target.checked }))} />实时监听</label>
-              <label className="flex items-center gap-2"><input type="checkbox" checked={form.enabled} onChange={(e) => setForm((p) => ({ ...p, enabled: e.target.checked }))} />启用</label>
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={form.watchMode}
+                  onChange={(e) => setForm((p) => ({ ...p, watchMode: e.target.checked }))}
+                />
+                实时监听
+              </label>
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={form.enabled}
+                  onChange={(e) => setForm((p) => ({ ...p, enabled: e.target.checked }))}
+                />
+                启用
+              </label>
             </div>
 
-            <div className="sm:col-span-2 flex gap-2">
+            <div className="flex gap-2 sm:col-span-2">
               <button type="submit" className="mp-btn mp-btn-primary flex-1">{editingJobId ? "保存修改" : "新增任务"}</button>
-              {editingJobId ? <button type="button" className="mp-btn" onClick={resetForm}>取消编辑</button> : null}
+              {editingJobId ? (
+                <button type="button" className="mp-btn" onClick={resetForm}>
+                  取消编辑
+                </button>
+              ) : null}
             </div>
           </form>
         </Collapsible.Content>
       </Collapsible.Root>
 
       <div className="mp-panel p-4">
-        <TableToolbar title="任务列表" search={search} onSearchChange={setSearch} pageSize={table.pageSize} onPageSizeChange={table.setPageSize} totalItems={table.totalItems} />
-        <div className="mb-2 flex justify-end"><button className="mp-btn" type="button" disabled={!selected.size} onClick={() => void handleDeleteSelected()}>批量删除 ({selected.size})</button></div>
-        <div className="overflow-auto">
+        <TableToolbar
+          title="任务列表"
+          search={search}
+          onSearchChange={setSearch}
+          pageSize={table.pageSize}
+          onPageSizeChange={table.setPageSize}
+          totalItems={table.totalItems}
+        />
+        <div className="mb-2 flex justify-end">
+          <button className="mp-btn" type="button" disabled={!selected.size} onClick={() => void handleDeleteSelected()}>
+            批量删除 ({selected.size})
+          </button>
+        </div>
+
+        <div className="space-y-2 md:hidden">
+          {table.paged.map((j) => {
+            const latest = latestRunByJobId[j.id];
+            const running = runningJobIds.has(j.id);
+            const src = storageById[j.sourceTargetId];
+            const dst = storageById[j.destinationTargetId];
+            return (
+              <article key={j.id} className="mp-mobile-card">
+                <div className="flex items-start gap-2">
+                  <input
+                    type="checkbox"
+                    checked={selected.has(j.id)}
+                    onChange={(e) => {
+                      const next = new Set(selected);
+                      if (e.target.checked) next.add(j.id);
+                      else next.delete(j.id);
+                      setSelected(next);
+                    }}
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <h4 className="truncate text-sm font-semibold">{j.name}</h4>
+                      <span className={j.enabled ? "text-xs text-emerald-600" : "text-xs text-red-500"}>{j.enabled ? "启用" : "停用"}</span>
+                    </div>
+                    <p className="mt-0.5 text-xs mp-muted">{j.watchMode ? "实时监听" : "仅定时"}</p>
+                  </div>
+                </div>
+
+                <dl className="mp-kv mt-3">
+                  <dt>源存储</dt>
+                  <dd>
+                    <div>{src?.name ?? j.sourceTargetId}</div>
+                    <div className="break-all mp-muted">{src?.basePath ?? j.sourcePath}</div>
+                  </dd>
+                  <dt>目标存储</dt>
+                  <dd>
+                    <div>{dst?.name ?? j.destinationTargetId}</div>
+                    <div className="break-all mp-muted">{dst?.basePath ?? j.destinationPath}</div>
+                  </dd>
+                  <dt>最近执行</dt>
+                  <dd>
+                    {latest ? (
+                      <>
+                        <span className={latest.status === "success" ? "text-emerald-600" : "text-red-500"}>
+                          {latest.status === "success" ? "成功" : "失败"}
+                        </span>
+                        <span className="ml-2 mp-muted">{new Date(latest.finishedAt).toLocaleString()}</span>
+                      </>
+                    ) : (
+                      <span className="mp-muted">未执行</span>
+                    )}
+                  </dd>
+                </dl>
+
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    className="mp-btn"
+                    disabled={!j.enabled || running}
+                    onClick={() => void handleRunJob(j.id)}
+                  >
+                    {running ? "执行中" : "立即执行"}
+                  </button>
+                  <button type="button" className="mp-btn" onClick={() => startEdit(j)}>
+                    编辑
+                  </button>
+                  <button type="button" className="mp-btn" onClick={() => void handleDeleteOne(j.id)}>
+                    删除
+                  </button>
+                </div>
+              </article>
+            );
+          })}
+          {!table.paged.length ? <p className="py-4 text-center text-xs mp-muted">暂无数据</p> : null}
+        </div>
+
+        <div className="hidden overflow-auto md:block">
           <table className="min-w-full text-sm">
             <thead>
               <tr className="border-b border-[var(--ark-line)] text-left text-xs mp-muted">
-                <th className="px-2 py-2"><input type="checkbox" checked={allCurrentPageSelected} onChange={(e) => {
-                  const next = new Set(selected);
-                  if (e.target.checked) table.paged.forEach((j) => next.add(j.id));
-                  else table.paged.forEach((j) => next.delete(j.id));
-                  setSelected(next);
-                }} /></th>
-                <th className="px-2 py-2 cursor-pointer" onClick={() => toggleSort("name")}>任务</th>
-                <th className="px-2 py-2 cursor-pointer" onClick={() => toggleSort("sourceTargetId")}>源存储</th>
-                <th className="px-2 py-2 cursor-pointer" onClick={() => toggleSort("destinationTargetId")}>目标存储</th>
-                <th className="px-2 py-2 cursor-pointer" onClick={() => toggleSort("enabled")}>状态</th>
+                <th className="px-2 py-2">
+                  <input
+                    type="checkbox"
+                    checked={allCurrentPageSelected}
+                    onChange={(e) => {
+                      const next = new Set(selected);
+                      if (e.target.checked) table.paged.forEach((j) => next.add(j.id));
+                      else table.paged.forEach((j) => next.delete(j.id));
+                      setSelected(next);
+                    }}
+                  />
+                </th>
+                <th className="cursor-pointer px-2 py-2" onClick={() => toggleSort("name")}>任务</th>
+                <th className="cursor-pointer px-2 py-2" onClick={() => toggleSort("sourceTargetId")}>源存储</th>
+                <th className="cursor-pointer px-2 py-2" onClick={() => toggleSort("destinationTargetId")}>目标存储</th>
+                <th className="cursor-pointer px-2 py-2" onClick={() => toggleSort("enabled")}>状态</th>
                 <th className="px-2 py-2">监听</th>
                 <th className="px-2 py-2">最近执行</th>
                 <th className="px-2 py-2">操作</th>
@@ -330,38 +448,71 @@ export function JobsPage() {
                 const dst = storageById[j.destinationTargetId];
                 return (
                   <tr key={j.id} className="border-b border-[var(--ark-line)]/70">
-                    <td className="px-2 py-2"><input type="checkbox" checked={selected.has(j.id)} onChange={(e) => {
-                      const next = new Set(selected);
-                      if (e.target.checked) next.add(j.id); else next.delete(j.id);
-                      setSelected(next);
-                    }} /></td>
+                    <td className="px-2 py-2">
+                      <input
+                        type="checkbox"
+                        checked={selected.has(j.id)}
+                        onChange={(e) => {
+                          const next = new Set(selected);
+                          if (e.target.checked) next.add(j.id);
+                          else next.delete(j.id);
+                          setSelected(next);
+                        }}
+                      />
+                    </td>
                     <td className="px-2 py-2 font-medium">{j.name}</td>
-                    <td className="px-2 py-2 text-xs"><div>{src?.name ?? j.sourceTargetId}</div><div className="mp-muted break-all">{src?.basePath ?? j.sourcePath}</div></td>
-                    <td className="px-2 py-2 text-xs"><div>{dst?.name ?? j.destinationTargetId}</div><div className="mp-muted break-all">{dst?.basePath ?? j.destinationPath}</div></td>
+                    <td className="px-2 py-2 text-xs">
+                      <div>{src?.name ?? j.sourceTargetId}</div>
+                      <div className="break-all mp-muted">{src?.basePath ?? j.sourcePath}</div>
+                    </td>
+                    <td className="px-2 py-2 text-xs">
+                      <div>{dst?.name ?? j.destinationTargetId}</div>
+                      <div className="break-all mp-muted">{dst?.basePath ?? j.destinationPath}</div>
+                    </td>
                     <td className="px-2 py-2">{j.enabled ? "启用" : "停用"}</td>
                     <td className="px-2 py-2">{j.watchMode ? "实时监听" : "关闭"}</td>
                     <td className="px-2 py-2 text-xs">
                       {latest ? (
                         <div>
-                          <div className={latest.status === "success" ? "text-emerald-600" : "text-red-500"}>{latest.status === "success" ? "成功" : "失败"}</div>
+                          <div className={latest.status === "success" ? "text-emerald-600" : "text-red-500"}>
+                            {latest.status === "success" ? "成功" : "失败"}
+                          </div>
                           <div className="mp-muted">{new Date(latest.finishedAt).toLocaleString()}</div>
                         </div>
-                      ) : <span className="mp-muted">未执行</span>}
+                      ) : (
+                        <span className="mp-muted">未执行</span>
+                      )}
                     </td>
                     <td className="px-2 py-2">
                       <div className="flex flex-wrap gap-1">
-                        <button type="button" className="mp-btn" disabled={!j.enabled || running} onClick={() => void handleRunJob(j.id)}>{running ? "执行中" : "立即执行"}</button>
-                        <button type="button" className="mp-btn" onClick={() => startEdit(j)}>编辑</button>
-                        <button type="button" className="mp-btn" onClick={() => void handleDeleteOne(j.id)}>删除</button>
+                        <button
+                          type="button"
+                          className="mp-btn"
+                          disabled={!j.enabled || running}
+                          onClick={() => void handleRunJob(j.id)}
+                        >
+                          {running ? "执行中" : "立即执行"}
+                        </button>
+                        <button type="button" className="mp-btn" onClick={() => startEdit(j)}>
+                          编辑
+                        </button>
+                        <button type="button" className="mp-btn" onClick={() => void handleDeleteOne(j.id)}>
+                          删除
+                        </button>
                       </div>
                     </td>
                   </tr>
                 );
               })}
-              {!table.paged.length ? <tr><td className="px-2 py-4 text-center text-xs mp-muted" colSpan={8}>暂无数据</td></tr> : null}
+              {!table.paged.length ? (
+                <tr>
+                  <td className="px-2 py-4 text-center text-xs mp-muted" colSpan={8}>暂无数据</td>
+                </tr>
+              ) : null}
             </tbody>
           </table>
         </div>
+
         <TablePagination page={table.page} totalPages={table.totalPages} onChange={table.setPage} />
       </div>
     </section>
