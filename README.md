@@ -46,6 +46,8 @@ cp .env.example .env
 - `WATCH_USE_POLLING`：是否强制轮询监听（默认 `false`，macOS/普通 Linux 推荐）
 - `WATCH_POLLING_INTERVAL_MS`：轮询间隔毫秒（默认 `1000`）
 - `WATCH_RECONCILE_INTERVAL_MS`：监听器自愈重建间隔毫秒（默认 `30000`）
+- `WATCH_SETTLE_DELAY_MS`：监听到变更后静默多久再触发同步（默认 `120000`，即 2 分钟）
+- `WATCH_BATCH_MAX_WAIT_MS`：单个变更批次最长等待多久必须触发（默认 `600000`，即 10 分钟）
 
 生成主密钥示例：
 
@@ -114,6 +116,7 @@ docker compose up -d --build app
 - 删除任务报错：请先更新到最新镜像/最新代码（已修复为可读错误信息）。
 - 路径选择问题：路径组件支持继续进入下级目录，只有点击“选中当前目录”才会确认。
 - 实时监听未触发：先确认任务已勾选“实时监听 + 启用”；若 NAS 挂载盘事件不稳定，可将 `WATCH_USE_POLLING=true` 后重启 API。
+- 实时监听触发太频繁：可增大 `WATCH_SETTLE_DELAY_MS`；若长时间连续写入导致迟迟不触发，可减小 `WATCH_BATCH_MAX_WAIT_MS`。
 
 ## WebUI 路由与联调
 - 路由：`/`（总览）、`/storages`、`/jobs`、`/media`、`/backups`

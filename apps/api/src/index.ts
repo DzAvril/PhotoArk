@@ -76,7 +76,6 @@ const stateRepo = new FileStateRepository(env.BACKUP_STATE_FILE);
 const previewTokens = new Map<string, { assetId: string; expiresAt: number }>();
 const previewTickets = new Map<string, { assetId: string; expiresAt: number }>();
 const PREVIEW_TOKEN_TTL_MS = 60_000;
-const WATCH_DEBOUNCE_MS = 1_200;
 
 const storageCreateSchema = z.object({
   name: z.string().min(1),
@@ -370,6 +369,8 @@ type JobWatcherControl = {
   lastError: string | null;
   debounceTimer: NodeJS.Timeout | null;
   pendingPath: string | null;
+  pendingReason: string | null;
+  pendingSinceMs: number | null;
 };
 
 const jobWatchers = new Map<string, JobWatcherControl>();
@@ -779,6 +780,12 @@ function parseWatcherError(error: unknown): string {
   return String(error);
 }
 
+function resolveWatchBatchWindowMs() {
+  const settleDelayMs = Math.max(1000, env.WATCH_SETTLE_DELAY_MS);
+  const maxWaitMs = Math.max(settleDelayMs, env.WATCH_BATCH_MAX_WAIT_MS);
+  return { settleDelayMs, maxWaitMs };
+}
+
 async function stopJobWatcher(jobId: string) {
   const control = jobWatchers.get(jobId);
   if (!control) {
@@ -790,6 +797,8 @@ async function stopJobWatcher(jobId: string) {
     control.debounceTimer = null;
   }
   control.pendingPath = null;
+  control.pendingReason = null;
+  control.pendingSinceMs = null;
   queuedWatchJobs.delete(jobId);
   runningWatchJobs.delete(jobId);
   await control.watcher.close();
@@ -840,16 +849,35 @@ function scheduleWatchedJob(jobId: string, reason: string, changedPath: string) 
     return;
   }
 
+  const now = Date.now();
+  if (control.pendingSinceMs === null) {
+    control.pendingSinceMs = now;
+  }
+  const { settleDelayMs, maxWaitMs } = resolveWatchBatchWindowMs();
   control.pendingPath = changedPath;
+  control.pendingReason = reason;
   if (control.debounceTimer) {
     clearTimeout(control.debounceTimer);
   }
-  control.debounceTimer = setTimeout(() => {
+  const elapsedMs = now - control.pendingSinceMs;
+  const remainingMaxWaitMs = Math.max(0, maxWaitMs - elapsedMs);
+  const delayMs = Math.min(settleDelayMs, remainingMaxWaitMs);
+  const flush = () => {
     control.debounceTimer = null;
     const pendingPath = control.pendingPath ?? undefined;
+    const pendingReason = control.pendingReason ?? reason;
     control.pendingPath = null;
-    void runWatchedJob(jobId, reason, pendingPath);
-  }, WATCH_DEBOUNCE_MS);
+    control.pendingReason = null;
+    control.pendingSinceMs = null;
+    void runWatchedJob(jobId, pendingReason, pendingPath);
+  };
+
+  if (delayMs <= 0) {
+    flush();
+    return;
+  }
+
+  control.debounceTimer = setTimeout(flush, delayMs);
 }
 
 async function createJobWatcher(job: BackupJob, sourceRoot: string, usePolling: boolean): Promise<JobWatcherControl> {
@@ -907,7 +935,9 @@ async function createJobWatcher(job: BackupJob, sourceRoot: string, usePolling: 
     faulted: false,
     lastError: null,
     debounceTimer: null,
-    pendingPath: null
+    pendingPath: null,
+    pendingReason: null,
+    pendingSinceMs: null
   };
 }
 
