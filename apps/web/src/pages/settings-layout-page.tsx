@@ -9,10 +9,8 @@ const tabs = [
 export function SettingsLayoutPage() {
   return (
     <section className="space-y-3">
-      <div className="mp-panel mp-panel-soft p-4">
-        <h2 className="mp-section-title">配置中心</h2>
-        <p className="mt-1 text-sm mp-muted">统一管理通知、存储和任务配置</p>
-        <nav className="mt-3 flex flex-wrap gap-2">
+      <div className="mp-panel mp-panel-soft p-3">
+        <nav className="flex flex-wrap gap-2">
           {tabs.map((tab) => (
             <NavLink
               key={tab.to}

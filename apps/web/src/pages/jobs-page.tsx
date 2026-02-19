@@ -278,7 +278,7 @@ export function JobsPage() {
       <Collapsible.Root open={formOpen} onOpenChange={setFormOpen} className="mp-panel mp-panel-soft p-4">
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="mp-section-title">备份任务</h2>
+            <h3 className="text-base font-semibold">备份任务</h3>
             <p className="mt-1 text-sm mp-muted">选择源存储和目标存储即可创建同步任务</p>
           </div>
           <Collapsible.Trigger className="mp-btn">{formOpen ? "收起" : "新增任务"}</Collapsible.Trigger>

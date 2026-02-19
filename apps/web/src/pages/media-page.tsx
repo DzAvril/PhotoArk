@@ -21,10 +21,46 @@ type DisplayMediaItem = {
   livePair: LivePhotoPair | null;
 };
 
+type ViewerRuntimeMeta = {
+  width?: number;
+  height?: number;
+  durationSeconds?: number;
+};
+
 function splitFileName(name: string) {
   const dotIdx = name.lastIndexOf(".");
   if (dotIdx <= 0) return { base: name.toLowerCase(), ext: "" };
   return { base: name.slice(0, dotIdx).toLowerCase(), ext: name.slice(dotIdx).toLowerCase() };
+}
+
+function formatBytes(bytes: number | null) {
+  if (bytes === null || !Number.isFinite(bytes)) return "-";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let value = bytes;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  return `${value >= 100 || unitIndex === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[unitIndex]}`;
+}
+
+function formatDateTime(value: string | null) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return date.toLocaleString();
+}
+
+function formatDuration(seconds: number | undefined) {
+  if (!Number.isFinite(seconds) || seconds === undefined) return "-";
+  const whole = Math.max(0, Math.round(seconds));
+  const hh = Math.floor(whole / 3600);
+  const mm = Math.floor((whole % 3600) / 60);
+  const ss = whole % 60;
+  return hh > 0
+    ? `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")}`
+    : `${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")}`;
 }
 
 function detectLivePhotoPairs(media: MediaBrowseResult | null) {
@@ -90,8 +126,11 @@ function MediaPane({ storages }: MediaPaneProps) {
   const [error, setError] = useState("");
   const [activePath, setActivePath] = useState<string | null>(null);
   const [playingLiveVideo, setPlayingLiveVideo] = useState(false);
+  const [showMediaInfo, setShowMediaInfo] = useState(false);
   const [brokenThumbImagePaths, setBrokenThumbImagePaths] = useState<Set<string>>(new Set());
+  const [brokenThumbVideoPaths, setBrokenThumbVideoPaths] = useState<Set<string>>(new Set());
   const [brokenViewerImagePaths, setBrokenViewerImagePaths] = useState<Set<string>>(new Set());
+  const [viewerMetaByPath, setViewerMetaByPath] = useState<Record<string, ViewerRuntimeMeta>>({});
   const livePressTimerRef = useRef<number | null>(null);
   const previewDialogRef = useRef<HTMLDivElement | null>(null);
   const previewCloseButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -118,7 +157,9 @@ function MediaPane({ storages }: MediaPaneProps) {
       setActivePath(null);
       setPlayingLiveVideo(false);
       setBrokenThumbImagePaths(new Set());
+      setBrokenThumbVideoPaths(new Set());
       setBrokenViewerImagePaths(new Set());
+      setViewerMetaByPath({});
     } catch (err) {
       setError((err as Error).message);
     }
@@ -129,6 +170,8 @@ function MediaPane({ storages }: MediaPaneProps) {
       setMedia(null);
       setActivePath(null);
       setPlayingLiveVideo(false);
+      setBrokenThumbVideoPaths(new Set());
+      setViewerMetaByPath({});
       return;
     }
     void previewMedia();
@@ -152,6 +195,7 @@ function MediaPane({ storages }: MediaPaneProps) {
   function openByPath(nextPath: string, options?: { preserveOpener?: boolean }) {
     if (!options?.preserveOpener) {
       openerElementRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      setShowMediaInfo(false);
     }
     setActivePath(nextPath);
     setPlayingLiveVideo(false);
@@ -159,6 +203,7 @@ function MediaPane({ storages }: MediaPaneProps) {
   function closePreview() {
     setActivePath(null);
     setPlayingLiveVideo(false);
+    setShowMediaInfo(false);
     clearLivePressTimer();
   }
   function openPrev() {
@@ -224,6 +269,22 @@ function MediaPane({ storages }: MediaPaneProps) {
       ? activeItem.file.path
       : null;
   const shouldShowVideoViewer = Boolean(activeViewerVideoPath && (playingLiveVideo || activeItem?.file.kind === "video"));
+  const activeViewerPath = shouldShowVideoViewer ? activeViewerVideoPath : activeViewerImagePath;
+  const activeViewerMeta = activeViewerPath ? viewerMetaByPath[activeViewerPath] : undefined;
+  const activeKindLabel = activePair ? "Live Photo" : activeItem?.file.kind === "video" ? "视频" : "图片";
+  const activeLatitude = activeItem?.file.latitude;
+  const activeLongitude = activeItem?.file.longitude;
+  const activeLocationLabel =
+    activeLatitude !== null && activeLatitude !== undefined && activeLongitude !== null && activeLongitude !== undefined
+      ? `${activeLatitude.toFixed(6)}, ${activeLongitude.toFixed(6)}`
+      : "未读取到位置信息";
+
+  function upsertViewerMeta(pathKey: string, next: ViewerRuntimeMeta) {
+    setViewerMetaByPath((prev) => ({
+      ...prev,
+      [pathKey]: { ...prev[pathKey], ...next }
+    }));
+  }
 
   function clearLivePressTimer() {
     if (livePressTimerRef.current !== null) {
@@ -313,6 +374,7 @@ function MediaPane({ storages }: MediaPaneProps) {
             const streamUrl = getStorageMediaStreamUrl(selectedStorage.id, item.file.path);
             const isLivePhoto = Boolean(item.livePair);
             const thumbBroken = brokenThumbImagePaths.has(item.file.path);
+            const videoThumbBroken = brokenThumbVideoPaths.has(item.file.path);
             return (
               <button key={item.key} type="button" className="overflow-hidden rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] text-left" onClick={() => openByPath(item.file.path)}>
                 <div className="relative aspect-square bg-black/10">
@@ -334,8 +396,36 @@ function MediaPane({ storages }: MediaPaneProps) {
                         }}
                       />
                     )
+                  ) : videoThumbBroken ? (
+                    <div className="flex h-full w-full flex-col items-center justify-center gap-2 px-3 text-center text-sm mp-muted">
+                      <span>▶</span>
+                      <span>该视频格式无法生成缩略图</span>
+                    </div>
                   ) : (
-                    <video src={streamUrl} className="h-full w-full object-cover" preload="metadata" />
+                    <video
+                      src={`${streamUrl}#t=0.1`}
+                      className="h-full w-full object-cover"
+                      preload="metadata"
+                      muted
+                      playsInline
+                      onLoadedMetadata={(event) => {
+                        const video = event.currentTarget;
+                        if (!Number.isFinite(video.duration) || video.duration <= 0.11) return;
+                        if (video.currentTime >= 0.09) return;
+                        try {
+                          video.currentTime = 0.1;
+                        } catch {
+                          // Ignore seek failures; browser may still render first frame.
+                        }
+                      }}
+                      onError={() => {
+                        setBrokenThumbVideoPaths((prev) => {
+                          const next = new Set(prev);
+                          next.add(item.file.path);
+                          return next;
+                        });
+                      }}
+                    />
                   )}
                   {isLivePhoto ? <span className="absolute left-1.5 top-1.5 rounded bg-black/70 px-1.5 py-0.5 text-[11px] text-white">Live</span> : null}
                 </div>
@@ -386,6 +476,19 @@ function MediaPane({ storages }: MediaPaneProps) {
                     {playingLiveVideo ? "查看静态" : "播放动态"}
                   </button>
                 ) : null}
+                <button
+                  type="button"
+                  className={`mp-btn px-2 ${showMediaInfo ? "border-[var(--ark-primary)] text-[var(--ark-primary)]" : ""}`}
+                  aria-label={showMediaInfo ? "隐藏媒体信息" : "显示媒体信息"}
+                  aria-pressed={showMediaInfo}
+                  onClick={() => setShowMediaInfo((prev) => !prev)}
+                >
+                  <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" aria-hidden="true">
+                    <circle cx="10" cy="10" r="7.25" stroke="currentColor" strokeWidth="1.6" />
+                    <path d="M10 9V13" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                    <circle cx="10" cy="6.5" r="0.9" fill="currentColor" />
+                  </svg>
+                </button>
                 <button ref={previewCloseButtonRef} type="button" className="mp-btn" aria-label="关闭预览" onClick={closePreview}>
                   关闭
                 </button>
@@ -408,9 +511,30 @@ function MediaPane({ storages }: MediaPaneProps) {
                     loop
                     playsInline
                     preload="auto"
+                    onLoadedMetadata={(event) => {
+                      const video = event.currentTarget;
+                      upsertViewerMeta(activeViewerVideoPath, {
+                        width: video.videoWidth || undefined,
+                        height: video.videoHeight || undefined,
+                        durationSeconds: Number.isFinite(video.duration) ? video.duration : undefined
+                      });
+                    }}
                   />
                 ) : (
-                  <video src={getStorageMediaStreamUrl(selectedStorage.id, activeViewerVideoPath)} className="max-h-full max-w-full" controls autoPlay />
+                  <video
+                    src={getStorageMediaStreamUrl(selectedStorage.id, activeViewerVideoPath)}
+                    className="max-h-full max-w-full"
+                    controls
+                    autoPlay
+                    onLoadedMetadata={(event) => {
+                      const video = event.currentTarget;
+                      upsertViewerMeta(activeViewerVideoPath, {
+                        width: video.videoWidth || undefined,
+                        height: video.videoHeight || undefined,
+                        durationSeconds: Number.isFinite(video.duration) ? video.duration : undefined
+                      });
+                    }}
+                  />
                 )
               ) : (
                 activeViewerImagePath && !brokenViewerImagePaths.has(activeViewerImagePath) ? (
@@ -418,6 +542,13 @@ function MediaPane({ storages }: MediaPaneProps) {
                     src={getStorageMediaStreamUrl(selectedStorage.id, activeViewerImagePath)}
                     alt={activeItem.file.name}
                     className="max-h-full max-w-full object-contain"
+                    onLoad={(event) => {
+                      const image = event.currentTarget;
+                      upsertViewerMeta(activeViewerImagePath, {
+                        width: image.naturalWidth || undefined,
+                        height: image.naturalHeight || undefined
+                      });
+                    }}
                     onError={() => {
                       setBrokenViewerImagePaths((prev) => {
                         const next = new Set(prev);
@@ -453,6 +584,45 @@ function MediaPane({ storages }: MediaPaneProps) {
                 下一张
               </button>
             </div>
+
+            {showMediaInfo ? (
+              <div className="mt-3 grid gap-2 rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-3 text-sm md:grid-cols-2">
+                <p className="break-all">
+                  <span className="mp-muted">路径：</span>
+                  {activeItem.file.path}
+                </p>
+                <p>
+                  <span className="mp-muted">类型：</span>
+                  {activeKindLabel}
+                </p>
+                <p>
+                  <span className="mp-muted">文件大小：</span>
+                  {formatBytes(activeItem.file.sizeBytes)}
+                </p>
+                <p>
+                  <span className="mp-muted">拍摄时间：</span>
+                  {formatDateTime(activeItem.file.capturedAt ?? activeItem.file.modifiedAt)}
+                </p>
+                <p>
+                  <span className="mp-muted">文件时间：</span>
+                  {formatDateTime(activeItem.file.modifiedAt)}
+                </p>
+                <p>
+                  <span className="mp-muted">分辨率：</span>
+                  {activeViewerMeta?.width && activeViewerMeta?.height
+                    ? `${activeViewerMeta.width} × ${activeViewerMeta.height}`
+                    : "加载后显示"}
+                </p>
+                <p>
+                  <span className="mp-muted">视频时长：</span>
+                  {activeKindLabel === "视频" || shouldShowVideoViewer ? formatDuration(activeViewerMeta?.durationSeconds) : "-"}
+                </p>
+                <p>
+                  <span className="mp-muted">拍摄地点：</span>
+                  {activeLocationLabel}
+                </p>
+              </div>
+            ) : null}
           </div>
         </div>
       ) : null}

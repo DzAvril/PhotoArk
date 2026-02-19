@@ -109,14 +109,9 @@ export function BackupsPage() {
 
   return (
     <section className="space-y-3">
-      <div className="mp-panel mp-panel-soft p-4">
-        <h2 className="mp-section-title">记录</h2>
-        <p className="mt-1 text-sm mp-muted">每次任务执行都会生成一条执行记录</p>
-        {message ? <p className="mt-3 text-sm mp-status-success">{message}</p> : null}
-        {error ? <p className="mp-error mt-3">{error}</p> : null}
-      </div>
-
       <div className="mp-panel p-4">
+        {message ? <p className="mb-3 text-sm mp-status-success">{message}</p> : null}
+        {error ? <p className="mp-error mb-3">{error}</p> : null}
         <TableToolbar
           title="执行记录"
           search={search}
@@ -135,7 +130,6 @@ export function BackupsPage() {
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <h4 className="truncate text-sm font-semibold">{job?.name ?? run.jobId}</h4>
-                    <p className="mt-0.5 break-all text-sm mp-muted">{job?.sourcePath ?? ""} {" -> "} {job?.destinationPath ?? ""}</p>
                   </div>
                   <span className={run.status === "success" ? "text-base mp-status-success" : "text-base mp-status-danger"}>
                     {run.status === "success" ? "成功" : "失败"}
@@ -211,7 +205,6 @@ export function BackupsPage() {
                   <tr key={run.id} className="border-b border-[var(--ark-line)]/70 align-top">
                     <td className="px-2 py-2 text-sm">
                       <div>{job?.name ?? run.jobId}</div>
-                      <div className="mp-muted">{job?.sourcePath ?? ""} {" -> "} {job?.destinationPath ?? ""}</div>
                     </td>
                     <td className="px-2 py-2 text-sm">{new Date(run.finishedAt).toLocaleString()}</td>
                     <td className="px-2 py-2 text-sm">{getTriggerLabel(run.trigger)}</td>

@@ -143,7 +143,7 @@ export function StoragesPage() {
       <Collapsible.Root open={formOpen} onOpenChange={setFormOpen} className="mp-panel mp-panel-soft p-4">
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="mp-section-title">目标存储</h2>
+            <h3 className="text-base font-semibold">目标存储</h3>
             <p className="mt-1 text-sm mp-muted">支持本地目录下拉选择和手动输入路径</p>
           </div>
           <Collapsible.Trigger className="mp-btn">{formOpen ? "收起" : "新增存储"}</Collapsible.Trigger>
