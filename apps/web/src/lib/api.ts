@@ -6,6 +6,7 @@ import type {
   BackupAsset,
   BackupJob,
   DirectoryBrowseResult,
+  JobExecution,
   JobRun,
   MediaBrowseResult,
   LivePhotoPair,
@@ -231,7 +232,11 @@ export function deleteJob(jobId: string) {
 }
 
 export function runJob(jobId: string) {
-  return fetchJson<JobRun>(`/api/jobs/${jobId}/run`, { method: "POST" });
+  return fetchJson<{ execution: JobExecution }>(`/api/jobs/${jobId}/run`, { method: "POST" });
+}
+
+export function getJobExecutions() {
+  return fetchJson<{ items: JobExecution[] }>("/api/job-executions");
 }
 
 export function getJobRuns(jobId: string) {

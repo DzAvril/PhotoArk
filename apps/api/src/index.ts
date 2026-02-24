@@ -514,6 +514,41 @@ const runningWatchJobs = new Set<string>();
 const queuedWatchJobs = new Set<string>();
 let runExecutionQueue: Promise<unknown> = Promise.resolve();
 let watcherReconcileTimer: NodeJS.Timeout | null = null;
+const jobExecutions = new Map<string, JobExecution>();
+const JOB_EXECUTION_HISTORY_LIMIT = 200;
+
+type JobExecutionStatus = "queued" | "running" | "success" | "failed";
+type JobExecutionPhase = "queued" | "scanning" | "syncing" | "finished";
+
+type JobExecutionProgress = {
+  phase: JobExecutionPhase;
+  totalCount: number | null;
+  scannedCount: number;
+  processedCount: number;
+  copiedCount: number;
+  skippedCount: number;
+  failedCount: number;
+  photoCount: number;
+  videoCount: number;
+  livePhotoPairCount: number;
+  percent: number;
+  currentPath: string | null;
+};
+
+type JobExecution = {
+  id: string;
+  jobId: string;
+  trigger: JobRunTrigger;
+  status: JobExecutionStatus;
+  createdAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+  updatedAt: string;
+  runId: string | null;
+  message: string | null;
+  error: string | null;
+  progress: JobExecutionProgress;
+};
 
 type VersionSource = "github_release" | "github_tag" | "unavailable";
 
@@ -654,7 +689,109 @@ function buildLivePhotoIdByRelativePath(relativePaths: string[]): Map<string, st
   return out;
 }
 
-async function executeJob(state: BackupState, jobId: string, trigger: JobRunTrigger): Promise<JobRun> {
+type JobExecutionProgressUpdate = {
+  phase: JobExecutionPhase;
+  totalCount: number | null;
+  scannedCount: number;
+  processedCount: number;
+  copiedCount: number;
+  skippedCount: number;
+  failedCount: number;
+  photoCount: number;
+  videoCount: number;
+  livePhotoPairCount: number;
+  percent: number;
+  currentPath: string | null;
+};
+
+type ExecuteJobProgressHandler = (progress: JobExecutionProgressUpdate) => void;
+
+function clampProgressPercent(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  if (value <= 0) return 0;
+  if (value >= 100) return 100;
+  return Math.round(value);
+}
+
+function normalizeJobExecution(execution: JobExecution): JobExecution {
+  return {
+    ...execution,
+    trigger: normalizeRunTrigger(execution.trigger),
+    progress: {
+      ...execution.progress
+    }
+  };
+}
+
+function listJobExecutions(): JobExecution[] {
+  const items = [...jobExecutions.values()];
+  items.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+  return items.map(normalizeJobExecution);
+}
+
+function trimJobExecutions() {
+  const all = [...jobExecutions.values()];
+  const activeIds = new Set(all.filter((item) => item.status === "queued" || item.status === "running").map((item) => item.id));
+  const finishedIds = all
+    .filter((item) => item.status === "success" || item.status === "failed")
+    .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
+    .slice(0, JOB_EXECUTION_HISTORY_LIMIT)
+    .map((item) => item.id);
+  const keepIds = new Set([...activeIds, ...finishedIds]);
+  for (const id of jobExecutions.keys()) {
+    if (!keepIds.has(id)) {
+      jobExecutions.delete(id);
+    }
+  }
+}
+
+function createJobExecution(jobId: string, trigger: JobRunTrigger): JobExecution {
+  const now = new Date().toISOString();
+  const execution: JobExecution = {
+    id: `exec_${randomUUID()}`,
+    jobId,
+    trigger,
+    status: "queued",
+    createdAt: now,
+    startedAt: null,
+    finishedAt: null,
+    updatedAt: now,
+    runId: null,
+    message: null,
+    error: null,
+    progress: {
+      phase: "queued",
+      totalCount: null,
+      scannedCount: 0,
+      processedCount: 0,
+      copiedCount: 0,
+      skippedCount: 0,
+      failedCount: 0,
+      photoCount: 0,
+      videoCount: 0,
+      livePhotoPairCount: 0,
+      percent: 0,
+      currentPath: null
+    }
+  };
+  jobExecutions.set(execution.id, execution);
+  trimJobExecutions();
+  return execution;
+}
+
+function updateJobExecution(executionId: string, updater: (execution: JobExecution) => void) {
+  const current = jobExecutions.get(executionId);
+  if (!current) return;
+  updater(current);
+  current.updatedAt = new Date().toISOString();
+}
+
+async function executeJob(
+  state: BackupState,
+  jobId: string,
+  trigger: JobRunTrigger,
+  onProgress?: ExecuteJobProgressHandler
+): Promise<JobRun> {
   const job = state.jobs.find((item) => item.id === jobId);
   if (!job) {
     throw new Error("Job not found");
@@ -677,7 +814,55 @@ async function executeJob(state: BackupState, jobId: string, trigger: JobRunTrig
   if (hasOverlappingPaths(sourceRoot, destinationRoot)) {
     throw new Error("Source path and destination path cannot overlap");
   }
+
+  const emitProgress = (
+    phase: JobExecutionPhase,
+    progress: {
+      totalCount: number | null;
+      scannedCount: number;
+      processedCount: number;
+      copiedCount: number;
+      skippedCount: number;
+      failedCount: number;
+      photoCount: number;
+      videoCount: number;
+      livePhotoPairCount: number;
+      currentPath: string | null;
+    }
+  ) => {
+    if (!onProgress) return;
+    const { totalCount, processedCount } = progress;
+    const percent = clampProgressPercent(totalCount && totalCount > 0 ? (processedCount / totalCount) * 100 : phase === "finished" ? 100 : 0);
+    onProgress({
+      phase,
+      totalCount,
+      scannedCount: progress.scannedCount,
+      processedCount,
+      copiedCount: progress.copiedCount,
+      skippedCount: progress.skippedCount,
+      failedCount: progress.failedCount,
+      photoCount: progress.photoCount,
+      videoCount: progress.videoCount,
+      livePhotoPairCount: progress.livePhotoPairCount,
+      percent,
+      currentPath: progress.currentPath
+    });
+  };
+
   const startedAt = new Date().toISOString();
+  emitProgress("scanning", {
+    totalCount: null,
+    scannedCount: 0,
+    processedCount: 0,
+    copiedCount: 0,
+    skippedCount: 0,
+    failedCount: 0,
+    photoCount: 0,
+    videoCount: 0,
+    livePhotoPairCount: 0,
+    currentPath: null
+  });
+
   const sourceFiles = await collectMediaFiles(sourceRoot);
   const relativePaths = sourceFiles.map((fullPath) => toPosixPath(path.relative(sourceRoot, fullPath)));
   const livePhotoMap = buildLivePhotoIdByRelativePath(relativePaths);
@@ -685,6 +870,7 @@ async function executeJob(state: BackupState, jobId: string, trigger: JobRunTrig
   const copiedSamples: string[] = [];
   const errors: JobRun["errors"] = [];
   const scannedCount = sourceFiles.length;
+  let processedCount = 0;
   let skippedCount = 0;
   let copiedCount = 0;
   let failedCount = 0;
@@ -699,6 +885,19 @@ async function executeJob(state: BackupState, jobId: string, trigger: JobRunTrig
       destinationAssetIndexByName.set(asset.name, idx);
     }
   }
+
+  emitProgress("syncing", {
+    totalCount: scannedCount,
+    scannedCount,
+    processedCount,
+    copiedCount,
+    skippedCount,
+    failedCount,
+    photoCount,
+    videoCount,
+    livePhotoPairCount: copiedLivePhotoIds.size,
+    currentPath: null
+  });
 
   for (let i = 0; i < sourceFiles.length; i += 1) {
     const sourceFile = sourceFiles[i];
@@ -738,6 +937,19 @@ async function executeJob(state: BackupState, jobId: string, trigger: JobRunTrig
           state.assets[existingIdx] = nextAsset;
         }
         skippedCount += 1;
+        processedCount += 1;
+        emitProgress("syncing", {
+          totalCount: scannedCount,
+          scannedCount,
+          processedCount,
+          copiedCount,
+          skippedCount,
+          failedCount,
+          photoCount,
+          videoCount,
+          livePhotoPairCount: copiedLivePhotoIds.size,
+          currentPath: relativePath
+        });
         continue;
       }
 
@@ -780,12 +992,38 @@ async function executeJob(state: BackupState, jobId: string, trigger: JobRunTrig
       }
 
       copiedCount += 1;
+      processedCount += 1;
+      emitProgress("syncing", {
+        totalCount: scannedCount,
+        scannedCount,
+        processedCount,
+        copiedCount,
+        skippedCount,
+        failedCount,
+        photoCount,
+        videoCount,
+        livePhotoPairCount: copiedLivePhotoIds.size,
+        currentPath: relativePath
+      });
       if (copiedSamples.length < 20) {
         copiedSamples.push(relativePath);
       }
     } catch (error) {
       failedCount += 1;
+      processedCount += 1;
       errors.push({ path: relativePath, error: (error as Error).message });
+      emitProgress("syncing", {
+        totalCount: scannedCount,
+        scannedCount,
+        processedCount,
+        copiedCount,
+        skippedCount,
+        failedCount,
+        photoCount,
+        videoCount,
+        livePhotoPairCount: copiedLivePhotoIds.size,
+        currentPath: relativePath
+      });
     }
   }
 
@@ -810,6 +1048,18 @@ async function executeJob(state: BackupState, jobId: string, trigger: JobRunTrig
   };
   state.jobRuns.unshift(run);
   state.jobRuns = state.jobRuns.slice(0, 200);
+  emitProgress("finished", {
+    totalCount: scannedCount,
+    scannedCount,
+    processedCount,
+    copiedCount,
+    skippedCount,
+    failedCount,
+    photoCount,
+    videoCount,
+    livePhotoPairCount: copiedLivePhotoIds.size,
+    currentPath: null
+  });
   return run;
 }
 
@@ -884,6 +1134,74 @@ async function executeJobAndPersist(jobId: string, trigger: JobRunTrigger): Prom
     });
     return run;
   });
+}
+
+function startJobExecution(jobId: string, trigger: JobRunTrigger): JobExecution {
+  const execution = createJobExecution(jobId, trigger);
+  void enqueueRunExecution(async () => {
+    updateJobExecution(execution.id, (current) => {
+      current.status = "running";
+      current.startedAt = new Date().toISOString();
+      current.progress.phase = "scanning";
+      current.progress.percent = 0;
+      current.progress.currentPath = null;
+      current.error = null;
+      current.message = null;
+    });
+
+    try {
+      const state = await stateRepo.loadState();
+      const run = await executeJob(state, jobId, trigger, (progress) => {
+        updateJobExecution(execution.id, (current) => {
+          current.progress = {
+            ...current.progress,
+            ...progress
+          };
+        });
+      });
+      await stateRepo.saveState(state);
+      updateJobExecution(execution.id, (current) => {
+        current.status = run.status;
+        current.finishedAt = run.finishedAt;
+        current.runId = run.id;
+        current.message = run.message ?? null;
+        current.error = null;
+        current.progress = {
+          ...current.progress,
+          phase: "finished",
+          totalCount: run.scannedCount,
+          scannedCount: run.scannedCount,
+          processedCount: run.scannedCount,
+          copiedCount: run.copiedCount,
+          skippedCount: run.skippedCount,
+          failedCount: run.failedCount,
+          photoCount: run.photoCount,
+          videoCount: run.videoCount,
+          livePhotoPairCount: run.livePhotoPairCount,
+          percent: 100,
+          currentPath: null
+        };
+      });
+      void sendTelegramRunSummaryIfEnabled(state, run).catch((error) => {
+        app.log.error({ err: error, runId: run.id, jobId: run.jobId }, "Failed to send Telegram backup summary");
+      });
+    } catch (error) {
+      const message = (error as Error).message;
+      updateJobExecution(execution.id, (current) => {
+        current.status = "failed";
+        current.finishedAt = new Date().toISOString();
+        current.runId = null;
+        current.error = message;
+        current.message = message;
+        current.progress.phase = "finished";
+      });
+      app.log.error({ err: error, executionId: execution.id, jobId }, "Job execution failed");
+    } finally {
+      trimJobExecutions();
+    }
+  });
+
+  return execution;
 }
 
 function resolveWatchSourceRoot(state: BackupState, job: BackupJob): string | null {
@@ -1682,10 +2000,30 @@ app.delete<{ Params: { runId: string } }>("/api/runs/:runId", async (req, reply)
   return { ok: true };
 });
 
+app.get("/api/job-executions", async () => {
+  return { items: listJobExecutions() };
+});
+
+app.get<{ Params: { executionId: string } }>("/api/job-executions/:executionId", async (req, reply) => {
+  const execution = jobExecutions.get(req.params.executionId);
+  if (!execution) {
+    return reply.code(404).send({ message: "Execution not found" });
+  }
+  return { execution: normalizeJobExecution(execution) };
+});
+
 app.post<{ Params: { jobId: string } }>("/api/jobs/:jobId/run", async (req, reply) => {
   try {
-    const run = await executeJobAndPersist(req.params.jobId, "manual");
-    return run;
+    const state = await stateRepo.loadState();
+    const job = state.jobs.find((item) => item.id === req.params.jobId);
+    if (!job) {
+      return reply.code(404).send({ message: "Job not found" });
+    }
+    if (!job.enabled) {
+      return reply.code(400).send({ message: "Job is disabled" });
+    }
+    const execution = startJobExecution(req.params.jobId, "manual");
+    return reply.code(202).send({ execution: normalizeJobExecution(execution) });
   } catch (error) {
     return reply.code(400).send({ message: (error as Error).message });
   }

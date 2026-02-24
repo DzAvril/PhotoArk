@@ -106,6 +106,39 @@ export interface JobRun {
   message?: string;
 }
 
+export type JobExecutionStatus = "queued" | "running" | "success" | "failed";
+export type JobExecutionPhase = "queued" | "scanning" | "syncing" | "finished";
+
+export interface JobExecutionProgress {
+  phase: JobExecutionPhase;
+  totalCount: number | null;
+  scannedCount: number;
+  processedCount: number;
+  copiedCount: number;
+  skippedCount: number;
+  failedCount: number;
+  photoCount: number;
+  videoCount: number;
+  livePhotoPairCount: number;
+  percent: number;
+  currentPath: string | null;
+}
+
+export interface JobExecution {
+  id: string;
+  jobId: string;
+  trigger: JobRunTrigger;
+  status: JobExecutionStatus;
+  createdAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+  updatedAt: string;
+  runId: string | null;
+  message: string | null;
+  error: string | null;
+  progress: JobExecutionProgress;
+}
+
 export interface BackupAsset {
   id: string;
   name: string;

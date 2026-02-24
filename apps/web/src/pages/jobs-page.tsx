@@ -6,8 +6,8 @@ import { SortableHeader } from "../components/table/sortable-header";
 import { TableToolbar } from "../components/table/table-toolbar";
 import { useTablePagination } from "../components/table/use-table-pagination";
 import { useLocalStorageState } from "../hooks/use-local-storage-state";
-import { createJob, deleteJob, getJobs, getRuns, getStorages, runJob, updateJob } from "../lib/api";
-import type { BackupJob, JobRun, StorageTarget } from "../types/api";
+import { createJob, deleteJob, getJobExecutions, getJobs, getRuns, getStorages, runJob, updateJob } from "../lib/api";
+import type { BackupJob, JobExecution, JobRun, StorageTarget } from "../types/api";
 
 type SortKey = "name" | "sourceTargetId" | "destinationTargetId" | "enabled";
 
@@ -42,10 +42,31 @@ function getAriaSort(active: boolean, asc: boolean): "ascending" | "descending" 
   return asc ? "ascending" : "descending";
 }
 
+function isExecutionActive(execution: JobExecution): boolean {
+  return execution.status === "queued" || execution.status === "running";
+}
+
+function upsertExecution(items: JobExecution[], execution: JobExecution): JobExecution[] {
+  const next = items.filter((item) => item.id !== execution.id);
+  next.unshift(execution);
+  return next;
+}
+
+function getExecutionStatusLabel(execution: JobExecution): string {
+  if (execution.status === "queued") return "排队中";
+  if (execution.status === "running") {
+    if (execution.progress.phase === "scanning") return "扫描中";
+    return "执行中";
+  }
+  if (execution.status === "success") return "执行完成";
+  return "执行失败";
+}
+
 export function JobsPage() {
   const [items, setItems] = useState<BackupJob[]>([]);
   const [storages, setStorages] = useState<StorageTarget[]>([]);
   const [runs, setRuns] = useState<JobRun[]>([]);
+  const [executions, setExecutions] = useState<JobExecution[]>([]);
   const [lastSourceTargetId, setLastSourceTargetId] = useLocalStorageState("ark-last-job-source-target-id", "");
   const [lastDestinationTargetId, setLastDestinationTargetId] = useLocalStorageState(
     "ark-last-job-destination-target-id",
@@ -60,10 +81,10 @@ export function JobsPage() {
   const [sortKey, setSortKey] = useState<SortKey>("name");
   const [sortAsc, setSortAsc] = useState(true);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [runningJobIds, setRunningJobIds] = useState<Set<string>>(new Set());
   const [deletingJobIds, setDeletingJobIds] = useState<Set<string>>(new Set());
   const [deletingSelected, setDeletingSelected] = useState(false);
   const [pendingDeleteAction, setPendingDeleteAction] = useState<PendingDeleteAction | null>(null);
+  const [progressDialogExecutionId, setProgressDialogExecutionId] = useState<string | null>(null);
 
   const storageById = useMemo(() => Object.fromEntries(storages.map((s) => [s.id, s])), [storages]);
   const sourceStorage = form.sourceTargetId ? storageById[form.sourceTargetId] : undefined;
@@ -71,10 +92,16 @@ export function JobsPage() {
 
   async function load() {
     try {
-      const [jobsRes, storagesRes, runsRes] = await Promise.all([getJobs(), getStorages(), getRuns()]);
+      const [jobsRes, storagesRes, runsRes, executionsRes] = await Promise.all([
+        getJobs(),
+        getStorages(),
+        getRuns(),
+        getJobExecutions()
+      ]);
       setItems(jobsRes.items);
       setStorages(storagesRes.items);
       setRuns(runsRes.items);
+      setExecutions(executionsRes.items);
       setSelected(new Set());
     } catch (err) {
       setError((err as Error).message);
@@ -83,6 +110,43 @@ export function JobsPage() {
 
   useEffect(() => {
     void load();
+  }, []);
+
+  useEffect(() => {
+    let disposed = false;
+    let timer: number | null = null;
+
+    const poll = async () => {
+      try {
+        const executionsRes = await getJobExecutions();
+        if (disposed) return;
+        setExecutions(executionsRes.items);
+        if (executionsRes.items.some(isExecutionActive)) {
+          const runsRes = await getRuns();
+          if (disposed) return;
+          setRuns(runsRes.items);
+        }
+      } catch {
+        // Ignore polling errors and keep the last known state.
+      } finally {
+        if (!disposed) {
+          timer = window.setTimeout(() => {
+            void poll();
+          }, 1200);
+        }
+      }
+    };
+
+    timer = window.setTimeout(() => {
+      void poll();
+    }, 1200);
+
+    return () => {
+      disposed = true;
+      if (timer !== null) {
+        window.clearTimeout(timer);
+      }
+    };
   }, []);
 
   function resetForm() {
@@ -202,21 +266,16 @@ export function JobsPage() {
     }
   }
 
-  async function handleRunJob(jobId: string) {
+  async function handleRunJob(job: BackupJob) {
     setError("");
     setMessage("");
-    setRunningJobIds((prev) => new Set(prev).add(jobId));
     try {
-      const run = await runJob(jobId);
-      setRuns((prev) => [run, ...prev]);
+      const result = await runJob(job.id);
+      setExecutions((prev) => upsertExecution(prev, result.execution));
+      setProgressDialogExecutionId(result.execution.id);
+      setMessage(`任务“${job.name}”已开始，可切到后台继续执行。`);
     } catch (err) {
       setError((err as Error).message);
-    } finally {
-      setRunningJobIds((prev) => {
-        const next = new Set(prev);
-        next.delete(jobId);
-        return next;
-      });
     }
   }
 
@@ -270,6 +329,35 @@ export function JobsPage() {
     }
     return out;
   }, [runs]);
+
+  const activeExecutionByJobId = useMemo(() => {
+    const out: Record<string, JobExecution | undefined> = {};
+    for (const execution of executions) {
+      if (!isExecutionActive(execution)) continue;
+      const existing = out[execution.jobId];
+      if (!existing) {
+        out[execution.jobId] = execution;
+        continue;
+      }
+      if (Date.parse(execution.updatedAt) > Date.parse(existing.updatedAt)) {
+        out[execution.jobId] = execution;
+      }
+    }
+    return out;
+  }, [executions]);
+
+  const executionById = useMemo(() => Object.fromEntries(executions.map((item) => [item.id, item])), [executions]);
+  const progressExecution = progressDialogExecutionId ? executionById[progressDialogExecutionId] : undefined;
+  const progressJob = progressExecution ? items.find((item) => item.id === progressExecution.jobId) : undefined;
+  const progressPercent = progressExecution?.progress.percent ?? 0;
+  const progressStatusLabel = progressExecution ? getExecutionStatusLabel(progressExecution) : "";
+  const progressStatusClass =
+    progressExecution?.status === "failed"
+      ? "mp-status-danger"
+      : progressExecution?.status === "success"
+        ? "mp-status-success"
+        : "mp-status-warning";
+  const progressCanBackground = Boolean(progressExecution && isExecutionActive(progressExecution));
 
   const allCurrentPageSelected = table.paged.length > 0 && table.paged.every((j) => selected.has(j.id));
 
@@ -427,7 +515,8 @@ export function JobsPage() {
         <div className="space-y-2 md:hidden">
           {table.paged.map((j) => {
             const latest = latestRunByJobId[j.id];
-            const running = runningJobIds.has(j.id);
+            const activeExecution = activeExecutionByJobId[j.id];
+            const running = Boolean(activeExecution);
             const src = storageById[j.sourceTargetId];
             const dst = storageById[j.destinationTargetId];
             return (
@@ -465,7 +554,18 @@ export function JobsPage() {
                   </dd>
                   <dt>最近执行</dt>
                   <dd>
-                    {latest ? (
+                    {activeExecution ? (
+                      <>
+                        <span className="mp-status-warning">{getExecutionStatusLabel(activeExecution)}</span>
+                        <span className="ml-2 font-medium">{activeExecution.progress.percent}%</span>
+                        <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-[var(--ark-line)]">
+                          <div
+                            className="h-full rounded-full bg-[var(--ark-primary)] transition-all"
+                            style={{ width: `${activeExecution.progress.percent}%` }}
+                          />
+                        </div>
+                      </>
+                    ) : latest ? (
                       <>
                         <span className={latest.status === "success" ? "mp-status-success" : "mp-status-danger"}>
                           {latest.status === "success" ? "成功" : "失败"}
@@ -483,10 +583,25 @@ export function JobsPage() {
                     type="button"
                     className="mp-btn"
                     disabled={!j.enabled || running}
-                    onClick={() => void handleRunJob(j.id)}
+                    onClick={() => void handleRunJob(j)}
                   >
-                    {running ? "执行中" : "立即执行"}
+                    {running
+                      ? activeExecution?.status === "queued"
+                        ? "排队中"
+                        : `执行中 ${activeExecution?.progress.percent ?? 0}%`
+                      : "立即执行"}
                   </button>
+                  {activeExecution ? (
+                    <button
+                      type="button"
+                      className="mp-btn"
+                      onClick={() => {
+                        setProgressDialogExecutionId(activeExecution.id);
+                      }}
+                    >
+                      查看进度
+                    </button>
+                  ) : null}
                   <button type="button" className="mp-btn" onClick={() => startEdit(j)}>
                     编辑
                   </button>
@@ -562,7 +677,8 @@ export function JobsPage() {
             <tbody>
               {table.paged.map((j) => {
                 const latest = latestRunByJobId[j.id];
-                const running = runningJobIds.has(j.id);
+                const activeExecution = activeExecutionByJobId[j.id];
+                const running = Boolean(activeExecution);
                 const src = storageById[j.sourceTargetId];
                 const dst = storageById[j.destinationTargetId];
                 return (
@@ -591,7 +707,19 @@ export function JobsPage() {
                     <td className="px-2 py-2">{j.enabled ? "启用" : "停用"}</td>
                     <td className="px-2 py-2">{j.watchMode ? "实时监听" : "关闭"}</td>
                     <td className="px-2 py-2 text-sm">
-                      {latest ? (
+                      {activeExecution ? (
+                        <div>
+                          <div className="mp-status-warning">
+                            {getExecutionStatusLabel(activeExecution)} {activeExecution.progress.percent}%
+                          </div>
+                          <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-[var(--ark-line)]">
+                            <div
+                              className="h-full rounded-full bg-[var(--ark-primary)] transition-all"
+                              style={{ width: `${activeExecution.progress.percent}%` }}
+                            />
+                          </div>
+                        </div>
+                      ) : latest ? (
                         <div>
                           <div className={latest.status === "success" ? "mp-status-success" : "mp-status-danger"}>
                             {latest.status === "success" ? "成功" : "失败"}
@@ -608,10 +736,25 @@ export function JobsPage() {
                           type="button"
                           className="mp-btn"
                           disabled={!j.enabled || running}
-                          onClick={() => void handleRunJob(j.id)}
+                          onClick={() => void handleRunJob(j)}
                         >
-                          {running ? "执行中" : "立即执行"}
+                          {running
+                            ? activeExecution?.status === "queued"
+                              ? "排队中"
+                              : `执行中 ${activeExecution?.progress.percent ?? 0}%`
+                            : "立即执行"}
                         </button>
+                        {activeExecution ? (
+                          <button
+                            type="button"
+                            className="mp-btn"
+                            onClick={() => {
+                              setProgressDialogExecutionId(activeExecution.id);
+                            }}
+                          >
+                            查看进度
+                          </button>
+                        ) : null}
                         <button type="button" className="mp-btn" onClick={() => startEdit(j)}>
                           编辑
                         </button>
@@ -652,6 +795,86 @@ export function JobsPage() {
           </div>
         ) : null}
       </div>
+
+      {progressExecution ? (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/45 p-4"
+          onClick={() => {
+            if (progressCanBackground) {
+              setProgressDialogExecutionId(null);
+              setMessage("任务已切到后台执行，可在任务列表查看实时进度。");
+            }
+          }}
+        >
+          <div className="mp-panel w-full max-w-lg p-4" onClick={(event) => event.stopPropagation()}>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-base font-semibold">任务执行进度</h3>
+                <p className="mt-1 text-sm mp-muted">{progressJob?.name ?? progressExecution.jobId}</p>
+              </div>
+              <span className={`text-sm font-medium ${progressStatusClass}`}>{progressStatusLabel}</span>
+            </div>
+
+            <div className="mt-3 flex items-center justify-between text-sm">
+              <span className="mp-muted">进度</span>
+              <span className="font-semibold">{progressPercent}%</span>
+            </div>
+            <div className="mt-1 h-2 overflow-hidden rounded-full bg-[var(--ark-line)]">
+              <div
+                className="h-full rounded-full bg-[var(--ark-primary)] transition-all duration-300"
+                style={{ width: `${progressPercent}%` }}
+              />
+            </div>
+
+            <div className="mt-3 grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
+              <div className="rounded-md border border-[var(--ark-line)] p-2">
+                <p className="text-xs mp-muted">已扫描</p>
+                <p className="font-semibold">{progressExecution.progress.scannedCount}</p>
+              </div>
+              <div className="rounded-md border border-[var(--ark-line)] p-2">
+                <p className="text-xs mp-muted">已同步</p>
+                <p className="font-semibold">{progressExecution.progress.copiedCount}</p>
+              </div>
+              <div className="rounded-md border border-[var(--ark-line)] p-2">
+                <p className="text-xs mp-muted">已跳过</p>
+                <p className="font-semibold">{progressExecution.progress.skippedCount}</p>
+              </div>
+              <div className="rounded-md border border-[var(--ark-line)] p-2">
+                <p className="text-xs mp-muted">失败</p>
+                <p className="font-semibold text-[var(--ark-danger-text)]">{progressExecution.progress.failedCount}</p>
+              </div>
+            </div>
+            {progressExecution.progress.currentPath ? (
+              <p className="mt-2 break-all text-xs mp-muted">当前文件: {progressExecution.progress.currentPath}</p>
+            ) : null}
+            {progressExecution.error ? <p className="mp-error mt-3">{progressExecution.error}</p> : null}
+
+            <div className="mt-4 flex justify-end gap-2">
+              {progressCanBackground ? (
+                <button
+                  type="button"
+                  className="mp-btn"
+                  onClick={() => {
+                    setProgressDialogExecutionId(null);
+                    setMessage("任务已切到后台执行，可在任务列表查看实时进度。");
+                  }}
+                >
+                  后台执行
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="mp-btn mp-btn-primary"
+                onClick={() => {
+                  setProgressDialogExecutionId(null);
+                }}
+              >
+                {progressCanBackground ? "关闭弹窗" : "关闭"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <ConfirmDialog
         open={Boolean(pendingDeleteAction)}
