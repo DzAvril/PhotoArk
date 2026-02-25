@@ -366,6 +366,11 @@ function buildUnavailableStorageCapacitySnapshot(
   };
 }
 
+function buildStorageCapacityGroupKey(pathDev: bigint, fsStats: Awaited<ReturnType<typeof statfs>>): string {
+  // st_dev alone can collide on some mount layouts; include filesystem geometry for safer grouping.
+  return `fs:${pathDev.toString()}:${fsStats.type}:${fsStats.bsize}:${fsStats.blocks}:${fsStats.files}`;
+}
+
 async function buildStorageCapacitySnapshot(storage: StorageTarget): Promise<StorageCapacitySnapshot> {
   if (!isLocalStorage(storage.type)) {
     return buildUnavailableStorageCapacitySnapshot(storage, "云存储暂不支持容量读取");
@@ -373,7 +378,7 @@ async function buildStorageCapacitySnapshot(storage: StorageTarget): Promise<Sto
 
   try {
     const targetPath = path.resolve(storage.basePath);
-    const [pathStats, fsStats] = await Promise.all([stat(targetPath), statfs(targetPath)]);
+    const [pathStats, fsStats] = await Promise.all([stat(targetPath, { bigint: true }), statfs(targetPath)]);
     const totalBytes = fsStats.blocks * fsStats.bsize;
     const freeBytes = fsStats.bavail * fsStats.bsize;
     const usedBytes = Math.max(0, totalBytes - freeBytes);
@@ -382,7 +387,7 @@ async function buildStorageCapacitySnapshot(storage: StorageTarget): Promise<Sto
     return {
       storageId: storage.id,
       storageName: storage.name,
-      groupKey: `dev:${pathStats.dev}`,
+      groupKey: buildStorageCapacityGroupKey(pathStats.dev, fsStats),
       available: true,
       reason: null,
       totalBytes,
