@@ -13,8 +13,8 @@ const tabs = [
 
 type ThemeMode = "light" | "dark";
 const themeColorByMode: Record<ThemeMode, string> = {
-  light: "#2563eb",
-  dark: "#0f172a"
+  light: "#2056dd",
+  dark: "#070f1e"
 };
 
 function normalizePathname(pathname: string) {
@@ -102,9 +102,14 @@ export function AppShell({ authUser, onLogout }: AppShellProps) {
   }
 
   return (
-    <div className="min-h-screen bg-[var(--ark-bg)] text-[var(--ark-ink)]">
-      <div className="mx-auto max-w-[1440px] px-3 pb-24 pt-3 md:px-5 md:pb-5 md:pt-4">
-        <div className="grid gap-4 md:grid-cols-[230px_minmax(0,1fr)]">
+    <div className="relative min-h-screen overflow-hidden bg-[var(--ark-bg)] text-[var(--ark-ink)]">
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(circle_at_8%_2%,color-mix(in_oklab,var(--ark-primary)_16%,transparent)_0%,transparent_32%),radial-gradient(circle_at_94%_18%,color-mix(in_oklab,var(--ark-primary)_10%,transparent)_0%,transparent_28%)]"
+      />
+
+      <div className="mx-auto max-w-[1480px] px-3 pb-24 pt-3 md:px-5 md:pb-5 md:pt-4">
+        <div className="grid gap-4 md:grid-cols-[244px_minmax(0,1fr)]">
           <motion.aside
             className="mp-panel mp-panel-soft hidden self-start p-4 md:sticky md:top-4 md:block"
             initial={{ opacity: 0, x: -12 }}
@@ -112,8 +117,17 @@ export function AppShell({ authUser, onLogout }: AppShellProps) {
             transition={{ duration: 0.25, ease: "easeOut" }}
           >
             <div className="mb-5">
-              <h1 className="text-xl font-bold">PhotoArk</h1>
-              <p className="mt-1 text-sm mp-muted">Backup Control Center</p>
+              <div className="flex items-center gap-3">
+                <img
+                  src="/logo.svg"
+                  alt="PhotoArk logo"
+                  className="h-11 w-11 rounded-xl border border-[var(--ark-line)] bg-[var(--ark-surface)] p-1.5 shadow-sm"
+                />
+                <div>
+                  <h1 className="text-xl font-bold">PhotoArk</h1>
+                  <p className="mt-0.5 text-xs uppercase tracking-[0.08em] mp-muted">Backup Control Center</p>
+                </div>
+              </div>
             </div>
             <nav className="space-y-1.5">
               {tabs.map((tab) => (
@@ -121,12 +135,17 @@ export function AppShell({ authUser, onLogout }: AppShellProps) {
                   key={tab.to}
                   to={tab.to}
                   className={({ isActive }) =>
-                    `block rounded-xl px-3 py-2.5 text-sm transition-colors ${
-                      isActive ? "bg-[var(--ark-primary)] text-white" : "text-[var(--ark-ink)] hover:bg-[var(--ark-surface-soft)]"
+                    `group block rounded-xl px-3 py-2.5 text-sm font-medium transition-all ${
+                      isActive
+                        ? "border border-[var(--ark-primary)]/20 bg-[var(--ark-primary)] text-white shadow-[0_8px_20px_color-mix(in_oklab,var(--ark-primary)_28%,transparent)]"
+                        : "border border-transparent text-[var(--ark-ink)] hover:border-[var(--ark-line)] hover:bg-[var(--ark-surface-soft)]"
                     }`
                   }
                 >
-                  {tab.label}
+                  <span className="flex items-center justify-between gap-2">
+                    <span>{tab.label}</span>
+                    <span className="text-xs opacity-70 transition-opacity group-hover:opacity-100">{tab.short}</span>
+                  </span>
                 </NavLink>
               ))}
             </nav>
@@ -135,18 +154,25 @@ export function AppShell({ authUser, onLogout }: AppShellProps) {
           <section className="min-w-0">
             <motion.header
               key={isDashboard ? "hero-header" : `page-header:${pathname}`}
-              className={`mb-4 p-4 ${isDashboard ? "mp-panel mp-panel-hero" : "mp-panel mp-panel-soft py-3.5"}`}
+              className={`mb-4 p-4 backdrop-blur-[2px] ${isDashboard ? "mp-panel mp-panel-hero" : "mp-panel mp-panel-soft py-3.5"}`}
               initial={{ opacity: 0, y: -10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.24, ease: "easeOut" }}
             >
               <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  {isDashboard ? <p className="text-sm uppercase tracking-[0.22em] text-[var(--ark-primary)]">PhotoArk</p> : null}
-                  <h2 className={`font-bold tracking-tight ${isDashboard ? "mt-1 text-lg sm:text-2xl" : "text-lg sm:text-xl"}`}>
-                    {isDashboard ? "NAS 多目标照片备份平台" : pageMeta.title}
-                  </h2>
-                  <p className={`text-sm mp-muted ${isDashboard ? "mt-2" : "mt-1"}`}>{pageMeta.subtitle}</p>
+                <div className="flex min-w-0 items-start gap-3">
+                  <img
+                    src="/logo.svg"
+                    alt="PhotoArk logo"
+                    className={`rounded-xl border border-[var(--ark-line)] bg-[var(--ark-surface)] p-1 shadow-sm ${isDashboard ? "h-11 w-11" : "h-9 w-9"}`}
+                  />
+                  <div className="min-w-0">
+                    {isDashboard ? <p className="text-sm uppercase tracking-[0.22em] text-[var(--ark-primary)]">PhotoArk</p> : null}
+                    <h2 className={`font-bold tracking-tight ${isDashboard ? "mt-1 text-lg sm:text-2xl" : "text-lg sm:text-xl"}`}>
+                      {isDashboard ? "NAS 多目标照片备份平台" : pageMeta.title}
+                    </h2>
+                    <p className={`text-sm mp-muted ${isDashboard ? "mt-1.5" : "mt-1"}`}>{pageMeta.subtitle}</p>
+                  </div>
                 </div>
                 <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
                   <span className="mp-chip text-sm">{authUser.username}</span>
@@ -185,8 +211,10 @@ export function AppShell({ authUser, onLogout }: AppShellProps) {
                 <NavLink
                   to={tab.to}
                   className={({ isActive }) =>
-                    `flex min-h-12 flex-col items-center justify-center rounded-xl px-2 py-1 text-[11px] font-medium leading-tight transition-colors ${
-                      isActive ? "bg-[var(--ark-primary)] text-white" : "text-[var(--ark-ink-soft)]"
+                    `flex min-h-12 flex-col items-center justify-center rounded-xl px-2 py-1 text-[11px] font-medium leading-tight transition-all ${
+                      isActive
+                        ? "bg-[var(--ark-primary)] text-white shadow-[0_8px_20px_color-mix(in_oklab,var(--ark-primary)_32%,transparent)]"
+                        : "text-[var(--ark-ink-soft)]"
                     }`
                   }
                 >

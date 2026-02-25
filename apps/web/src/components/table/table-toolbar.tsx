@@ -15,13 +15,21 @@ export function TableToolbar({ title, search, onSearchChange, pageSize, onPageSi
         <p className="text-sm mp-muted">共 {totalItems} 条</p>
       </div>
       <div className="flex w-full flex-col gap-2 sm:w-auto sm:min-w-[280px] sm:flex-row">
-        <input
-          className="mp-input w-full sm:min-w-[200px]"
-          placeholder="搜索"
-          aria-label="搜索"
-          value={search}
-          onChange={(e) => onSearchChange(e.target.value)}
-        />
+        <label className="relative block w-full sm:min-w-[220px]">
+          <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--ark-ink-soft)]">
+            <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4" aria-hidden="true">
+              <circle cx="11" cy="11" r="6.5" stroke="currentColor" strokeWidth="1.7" />
+              <path d="M16 16 20 20" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+            </svg>
+          </span>
+          <input
+            className="mp-input w-full pl-9"
+            placeholder="搜索名称或关键字"
+            aria-label="搜索"
+            value={search}
+            onChange={(e) => onSearchChange(e.target.value)}
+          />
+        </label>
         <select
           className="mp-select w-full sm:w-[96px]"
           aria-label="每页条数"

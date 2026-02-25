@@ -12,7 +12,7 @@ export function SortableHeader({ label, active, ascending, onToggle }: SortableH
   return (
     <button
       type="button"
-      className="inline-flex items-center gap-1 text-left text-sm font-medium text-[var(--ark-ink)] transition-colors hover:text-[var(--ark-primary)]"
+      className="inline-flex items-center gap-1 rounded-md px-1 py-0.5 text-left text-sm font-semibold text-[var(--ark-ink)] transition-colors hover:text-[var(--ark-primary)]"
       aria-label={`${label}，当前${directionLabel}，点击切换排序`}
       onClick={onToggle}
     >

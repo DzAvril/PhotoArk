@@ -81,7 +81,7 @@ export function ConfirmDialog({
 
   return (
     <div
-      className="fixed inset-0 z-[70] flex items-center justify-center bg-black/45 p-4"
+      className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-[2px]"
       onClick={() => {
         if (!busy) onCancel();
       }}
@@ -92,10 +92,10 @@ export function ConfirmDialog({
         aria-modal="true"
         aria-labelledby={titleId}
         aria-describedby={descriptionId}
-        className="mp-panel w-full max-w-md p-4"
+        className="mp-panel w-full max-w-md p-5"
         onClick={(event) => event.stopPropagation()}
       >
-        <h3 id={titleId} className="text-base font-semibold">
+        <h3 id={titleId} className="text-lg font-semibold">
           {title}
         </h3>
         <p id={descriptionId} className="mt-2 text-sm mp-muted">

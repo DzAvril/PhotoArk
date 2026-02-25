@@ -59,11 +59,36 @@ export function LoginPage({ onAuthenticated }: LoginPageProps) {
   }
 
   return (
-    <div className="min-h-screen bg-[var(--ark-bg)] px-3 py-10 text-[var(--ark-ink)] md:px-6">
-      <div className="mx-auto max-w-md">
+    <div className="relative min-h-screen overflow-hidden bg-[var(--ark-bg)] px-3 py-8 text-[var(--ark-ink)] md:px-6 md:py-12">
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(circle_at_8%_12%,color-mix(in_oklab,var(--ark-primary)_24%,transparent)_0%,transparent_36%),radial-gradient(circle_at_95%_80%,color-mix(in_oklab,var(--ark-primary)_16%,transparent)_0%,transparent_32%)]"
+      />
+      <div className="mx-auto grid w-full max-w-[1040px] gap-4 md:grid-cols-[1.2fr_0.95fr]">
+        <section className="mp-panel mp-panel-hero hidden p-7 md:flex md:flex-col md:justify-between">
+          <div>
+            <div className="inline-flex items-center gap-2 rounded-full border border-[var(--ark-line)]/50 bg-white/45 px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em]">
+              <img src="/logo.svg" alt="PhotoArk logo" className="h-4 w-4 rounded-sm" />
+              PhotoArk
+            </div>
+            <h1 className="mt-4 text-3xl font-bold leading-tight">为 NAS 与多目标存储提供可控的照片备份中心</h1>
+            <p className="mt-3 text-sm mp-muted">
+              统一管理本地盘、外置盘与云端存储，支持加密传输、Live Photo 识别和执行结果追踪。
+            </p>
+          </div>
+          <div className="grid gap-2 text-sm">
+            <div className="rounded-xl border border-[var(--ark-line)]/60 bg-white/45 px-3 py-2">多存储目标统一管理</div>
+            <div className="rounded-xl border border-[var(--ark-line)]/60 bg-white/45 px-3 py-2">定时任务 + 文件监听双模式</div>
+            <div className="rounded-xl border border-[var(--ark-line)]/60 bg-white/45 px-3 py-2">细粒度执行记录与通知回传</div>
+          </div>
+        </section>
+
         <section className="mp-panel p-6">
-          <p className="text-sm uppercase tracking-[0.2em] text-[var(--ark-primary)]">PhotoArk</p>
-          <h1 className="mt-2 text-2xl font-bold">{checking ? "加载中..." : hasUsers ? "登录" : "初始化管理员账号"}</h1>
+          <div className="flex items-center gap-2">
+            <img src="/logo.svg" alt="PhotoArk logo" className="h-8 w-8 rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-1" />
+            <p className="text-sm uppercase tracking-[0.18em] text-[var(--ark-primary)]">PhotoArk</p>
+          </div>
+          <h2 className="mt-2 text-2xl font-bold">{checking ? "加载中..." : hasUsers ? "登录" : "初始化管理员账号"}</h2>
           <p className="mt-2 text-sm mp-muted">
             {hasUsers ? "请输入账号密码进入系统。" : "首次使用请先创建管理员账号，创建后将自动登录。"}
           </p>

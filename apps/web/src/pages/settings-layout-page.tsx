@@ -8,17 +8,19 @@ const tabs = [
 
 export function SettingsLayoutPage() {
   return (
-    <section className="space-y-3">
+    <section className="space-y-4">
       <div className="mp-panel mp-panel-soft p-3">
-        <nav className="flex flex-wrap gap-2">
+        <nav className="grid grid-cols-3 gap-2">
           {tabs.map((tab) => (
             <NavLink
               key={tab.to}
               to={tab.to}
               end={tab.to === "/settings"}
               className={({ isActive }) =>
-                `rounded-lg px-3 py-2 text-sm transition-colors ${
-                  isActive ? "bg-[var(--ark-primary)] text-white" : "bg-[var(--ark-surface-soft)] text-[var(--ark-ink)]"
+                `rounded-xl border px-3 py-2 text-center text-sm font-medium transition-all ${
+                  isActive
+                    ? "border-[var(--ark-primary)] bg-[var(--ark-primary)] text-white shadow-[0_8px_20px_color-mix(in_oklab,var(--ark-primary)_28%,transparent)]"
+                    : "border-[var(--ark-line)] bg-[var(--ark-surface)] text-[var(--ark-ink)] hover:border-[var(--ark-line-strong)] hover:bg-[var(--ark-surface-soft)]"
                 }`
               }
             >

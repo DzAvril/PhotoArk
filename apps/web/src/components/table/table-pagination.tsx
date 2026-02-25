@@ -10,7 +10,7 @@ export function TablePagination({ page, totalPages, onChange }: TablePaginationP
       <button className="mp-btn" type="button" disabled={page <= 1} onClick={() => onChange(page - 1)}>
         上一页
       </button>
-      <span className="mp-muted">
+      <span className="mp-chip mp-muted">
         {page} / {totalPages}
       </span>
       <button className="mp-btn" type="button" disabled={page >= totalPages} onClick={() => onChange(page + 1)}>

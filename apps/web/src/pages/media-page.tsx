@@ -122,6 +122,7 @@ function MediaPane({ storages }: MediaPaneProps) {
   const [storageId, setStorageId] = useLocalStorageState("ark-last-media-storage-id", "");
   const [thumbSize, setThumbSize] = useLocalStorageState("ark-media-thumb-size", 170);
   const [media, setMedia] = useState<MediaBrowseResult | null>(null);
+  const [loadingMedia, setLoadingMedia] = useState(false);
   const [kindFilter, setKindFilter] = useState<"all" | "image" | "video" | "live">("all");
   const [error, setError] = useState("");
   const [activePath, setActivePath] = useState<string | null>(null);
@@ -147,9 +148,11 @@ function MediaPane({ storages }: MediaPaneProps) {
 
   async function previewMedia() {
     if (!selectedStorage) return;
+    setLoadingMedia(true);
     setError("");
     if (selectedStorage.type === "cloud_115") {
       setError("当前版本暂不支持直接浏览 115 存储媒体");
+      setLoadingMedia(false);
       return;
     }
     try {
@@ -162,12 +165,15 @@ function MediaPane({ storages }: MediaPaneProps) {
       setViewerMetaByPath({});
     } catch (err) {
       setError((err as Error).message);
+    } finally {
+      setLoadingMedia(false);
     }
   }
 
   useEffect(() => {
     if (!selectedStorage) {
       setMedia(null);
+      setLoadingMedia(false);
       setActivePath(null);
       setPlayingLiveVideo(false);
       setBrokenThumbVideoPaths(new Set());
@@ -315,44 +321,94 @@ function MediaPane({ storages }: MediaPaneProps) {
   const mediaGridStyle = {
     gridTemplateColumns: `repeat(auto-fill, minmax(${normalizedThumbSize}px, 1fr))`
   };
+  const mediaSummary = useMemo(() => {
+    let imageCount = 0;
+    let videoCount = 0;
+    for (const file of allFiles) {
+      if (file.kind === "image") imageCount += 1;
+      if (file.kind === "video") videoCount += 1;
+    }
+    const liveCount = new Set(
+      [...livePhotoPairByPath.values()].map((pair) => pair.image.path)
+    ).size;
+    return {
+      total: allFiles.length,
+      imageCount,
+      videoCount,
+      liveCount
+    };
+  }, [allFiles, livePhotoPairByPath]);
 
   return (
     <article className="mp-panel flex min-h-[calc(100vh-12rem)] flex-col p-4">
-      <h3 className="text-base font-semibold">存储媒体</h3>
-      {error ? <p className="mp-error mt-2">{error}</p> : null}
-
-      <div className="mt-3 space-y-2">
-        <label htmlFor="media-storage-select" className="block text-sm font-medium">
-          选择存储
-        </label>
-        <select
-          id="media-storage-select"
-          className="mp-select"
-          value={storageId}
-          onChange={(e) => {
-            setStorageId(e.target.value);
-            setError("");
-            setMedia(null);
-            setActivePath(null);
-          }}
-        >
-          <option value="">选择存储</option>
-          {storages.map((s) => <option key={s.id} value={s.id}>{s.name} ({s.type})</option>)}
-        </select>
-
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h3 className="text-base font-semibold">存储媒体</h3>
+          <p className="mt-1 text-sm mp-muted">按存储浏览媒体，支持 Live Photo 动态预览与元数据查看</p>
+        </div>
+        <div className="flex flex-wrap gap-2 text-xs sm:text-sm">
+          <span className="mp-chip">总计 {mediaSummary.total}</span>
+          <span className="mp-chip">图片 {mediaSummary.imageCount}</span>
+          <span className="mp-chip">视频 {mediaSummary.videoCount}</span>
+          <span className="mp-chip mp-chip-success">Live {mediaSummary.liveCount}</span>
+        </div>
       </div>
+      {error ? <p className="mp-error mt-3">{error}</p> : null}
 
-      <div className="mt-3 flex min-h-0 flex-1 flex-col rounded-lg border border-[var(--ark-line)] p-2">
-        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-          <div className="flex flex-wrap gap-1 text-sm">
-            <button type="button" className={`mp-btn ${kindFilter === "all" ? "mp-btn-primary" : ""}`} onClick={() => setKindFilter("all")}>全部</button>
-            <button type="button" className={`mp-btn ${kindFilter === "image" ? "mp-btn-primary" : ""}`} onClick={() => setKindFilter("image")}>图片</button>
-            <button type="button" className={`mp-btn ${kindFilter === "video" ? "mp-btn-primary" : ""}`} onClick={() => setKindFilter("video")}>视频</button>
-            <button type="button" className={`mp-btn ${kindFilter === "live" ? "mp-btn-primary" : ""}`} onClick={() => setKindFilter("live")}>Live</button>
+      <div className="mt-3 grid gap-3 lg:grid-cols-[340px_minmax(0,1fr)]">
+        <aside className="mp-panel mp-panel-soft p-3">
+          <label htmlFor="media-storage-select" className="block text-sm font-medium">
+            选择存储
+          </label>
+          <div className="mt-1.5 flex items-center gap-2">
+            <select
+              id="media-storage-select"
+              className="mp-select"
+              value={storageId}
+              disabled={!storages.length}
+              onChange={(e) => {
+                setStorageId(e.target.value);
+                setError("");
+                setMedia(null);
+                setActivePath(null);
+              }}
+            >
+              <option value="">选择存储</option>
+              {storages.map((s) => <option key={s.id} value={s.id}>{s.name} ({s.type})</option>)}
+            </select>
+            <button type="button" className="mp-btn shrink-0" onClick={() => void previewMedia()} disabled={!selectedStorage || loadingMedia}>
+              刷新
+            </button>
           </div>
-          <div className="flex items-center gap-2 text-sm">
-            <span className="text-sm mp-muted">{displayItems.length} 项</span>
-            <label htmlFor="media-zoom" className="text-xs mp-muted">缩放</label>
+          <p className="mt-2 text-xs mp-muted break-all">
+            {selectedStorage ? `${selectedStorage.name} · ${selectedStorage.basePath}` : "选择存储后可浏览媒体内容"}
+          </p>
+
+          <div className="mt-4">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] mp-muted">筛选类型</p>
+            <div className="mp-segment">
+              <button type="button" className="mp-segment-item" aria-pressed={kindFilter === "all"} onClick={() => setKindFilter("all")}>
+                全部
+              </button>
+              <button type="button" className="mp-segment-item" aria-pressed={kindFilter === "image"} onClick={() => setKindFilter("image")}>
+                图片
+              </button>
+              <button type="button" className="mp-segment-item" aria-pressed={kindFilter === "video"} onClick={() => setKindFilter("video")}>
+                视频
+              </button>
+              <button type="button" className="mp-segment-item" aria-pressed={kindFilter === "live"} onClick={() => setKindFilter("live")}>
+                Live
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-4 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <label htmlFor="media-zoom" className="text-sm font-medium">
+                缩略图尺寸
+              </label>
+              <span className="mp-chip text-xs">{normalizedThumbSize}px</span>
+            </div>
             <input
               id="media-zoom"
               type="range"
@@ -361,111 +417,189 @@ function MediaPane({ storages }: MediaPaneProps) {
               step={10}
               value={normalizedThumbSize}
               onChange={(e) => setThumbSize(Number(e.target.value))}
-              className="h-2 w-28 cursor-pointer accent-[var(--ark-primary)]"
+              className="mp-slider"
             />
-            <button type="button" className="mp-btn px-2" onClick={() => setThumbSize(140)}>紧凑</button>
-            <button type="button" className="mp-btn px-2" onClick={() => setThumbSize(210)}>放大</button>
-          </div>
-        </div>
-
-        <div className="min-h-0 flex-1 overflow-auto">
-          <div className="grid gap-2" style={mediaGridStyle}>
-          {selectedStorage && displayItems.map((item) => {
-            const streamUrl = getStorageMediaStreamUrl(selectedStorage.id, item.file.path);
-            const isLivePhoto = Boolean(item.livePair);
-            const thumbBroken = brokenThumbImagePaths.has(item.file.path);
-            const videoThumbBroken = brokenThumbVideoPaths.has(item.file.path);
-            return (
-              <button key={item.key} type="button" className="overflow-hidden rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] text-left" onClick={() => openByPath(item.file.path)}>
-                <div className="relative aspect-square bg-black/10">
-                  {item.file.kind === "image" ? (
-                    thumbBroken ? (
-                      <div className="flex h-full w-full items-center justify-center px-3 text-center text-sm text-white/80">图片预览不可用</div>
-                    ) : (
-                      <img
-                        src={streamUrl}
-                        alt={item.file.name}
-                        className="h-full w-full object-cover"
-                        loading="lazy"
-                        onError={() => {
-                          setBrokenThumbImagePaths((prev) => {
-                            const next = new Set(prev);
-                            next.add(item.file.path);
-                            return next;
-                          });
-                        }}
-                      />
-                    )
-                  ) : videoThumbBroken ? (
-                    <div className="flex h-full w-full flex-col items-center justify-center gap-2 px-3 text-center text-sm mp-muted">
-                      <span>▶</span>
-                      <span>该视频格式无法生成缩略图</span>
-                    </div>
-                  ) : (
-                    <video
-                      src={`${streamUrl}#t=0.1`}
-                      className="h-full w-full object-cover"
-                      preload="metadata"
-                      muted
-                      playsInline
-                      onLoadedMetadata={(event) => {
-                        const video = event.currentTarget;
-                        if (!Number.isFinite(video.duration) || video.duration <= 0.11) return;
-                        if (video.currentTime >= 0.09) return;
-                        try {
-                          video.currentTime = 0.1;
-                        } catch {
-                          // Ignore seek failures; browser may still render first frame.
-                        }
-                      }}
-                      onError={() => {
-                        setBrokenThumbVideoPaths((prev) => {
-                          const next = new Set(prev);
-                          next.add(item.file.path);
-                          return next;
-                        });
-                      }}
-                    />
-                  )}
-                  {isLivePhoto ? <span className="absolute left-1.5 top-1.5 rounded bg-black/70 px-1.5 py-0.5 text-[11px] text-white">Live</span> : null}
-                </div>
-                <div className="flex items-center justify-between gap-2 px-2 py-1.5">
-                  <span className="truncate text-sm">{item.file.name}</span>
-                  <span className="shrink-0 rounded border border-[var(--ark-line)] px-1.5 py-0.5 text-[11px] uppercase">{isLivePhoto ? "live" : item.file.kind}</span>
-                </div>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                className={`mp-btn flex-1 ${normalizedThumbSize <= 150 ? "mp-btn-primary" : ""}`}
+                onClick={() => setThumbSize(140)}
+              >
+                紧凑
               </button>
-            );
-          })}
+              <button
+                type="button"
+                className={`mp-btn flex-1 ${normalizedThumbSize > 150 && normalizedThumbSize < 200 ? "mp-btn-primary" : ""}`}
+                onClick={() => setThumbSize(170)}
+              >
+                标准
+              </button>
+              <button
+                type="button"
+                className={`mp-btn flex-1 ${normalizedThumbSize >= 200 ? "mp-btn-primary" : ""}`}
+                onClick={() => setThumbSize(220)}
+              >
+                放大
+              </button>
+            </div>
+          </div>
+        </aside>
+
+        <section className="flex min-h-[56vh] min-w-0 flex-col rounded-xl border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-2.5">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--ark-line)] pb-2">
+            <p className="text-sm">
+              {selectedStorage ? (
+                <>
+                  <span className="font-semibold">{selectedStorage.name}</span>
+                  <span className="mp-muted"> · 匹配 {displayItems.length} 项</span>
+                </>
+              ) : (
+                <span className="mp-muted">请先选择存储后再浏览媒体</span>
+              )}
+            </p>
+            <div className="flex items-center gap-2 text-xs">
+              {loadingMedia ? <span className="mp-chip">正在读取...</span> : null}
+              {!loadingMedia && selectedStorage ? <span className="mp-chip mp-chip-success">已加载</span> : null}
+            </div>
           </div>
 
-          {!displayItems.length ? (
-            <p className="py-4 text-center text-sm mp-muted">
-              {selectedStorage ? "该位置暂无可浏览媒体，可尝试切换筛选类型。" : "请先选择存储后再浏览媒体。"}
-            </p>
-          ) : null}
-        </div>
+          <div className="mt-2 min-h-0 flex-1 overflow-auto">
+            {loadingMedia ? (
+              <div className="flex h-full min-h-40 items-center justify-center">
+                <span className="mp-chip">正在加载媒体目录...</span>
+              </div>
+            ) : null}
+
+            {!loadingMedia ? (
+              <>
+                <div className="grid gap-2.5" style={mediaGridStyle}>
+                  {selectedStorage && displayItems.map((item) => {
+                    const streamUrl = getStorageMediaStreamUrl(selectedStorage.id, item.file.path);
+                    const isLivePhoto = Boolean(item.livePair);
+                    const thumbBroken = brokenThumbImagePaths.has(item.file.path);
+                    const videoThumbBroken = brokenThumbVideoPaths.has(item.file.path);
+                    const isActiveItem = activePath === item.file.path;
+                    return (
+                      <button
+                        key={item.key}
+                        type="button"
+                        className={`group overflow-hidden rounded-xl border bg-[var(--ark-surface)] text-left transition-all hover:-translate-y-0.5 hover:border-[var(--ark-line-strong)] hover:shadow-md ${
+                          isActiveItem
+                            ? "border-[var(--ark-primary)] shadow-[0_10px_24px_color-mix(in_oklab,var(--ark-primary)_22%,transparent)]"
+                            : "border-[var(--ark-line)]"
+                        }`}
+                        onClick={() => openByPath(item.file.path)}
+                      >
+                        <div className="relative aspect-square overflow-hidden bg-black/15">
+                          {item.file.kind === "image" ? (
+                            thumbBroken ? (
+                              <div className="flex h-full w-full items-center justify-center px-3 text-center text-sm text-white/80">
+                                图片预览不可用
+                              </div>
+                            ) : (
+                              <img
+                                src={streamUrl}
+                                alt={item.file.name}
+                                className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.04]"
+                                loading="lazy"
+                                onError={() => {
+                                  setBrokenThumbImagePaths((prev) => {
+                                    const next = new Set(prev);
+                                    next.add(item.file.path);
+                                    return next;
+                                  });
+                                }}
+                              />
+                            )
+                          ) : videoThumbBroken ? (
+                            <div className="flex h-full w-full flex-col items-center justify-center gap-2 px-3 text-center text-sm text-white/80">
+                              <span>▶</span>
+                              <span>该视频格式无法生成缩略图</span>
+                            </div>
+                          ) : (
+                            <video
+                              src={`${streamUrl}#t=0.1`}
+                              className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.04]"
+                              preload="metadata"
+                              muted
+                              playsInline
+                              onLoadedMetadata={(event) => {
+                                const video = event.currentTarget;
+                                if (!Number.isFinite(video.duration) || video.duration <= 0.11) return;
+                                if (video.currentTime >= 0.09) return;
+                                try {
+                                  video.currentTime = 0.1;
+                                } catch {
+                                  // Ignore seek failures; browser may still render first frame.
+                                }
+                              }}
+                              onError={() => {
+                                setBrokenThumbVideoPaths((prev) => {
+                                  const next = new Set(prev);
+                                  next.add(item.file.path);
+                                  return next;
+                                });
+                              }}
+                            />
+                          )}
+                          <div className="absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-black/65 to-transparent" />
+                          <div className="absolute left-2 top-2 flex items-center gap-1.5">
+                            {isLivePhoto ? <span className="rounded bg-emerald-500/85 px-1.5 py-0.5 text-[11px] font-semibold text-white">Live</span> : null}
+                            {item.file.kind === "video" && !isLivePhoto ? (
+                              <span className="rounded bg-black/70 px-1.5 py-0.5 text-[11px] font-semibold text-white">Video</span>
+                            ) : null}
+                          </div>
+                          <div className="absolute inset-x-0 bottom-0 px-2.5 pb-2 text-white">
+                            <p className="truncate text-sm font-medium">{item.file.name}</p>
+                            <p className="text-xs text-white/80">{formatBytes(item.file.sizeBytes)}</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center justify-between gap-2 px-2.5 py-2">
+                          <span className="truncate text-sm mp-muted">{formatDateTime(item.file.capturedAt ?? item.file.modifiedAt)}</span>
+                          <span className="shrink-0 rounded-md border border-[var(--ark-line)] px-1.5 py-0.5 text-[11px] uppercase mp-muted">
+                            {isLivePhoto ? "live" : item.file.kind}
+                          </span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {!displayItems.length ? (
+                  <p className="py-5 text-center text-sm mp-muted">
+                    {selectedStorage ? "该位置暂无可浏览媒体，可尝试切换筛选类型。" : "请先选择存储后再浏览媒体。"}
+                  </p>
+                ) : null}
+              </>
+            ) : null}
+          </div>
+        </section>
       </div>
 
       {selectedStorage && activeItem ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-3" onClick={closePreview}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/78 p-3 backdrop-blur-[3px]" onClick={closePreview}>
           <div
             ref={previewDialogRef}
             role="dialog"
             aria-modal="true"
             aria-labelledby={previewTitleId}
             aria-describedby={activePair ? previewHintId : undefined}
-            className="w-full max-w-5xl rounded-xl bg-[var(--ark-surface)] p-3"
+            className="w-full max-w-6xl rounded-2xl border border-[var(--ark-line)] bg-[var(--ark-surface)] p-3 shadow-[0_28px_64px_rgba(2,8,23,0.45)]"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="mb-2 flex items-center justify-between gap-2">
+            <div className="mb-2 flex flex-wrap items-start justify-between gap-2">
               <div className="min-w-0">
-                <p id={previewTitleId} className="truncate text-sm font-medium">{activeItem.file.name}</p>
-                <p className="text-sm mp-muted">{activeIndex + 1} / {activeList.length}</p>
+                <p id={previewTitleId} className="truncate text-base font-semibold">{activeItem.file.name}</p>
+                <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
+                  <span className="mp-chip">{activeIndex + 1} / {activeList.length}</span>
+                  <span className="mp-chip">{activeKindLabel}</span>
+                  <span className="mp-chip">大小 {formatBytes(activeItem.file.sizeBytes)}</span>
+                </div>
                 {activePair ? (
-                  <p id={previewHintId} className="text-sm mp-muted">点击“播放动态”或长按画面可预览 Live Photo（快捷键：L）</p>
+                  <p id={previewHintId} className="mt-1 text-sm mp-muted">点击“播放动态”或长按画面可预览 Live Photo（快捷键：L）</p>
                 ) : null}
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 {activePair ? (
                   <button
                     type="button"
@@ -496,7 +630,7 @@ function MediaPane({ storages }: MediaPaneProps) {
             </div>
 
             <div
-              className="relative flex h-[62vh] items-center justify-center overflow-hidden rounded-lg bg-black/80"
+              className="relative flex h-[62vh] items-center justify-center overflow-hidden rounded-xl border border-white/10 bg-black/85"
               onPointerDown={() => startLivePress()}
               onPointerUp={() => endLivePress()}
               onPointerLeave={() => endLivePress()}
@@ -567,7 +701,7 @@ function MediaPane({ storages }: MediaPaneProps) {
 
               <button
                 type="button"
-                className="absolute left-2 top-1/2 -translate-y-1/2 rounded-full border border-white/20 bg-black/50 px-3 py-1.5 text-base text-white"
+                className="absolute left-2 top-1/2 -translate-y-1/2 rounded-full border border-white/25 bg-black/50 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-black/65 disabled:opacity-40"
                 aria-label="查看上一张"
                 onClick={openPrev}
                 disabled={activeIndex <= 0}
@@ -576,7 +710,7 @@ function MediaPane({ storages }: MediaPaneProps) {
               </button>
               <button
                 type="button"
-                className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full border border-white/20 bg-black/50 px-3 py-1.5 text-base text-white"
+                className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full border border-white/25 bg-black/50 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-black/65 disabled:opacity-40"
                 aria-label="查看下一张"
                 onClick={openNext}
                 disabled={activeIndex >= activeList.length - 1}
@@ -586,42 +720,46 @@ function MediaPane({ storages }: MediaPaneProps) {
             </div>
 
             {showMediaInfo ? (
-              <div className="mt-3 grid gap-2 rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-3 text-sm md:grid-cols-2">
-                <p className="break-all">
-                  <span className="mp-muted">路径：</span>
-                  {activeItem.file.path}
-                </p>
-                <p>
-                  <span className="mp-muted">类型：</span>
-                  {activeKindLabel}
-                </p>
-                <p>
-                  <span className="mp-muted">文件大小：</span>
-                  {formatBytes(activeItem.file.sizeBytes)}
-                </p>
-                <p>
-                  <span className="mp-muted">拍摄时间：</span>
-                  {formatDateTime(activeItem.file.capturedAt ?? activeItem.file.modifiedAt)}
-                </p>
-                <p>
-                  <span className="mp-muted">文件时间：</span>
-                  {formatDateTime(activeItem.file.modifiedAt)}
-                </p>
-                <p>
-                  <span className="mp-muted">分辨率：</span>
-                  {activeViewerMeta?.width && activeViewerMeta?.height
-                    ? `${activeViewerMeta.width} × ${activeViewerMeta.height}`
-                    : "加载后显示"}
-                </p>
-                <p>
-                  <span className="mp-muted">视频时长：</span>
-                  {activeKindLabel === "视频" || shouldShowVideoViewer ? formatDuration(activeViewerMeta?.durationSeconds) : "-"}
-                </p>
-                <p>
-                  <span className="mp-muted">拍摄地点：</span>
-                  {activeLocationLabel}
-                </p>
-              </div>
+              <dl className="mt-3 grid gap-2 text-sm md:grid-cols-2">
+                <div className="rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-2.5">
+                  <dt className="text-xs font-semibold uppercase tracking-[0.08em] mp-muted">路径</dt>
+                  <dd className="mt-1 break-all">{activeItem.file.path}</dd>
+                </div>
+                <div className="rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-2.5">
+                  <dt className="text-xs font-semibold uppercase tracking-[0.08em] mp-muted">类型</dt>
+                  <dd className="mt-1">{activeKindLabel}</dd>
+                </div>
+                <div className="rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-2.5">
+                  <dt className="text-xs font-semibold uppercase tracking-[0.08em] mp-muted">文件大小</dt>
+                  <dd className="mt-1">{formatBytes(activeItem.file.sizeBytes)}</dd>
+                </div>
+                <div className="rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-2.5">
+                  <dt className="text-xs font-semibold uppercase tracking-[0.08em] mp-muted">拍摄时间</dt>
+                  <dd className="mt-1">{formatDateTime(activeItem.file.capturedAt ?? activeItem.file.modifiedAt)}</dd>
+                </div>
+                <div className="rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-2.5">
+                  <dt className="text-xs font-semibold uppercase tracking-[0.08em] mp-muted">文件时间</dt>
+                  <dd className="mt-1">{formatDateTime(activeItem.file.modifiedAt)}</dd>
+                </div>
+                <div className="rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-2.5">
+                  <dt className="text-xs font-semibold uppercase tracking-[0.08em] mp-muted">分辨率</dt>
+                  <dd className="mt-1">
+                    {activeViewerMeta?.width && activeViewerMeta?.height
+                      ? `${activeViewerMeta.width} × ${activeViewerMeta.height}`
+                      : "加载后显示"}
+                  </dd>
+                </div>
+                <div className="rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-2.5">
+                  <dt className="text-xs font-semibold uppercase tracking-[0.08em] mp-muted">视频时长</dt>
+                  <dd className="mt-1">
+                    {activeKindLabel === "视频" || shouldShowVideoViewer ? formatDuration(activeViewerMeta?.durationSeconds) : "-"}
+                  </dd>
+                </div>
+                <div className="rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-2.5">
+                  <dt className="text-xs font-semibold uppercase tracking-[0.08em] mp-muted">拍摄地点</dt>
+                  <dd className="mt-1">{activeLocationLabel}</dd>
+                </div>
+              </dl>
             ) : null}
           </div>
         </div>

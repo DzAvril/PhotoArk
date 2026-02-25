@@ -69,103 +69,121 @@ export function SettingsPage() {
 
   return (
     <div className="mp-panel mp-panel-soft p-4">
-      <h3 className="text-base font-semibold">Telegram 通知</h3>
-      <p className="mt-1 text-sm mp-muted">启用后每次备份执行都会自动发送摘要</p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h3 className="text-base font-semibold">Telegram 通知</h3>
+          <p className="mt-1 text-sm mp-muted">启用后每次备份执行都会自动发送摘要，建议先发送测试消息确认可达性。</p>
+        </div>
+        <span className={`mp-chip ${form.telegram.enabled ? "mp-chip-success" : ""}`}>
+          {form.telegram.enabled ? "已启用" : "未启用"}
+        </span>
+      </div>
+
       {loading ? <p className="mt-3 text-sm mp-muted">加载中...</p> : null}
       {error ? <p className="mp-error mt-3">{error}</p> : null}
       {message ? <p className="mt-3 text-sm mp-status-success">{message}</p> : null}
 
       <form onSubmit={(e) => void onSubmit(e)} className="mt-3 space-y-3">
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={form.telegram.enabled}
-            onChange={(e) =>
-              setForm((prev) => ({
-                ...prev,
-                telegram: { ...prev.telegram, enabled: e.target.checked }
-              }))
-            }
-          />
-          启用 Telegram 备份摘要通知
-        </label>
+        <fieldset className="rounded-xl border border-[var(--ark-line)] bg-[var(--ark-surface)] p-3">
+          <label className="flex items-center gap-2 text-sm font-medium">
+            <input
+              type="checkbox"
+              checked={form.telegram.enabled}
+              onChange={(e) =>
+                setForm((prev) => ({
+                  ...prev,
+                  telegram: { ...prev.telegram, enabled: e.target.checked }
+                }))
+              }
+            />
+            启用 Telegram 备份摘要通知
+          </label>
+          <p className="mt-1 text-xs mp-muted">关闭后不会发送任何自动通知，手动测试按钮也会禁用。</p>
+        </fieldset>
 
-        <div className="grid gap-2 sm:grid-cols-2">
-          <div className="space-y-1">
-            <label htmlFor="telegram-bot-token" className="text-sm font-medium">
-              Bot Token
-            </label>
-            <div className="flex gap-2">
+        <fieldset className="rounded-xl border border-[var(--ark-line)] bg-[var(--ark-surface)] p-3">
+          <legend className="px-1 text-sm font-semibold">连接凭据</legend>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-1">
+              <label htmlFor="telegram-bot-token" className="text-sm font-medium">
+                Bot Token
+              </label>
+              <div className="flex gap-2">
+                <input
+                  id="telegram-bot-token"
+                  className="mp-input"
+                  type={showBotToken ? "text" : "password"}
+                  autoComplete="off"
+                  placeholder="输入 Telegram Bot Token"
+                  value={form.telegram.botToken}
+                  disabled={!form.telegram.enabled}
+                  onChange={(e) =>
+                    setForm((prev) => ({
+                      ...prev,
+                      telegram: { ...prev.telegram, botToken: e.target.value }
+                    }))
+                  }
+                />
+                <button
+                  type="button"
+                  className="mp-btn shrink-0"
+                  onClick={() => setShowBotToken((prev) => !prev)}
+                  disabled={!form.telegram.enabled}
+                >
+                  {showBotToken ? "隐藏" : "显示"}
+                </button>
+              </div>
+              <p className="text-sm mp-muted">可在 Telegram BotFather 创建机器人并获取 Token。</p>
+            </div>
+
+            <div className="space-y-1">
+              <label htmlFor="telegram-chat-id" className="text-sm font-medium">
+                Chat ID
+              </label>
               <input
-                id="telegram-bot-token"
+                id="telegram-chat-id"
                 className="mp-input"
-                type={showBotToken ? "text" : "password"}
                 autoComplete="off"
-                placeholder="输入 Telegram Bot Token"
-                value={form.telegram.botToken}
+                placeholder="输入接收消息的 Chat ID"
+                value={form.telegram.chatId}
                 disabled={!form.telegram.enabled}
                 onChange={(e) =>
                   setForm((prev) => ({
                     ...prev,
-                    telegram: { ...prev.telegram, botToken: e.target.value }
+                    telegram: { ...prev.telegram, chatId: e.target.value }
                   }))
                 }
               />
-              <button
-                type="button"
-                className="mp-btn shrink-0"
-                onClick={() => setShowBotToken((prev) => !prev)}
-                disabled={!form.telegram.enabled}
-              >
-                {showBotToken ? "隐藏" : "显示"}
-              </button>
+              <p className="text-sm mp-muted">填写接收通知的个人或群组 Chat ID。</p>
             </div>
-            <p className="text-sm mp-muted">可在 Telegram BotFather 创建机器人并获取 Token。</p>
           </div>
+        </fieldset>
+
+        <fieldset className="rounded-xl border border-[var(--ark-line)] bg-[var(--ark-surface)] p-3">
+          <legend className="px-1 text-sm font-semibold">网络设置</legend>
           <div className="space-y-1">
-            <label htmlFor="telegram-chat-id" className="text-sm font-medium">
-              Chat ID
+            <label htmlFor="telegram-proxy-url" className="text-sm font-medium">
+              代理地址（可选）
             </label>
             <input
-              id="telegram-chat-id"
+              id="telegram-proxy-url"
               className="mp-input"
               autoComplete="off"
-              placeholder="输入接收消息的 Chat ID"
-              value={form.telegram.chatId}
+              placeholder="例如 http://127.0.0.1:7890"
+              value={form.telegram.proxyUrl}
               disabled={!form.telegram.enabled}
               onChange={(e) =>
                 setForm((prev) => ({
                   ...prev,
-                  telegram: { ...prev.telegram, chatId: e.target.value }
+                  telegram: { ...prev.telegram, proxyUrl: e.target.value }
                 }))
               }
             />
-            <p className="text-sm mp-muted">填写接收通知的个人或群组 Chat ID。</p>
+            <p className="text-sm mp-muted">
+              当 NAS 无法直连 Telegram 时填写 HTTP/HTTPS 代理地址；留空则直接连接 Telegram API。
+            </p>
           </div>
-        </div>
-
-        <div className="space-y-1">
-          <label htmlFor="telegram-proxy-url" className="text-sm font-medium">
-            代理地址（可选）
-          </label>
-          <input
-            id="telegram-proxy-url"
-            className="mp-input"
-            autoComplete="off"
-            placeholder="例如 http://127.0.0.1:7890"
-            value={form.telegram.proxyUrl}
-            disabled={!form.telegram.enabled}
-            onChange={(e) =>
-              setForm((prev) => ({
-                ...prev,
-                telegram: { ...prev.telegram, proxyUrl: e.target.value }
-              }))
-            }
-          />
-          <p className="text-sm mp-muted">
-            当 NAS 无法直连 Telegram 时填写 HTTP/HTTPS 代理地址；留空则直接连接 Telegram API。
-          </p>
-        </div>
+        </fieldset>
 
         <div className="flex flex-wrap gap-2">
           <button type="submit" className="mp-btn mp-btn-primary" disabled={saving || loading}>

@@ -165,7 +165,7 @@ export function BackupsPage() {
         </div>
 
         <div className="hidden overflow-auto md:block">
-          <table className="min-w-full text-base">
+          <table className="mp-data-table min-w-full text-base">
             <thead>
               <tr className="border-b border-[var(--ark-line)] text-left text-sm mp-muted">
                 <th className="px-2 py-2">任务</th>

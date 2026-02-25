@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { MetricCard } from "../components/metric-card";
 import { getMetrics, getStorageCapacities } from "../lib/api";
 import type { Metrics, StorageCapacityItem } from "../types/api";
@@ -37,8 +37,24 @@ export function DashboardPage() {
     return `${value.toFixed(value >= 100 || index === 0 ? 0 : 1)} ${units[index]}`;
   }
 
+  const capacitySummary = useMemo(() => {
+    const readable = capacities.filter((item) => item.available);
+    const unreadable = capacities.length - readable.length;
+    const totalBytes = readable.reduce((sum, item) => sum + (item.totalBytes ?? 0), 0);
+    const usedBytes = readable.reduce((sum, item) => sum + (item.usedBytes ?? 0), 0);
+    const usedPercent = totalBytes > 0 ? Number(((usedBytes / totalBytes) * 100).toFixed(1)) : 0;
+    return {
+      groups: capacities.length,
+      readable: readable.length,
+      unreadable,
+      totalBytes,
+      usedBytes,
+      usedPercent
+    };
+  }, [capacities]);
+
   return (
-    <section className="space-y-3">
+    <section className="space-y-4">
       {error ? <p className="mp-error">{error}</p> : null}
       <motion.div
         className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"
@@ -50,7 +66,8 @@ export function DashboardPage() {
           <MetricCard
             title="目标存储"
             value={String(metrics.storageTargets)}
-            meta="NAS / SSD / 115"
+            meta="NAS + SSD + 云端"
+            tone="blue"
             icon={
               <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" aria-hidden="true">
                 <path d="M4 7.5h16v9H4z" stroke="currentColor" strokeWidth="1.7" />
@@ -64,6 +81,7 @@ export function DashboardPage() {
             title="备份任务"
             value={String(metrics.backupJobs)}
             meta="定时 + 文件监听"
+            tone="emerald"
             icon={
               <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" aria-hidden="true">
                 <circle cx="12" cy="12" r="8" stroke="currentColor" strokeWidth="1.7" />
@@ -77,6 +95,7 @@ export function DashboardPage() {
             title="加密对象"
             value={String(metrics.encryptedAssets)}
             meta="AES-256-GCM"
+            tone="amber"
             icon={
               <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" aria-hidden="true">
                 <rect x="5" y="10" width="14" height="10" rx="2" stroke="currentColor" strokeWidth="1.7" />
@@ -90,6 +109,7 @@ export function DashboardPage() {
             title="Live Photo 对"
             value={String(metrics.livePhotoPairs)}
             meta="HEIC/JPG + MOV"
+            tone="violet"
             icon={
               <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" aria-hidden="true">
                 <circle cx="12" cy="12" r="7.5" stroke="currentColor" strokeWidth="1.7" />
@@ -106,27 +126,44 @@ export function DashboardPage() {
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.05, duration: 0.2, ease: "easeOut" }}
       >
-        <h3 className="text-base font-semibold">存储盘容量</h3>
-        <div className="mt-3 space-y-3">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h3 className="text-base font-semibold">存储盘容量</h3>
+            <p className="mt-1 text-sm mp-muted">
+              已读取 {capacitySummary.readable}/{capacitySummary.groups} 组
+              {capacitySummary.unreadable ? `，${capacitySummary.unreadable} 组不可读取` : ""}
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 text-sm">
+            <span className="mp-chip">总容量 {formatBytes(capacitySummary.totalBytes)}</span>
+            <span className="mp-chip">已用 {formatBytes(capacitySummary.usedBytes)}</span>
+            <span className="mp-chip mp-chip-success">整体 {capacitySummary.usedPercent}%</span>
+          </div>
+        </div>
+
+        <div className="mt-3 grid gap-3 lg:grid-cols-2">
           {capacities.map((item) => (
-            <div key={item.id} className="rounded-xl border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-3">
+            <div
+              key={item.id}
+              className="rounded-xl border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-3 transition-all hover:border-[var(--ark-line-strong)] hover:shadow-md"
+            >
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <p className="text-sm font-semibold break-all">{item.storageNames.join("、")}</p>
-                  <p className="text-sm mp-muted">{item.storageNames.length} 个配置存储</p>
+                  <p className="text-xs mp-muted">{item.storageNames.length} 个配置存储</p>
                 </div>
                 {item.available ? (
-                  <span className="text-sm">{item.usedPercent}% 已用</span>
+                  <span className="mp-chip">{item.usedPercent}% 已用</span>
                 ) : (
-                  <span className="text-sm mp-status-warning">不可读取</span>
+                  <span className="mp-chip mp-chip-warning">不可读取</span>
                 )}
               </div>
 
               {item.available ? (
                 <>
-                  <div className="mt-2 h-2 overflow-hidden rounded-full bg-[var(--ark-line)]">
+                  <div className="mt-2 h-2.5 overflow-hidden rounded-full bg-[var(--ark-line)]">
                     <div
-                      className="h-full rounded-full bg-[var(--ark-primary)]"
+                      className="h-full rounded-full bg-gradient-to-r from-[var(--ark-primary)] to-[var(--ark-primary-strong)]"
                       style={{ width: `${Math.min(100, Math.max(0, item.usedPercent ?? 0))}%` }}
                     />
                   </div>
@@ -139,7 +176,7 @@ export function DashboardPage() {
               )}
             </div>
           ))}
-          {!capacities.length ? <p className="text-sm mp-muted">暂无存储</p> : null}
+          {!capacities.length ? <p className="text-sm mp-muted">暂无存储容量数据</p> : null}
         </div>
       </motion.article>
     </section>
