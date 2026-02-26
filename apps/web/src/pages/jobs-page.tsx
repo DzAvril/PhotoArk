@@ -2,6 +2,7 @@ import * as Collapsible from "@radix-ui/react-collapsible";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useSearchParams } from "react-router-dom";
 import { ConfirmDialog } from "../components/confirm-dialog";
+import { InlineAlert } from "../components/inline-alert";
 import { TablePagination } from "../components/table/table-pagination";
 import { SortableHeader } from "../components/table/sortable-header";
 import { TableToolbar } from "../components/table/table-toolbar";
@@ -381,8 +382,16 @@ export function JobsPage() {
 
   return (
     <section className="space-y-3 md:flex md:h-full md:flex-col">
-      {message ? <p className="text-sm mp-status-success">{message}</p> : null}
-      {error ? <p className="mp-error">{error}</p> : null}
+      {message ? (
+        <InlineAlert tone="success" autoCloseMs={5200} onClose={() => setMessage("")}>
+          {message}
+        </InlineAlert>
+      ) : null}
+      {error ? (
+        <InlineAlert tone="error" onClose={() => setError("")}>
+          {error}
+        </InlineAlert>
+      ) : null}
 
       <Collapsible.Root open={formOpen} onOpenChange={setFormOpen} className="mp-panel mp-panel-soft p-4">
         <div className="flex items-center justify-between">

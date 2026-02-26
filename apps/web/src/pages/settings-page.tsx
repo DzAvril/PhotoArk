@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { InlineAlert } from "../components/inline-alert";
 import { getSettings, sendTelegramTest, updateSettings } from "../lib/api";
 import type { AppSettings } from "../types/api";
 
@@ -79,8 +80,16 @@ export function SettingsPage() {
       </div>
 
       {loading ? <p className="mt-3 text-sm mp-muted">加载中...</p> : null}
-      {error ? <p className="mp-error mt-3">{error}</p> : null}
-      {message ? <p className="mt-3 text-sm mp-status-success">{message}</p> : null}
+      {error ? (
+        <InlineAlert tone="error" className="mt-3" onClose={() => setError("")}>
+          {error}
+        </InlineAlert>
+      ) : null}
+      {message ? (
+        <InlineAlert tone="success" className="mt-3" autoCloseMs={5200} onClose={() => setMessage("")}>
+          {message}
+        </InlineAlert>
+      ) : null}
 
       <form onSubmit={(e) => void onSubmit(e)} className="mt-3 space-y-3 md:min-h-0 md:flex-1 md:overflow-auto">
         <fieldset className="rounded-xl border border-[var(--ark-line)] bg-[var(--ark-surface)] p-3">

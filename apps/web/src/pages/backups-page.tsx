@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ConfirmDialog } from "../components/confirm-dialog";
+import { InlineAlert } from "../components/inline-alert";
 import { TablePagination } from "../components/table/table-pagination";
 import { SortableHeader } from "../components/table/sortable-header";
 import { TableToolbar } from "../components/table/table-toolbar";
@@ -154,8 +155,16 @@ export function BackupsPage() {
   return (
     <section className="space-y-3 md:flex md:h-full md:flex-col">
       <div className="mp-panel p-4 md:flex md:min-h-0 md:flex-1 md:flex-col">
-        {message ? <p className="mb-3 text-sm mp-status-success">{message}</p> : null}
-        {error ? <p className="mp-error mb-3">{error}</p> : null}
+        {message ? (
+          <InlineAlert tone="success" className="mb-3" autoCloseMs={5200} onClose={() => setMessage("")}>
+            {message}
+          </InlineAlert>
+        ) : null}
+        {error ? (
+          <InlineAlert tone="error" className="mb-3" onClose={() => setError("")}>
+            {error}
+          </InlineAlert>
+        ) : null}
         <TableToolbar
           title="执行记录"
           search={search}

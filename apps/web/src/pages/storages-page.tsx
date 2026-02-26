@@ -1,6 +1,7 @@
 import * as Collapsible from "@radix-ui/react-collapsible";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { ConfirmDialog } from "../components/confirm-dialog";
+import { InlineAlert } from "../components/inline-alert";
 import { PathPicker } from "../components/path-picker";
 import { TablePagination } from "../components/table/table-pagination";
 import { SortableHeader } from "../components/table/sortable-header";
@@ -147,8 +148,16 @@ export function StoragesPage() {
           </div>
           <Collapsible.Trigger className="mp-btn">{formOpen ? "收起" : "新增存储"}</Collapsible.Trigger>
         </div>
-        {message ? <p className="mt-3 text-sm mp-status-success">{message}</p> : null}
-        {error ? <p className="mp-error mt-3">{error}</p> : null}
+        {message ? (
+          <InlineAlert tone="success" className="mt-3" autoCloseMs={5200} onClose={() => setMessage("")}>
+            {message}
+          </InlineAlert>
+        ) : null}
+        {error ? (
+          <InlineAlert tone="error" className="mt-3" onClose={() => setError("")}>
+            {error}
+          </InlineAlert>
+        ) : null}
 
         <Collapsible.Content>
           <form onSubmit={(e) => void onSubmit(e)} className="mt-3 grid gap-2 sm:grid-cols-2">

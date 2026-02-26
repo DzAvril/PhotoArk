@@ -2,6 +2,7 @@ import { motion } from "framer-motion";
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { ConfirmDialog } from "../components/confirm-dialog";
+import { InlineAlert } from "../components/inline-alert";
 import {
   getJobExecutions,
   getJobs,
@@ -753,9 +754,14 @@ export function DashboardPage() {
     const updatePannable = () => {
       const canPanX = viewport.scrollWidth - viewport.clientWidth > 2;
       const canPanY = viewport.scrollHeight - viewport.clientHeight > 2;
+      const shouldCenter = viewport.scrollLeft <= 1 && viewport.scrollTop <= 1;
       setIsRelationGraphPannable(canPanX || canPanY);
       if (!canPanX) viewport.scrollLeft = 0;
       if (!canPanY) viewport.scrollTop = 0;
+      if (shouldCenter && (canPanX || canPanY)) {
+        viewport.scrollLeft = Math.max(0, Math.round((viewport.scrollWidth - viewport.clientWidth) / 2));
+        viewport.scrollTop = Math.max(0, Math.round((viewport.scrollHeight - viewport.clientHeight) / 2));
+      }
     };
 
     updatePannable();
@@ -784,6 +790,16 @@ export function DashboardPage() {
         suppressRelationGraphClickRef.current = false;
       }, 0);
     }
+  }
+
+  function resetRelationGraphViewport() {
+    const viewport = relationGraphViewportRef.current;
+    if (!viewport) return;
+    viewport.scrollTo({
+      left: Math.max(0, Math.round((viewport.scrollWidth - viewport.clientWidth) / 2)),
+      top: Math.max(0, Math.round((viewport.scrollHeight - viewport.clientHeight) / 2)),
+      behavior: "smooth"
+    });
   }
 
   function handleRelationGraphPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
@@ -905,8 +921,16 @@ export function DashboardPage() {
 
   return (
     <section className="space-y-4">
-      {message ? <p className="text-sm mp-status-success">{message}</p> : null}
-      {error ? <p className="mp-error">{error}</p> : null}
+      {message ? (
+        <InlineAlert tone="success" autoCloseMs={5200} onClose={() => setMessage("")}>
+          {message}
+        </InlineAlert>
+      ) : null}
+      {error ? (
+        <InlineAlert tone="error" onClose={() => setError("")}>
+          {error}
+        </InlineAlert>
+      ) : null}
 
       <motion.article
         className="mp-panel p-4"
@@ -945,6 +969,14 @@ export function DashboardPage() {
             孤立存储
           </span>
         </div>
+        {isRelationGraphPannable ? (
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+            <span className="mp-chip border-sky-200 bg-sky-50 text-sky-700">可拖动画布查看遮挡区域</span>
+            <button type="button" className="mp-btn px-2 py-1 text-xs" onClick={resetRelationGraphViewport}>
+              回到中心
+            </button>
+          </div>
+        ) : null}
 
         <div
           ref={relationGraphViewportRef}
@@ -956,6 +988,7 @@ export function DashboardPage() {
           onPointerMove={handleRelationGraphPointerMove}
           onPointerUp={finishRelationGraphDrag}
           onPointerCancel={finishRelationGraphDrag}
+          onDoubleClick={resetRelationGraphViewport}
         >
           {relationNodes.length ? (
             <div className="mx-auto w-full min-w-[860px] max-w-[1320px]" style={{ aspectRatio: `${RELATION_GRAPH_WIDTH} / ${relationGraphHeight}` }}>
