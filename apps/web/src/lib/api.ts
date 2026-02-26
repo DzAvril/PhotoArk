@@ -11,6 +11,8 @@ import type {
   MediaBrowseResult,
   LivePhotoPair,
   LivePhotoDetail,
+  MediaIndexRebuildItem,
+  MediaIndexStatusItem,
   Metrics,
   PreviewResult,
   PreviewTokenResult,
@@ -183,6 +185,17 @@ export function getStorageMediaSummary() {
 
 export function getStorageRelations() {
   return fetchJson<{ nodes: StorageRelationNodeItem[]; edges: StorageRelationEdgeItem[] }>("/api/storages/relations");
+}
+
+export function getMediaIndexStatus() {
+  return fetchJson<{ maxAgeMs: number; items: MediaIndexStatusItem[] }>("/api/media-index");
+}
+
+export function rebuildMediaIndex(payload?: { storageId?: string }) {
+  return fetchJson<{ refreshedCount: number; failedCount: number; items: MediaIndexRebuildItem[] }>("/api/media-index/rebuild", {
+    method: "POST",
+    body: JSON.stringify(payload ?? {})
+  });
 }
 
 export function browseDirectories(dirPath?: string) {

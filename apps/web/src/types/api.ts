@@ -110,6 +110,23 @@ export interface StorageRelationEdgeItem {
   summary: string;
 }
 
+export interface MediaIndexStatusItem {
+  rootPath: string;
+  fileCount: number;
+  generatedAt: string;
+  ageMs: number;
+  fresh: boolean;
+}
+
+export interface MediaIndexRebuildItem {
+  storageId: string;
+  storageName: string;
+  rootPath: string;
+  fileCount: number;
+  ok: boolean;
+  error: string | null;
+}
+
 export interface BackupJob {
   id: string;
   name: string;
