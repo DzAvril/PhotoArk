@@ -16,6 +16,7 @@ import { LivePhotoService } from "./modules/livephoto/live-photo-service.js";
 import { TelegramService } from "./modules/notification/telegram-service.js";
 import { PasswordService } from "./modules/auth/password-service.js";
 import { FileStateRepository } from "./modules/backup/repository/file-state-repository.js";
+import { MediaIndexRepository, type MediaIndexRootEntry, type MediaIndexStore } from "./modules/backup/repository/media-index-repository.js";
 import type {
   AppSettings,
   AuthSession,
@@ -82,6 +83,7 @@ const encryption = new EncryptionService(
 const livePhoto = new LivePhotoService();
 const passwordService = new PasswordService();
 const stateRepo = new FileStateRepository(env.BACKUP_STATE_FILE);
+const mediaIndexRepo = new MediaIndexRepository(path.join(path.dirname(path.resolve(env.BACKUP_STATE_FILE)), "media-index.json"));
 
 const previewTokens = new Map<string, { assetId: string; expiresAt: number }>();
 const previewTickets = new Map<string, { assetId: string; expiresAt: number }>();
@@ -303,6 +305,26 @@ const MIME_BY_EXT: Record<string, string> = {
   ".webm": "video/webm"
 };
 
+const MEDIA_INDEX_MAX_AGE_MS = 30_000;
+const MEDIA_INDEX_SAVE_DEBOUNCE_MS = 1_200;
+
+type IndexedMediaFile = {
+  relativePath: string;
+  fullPath: string;
+  sizeBytes: number;
+  mtimeMs: number;
+};
+
+let mediaIndexStore: MediaIndexStore = {
+  version: 1,
+  roots: {}
+};
+let mediaIndexLoaded = false;
+let mediaIndexLoadPromise: Promise<void> | null = null;
+let mediaIndexSaveTimer: NodeJS.Timeout | null = null;
+let mediaIndexDirty = false;
+const mediaIndexRebuildByRoot = new Map<string, Promise<MediaIndexRootEntry>>();
+
 type ByteRange = {
   start: number;
   end: number;
@@ -513,15 +535,15 @@ function buildStorageMediaSummaryFromAssets(storageId: string, assets: BackupSta
 async function buildStorageMediaSummaryFromLocalScan(storage: StorageTarget): Promise<StorageMediaSummaryMetrics> {
   const summary = createEmptyStorageMediaSummaryMetrics();
   const rootPath = resolvePathInStorage(storage, storage.basePath);
-  const files = await collectMediaFiles(rootPath);
-  const relativePaths = files.map((fullPath) => toPosixPath(path.relative(rootPath, fullPath)));
+  const files = await collectIndexedMediaFiles(rootPath);
+  const relativePaths = files.map((row) => row.relativePath);
   const livePhotoMap = buildLivePhotoIdByRelativePath(relativePaths);
-  const fileStats = await Promise.all(files.map((fullPath) => stat(fullPath).catch(() => null)));
   const livePhotoBytesById = new Map<string, number>();
 
   for (let i = 0; i < files.length; i += 1) {
-    const relativePath = relativePaths[i];
-    const sizeBytes = fileStats[i]?.size ?? 0;
+    const row = files[i];
+    const relativePath = row.relativePath;
+    const sizeBytes = row.sizeBytes;
     const ext = path.extname(relativePath).toLowerCase();
     const livePhotoAssetId = livePhotoMap.get(relativePath);
 
@@ -620,7 +642,7 @@ async function buildStorageRelationGraph(state: BackupState): Promise<{ nodes: S
 
     const promise = (async (): Promise<MediaPathSnapshotResult> => {
       try {
-        const files = await collectMediaFiles(scanPath);
+        const files = await collectMediaFilesPreferIndex(scanPath);
         const relativePaths = new Set(files.map((filePath) => toPosixPath(path.relative(scanPath, filePath))));
         return { ok: true, relativePaths };
       } catch (error) {
@@ -1001,6 +1023,155 @@ function detectAssetKind(fileName: string, livePhotoAssetId: string | undefined)
   const ext = path.extname(fileName).toLowerCase();
   if (!livePhotoAssetId) return VIDEO_EXTENSIONS.has(ext) ? "video" : "photo";
   return VIDEO_EXTENSIONS.has(ext) ? "live_photo_video" : "live_photo_image";
+}
+
+function normalizeMediaIndexRootPath(dirPath: string): string {
+  return path.resolve(dirPath);
+}
+
+function toSystemPathFromPosixRelative(rootPath: string, relativePath: string): string {
+  const normalizedRelative = relativePath.split(path.posix.sep).join(path.sep);
+  return path.resolve(rootPath, normalizedRelative);
+}
+
+async function ensureMediaIndexLoaded() {
+  if (mediaIndexLoaded) return;
+  if (!mediaIndexLoadPromise) {
+    mediaIndexLoadPromise = (async () => {
+      mediaIndexStore = await mediaIndexRepo.load();
+      mediaIndexLoaded = true;
+    })().finally(() => {
+      mediaIndexLoadPromise = null;
+    });
+  }
+  await mediaIndexLoadPromise;
+}
+
+function markMediaIndexDirty() {
+  mediaIndexDirty = true;
+  if (mediaIndexSaveTimer) return;
+  mediaIndexSaveTimer = setTimeout(() => {
+    mediaIndexSaveTimer = null;
+    void persistMediaIndexStore();
+  }, MEDIA_INDEX_SAVE_DEBOUNCE_MS);
+  mediaIndexSaveTimer.unref();
+}
+
+async function persistMediaIndexStore() {
+  if (!mediaIndexDirty) return;
+  mediaIndexDirty = false;
+  try {
+    await mediaIndexRepo.save(mediaIndexStore);
+  } catch (error) {
+    mediaIndexDirty = true;
+    app.log.warn({ err: (error as Error).message }, "Failed to persist media index cache");
+  }
+}
+
+function getFreshMediaIndexEntry(rootPath: string, maxAgeMs = MEDIA_INDEX_MAX_AGE_MS): MediaIndexRootEntry | null {
+  const root = mediaIndexStore.roots[rootPath];
+  if (!root) return null;
+  const generatedAtMs = Date.parse(root.generatedAt);
+  if (!Number.isFinite(generatedAtMs)) return null;
+  if (Date.now() - generatedAtMs > Math.max(1000, maxAgeMs)) return null;
+  return root;
+}
+
+function buildMediaIndexEntry(rows: IndexedMediaFile[]): MediaIndexRootEntry {
+  const files: MediaIndexRootEntry["files"] = {};
+  for (const row of rows) {
+    files[row.relativePath] = {
+      sizeBytes: row.sizeBytes,
+      mtimeMs: row.mtimeMs
+    };
+  }
+  return {
+    generatedAt: new Date().toISOString(),
+    files
+  };
+}
+
+function rowsFromMediaIndexEntry(rootPath: string, entry: MediaIndexRootEntry): IndexedMediaFile[] {
+  const rows = Object.entries(entry.files).map(([relativePath, value]) => ({
+    relativePath,
+    fullPath: toSystemPathFromPosixRelative(rootPath, relativePath),
+    sizeBytes: value.sizeBytes,
+    mtimeMs: value.mtimeMs
+  }));
+  rows.sort((a, b) => a.relativePath.localeCompare(b.relativePath));
+  return rows;
+}
+
+async function scanMediaFilesWithStats(dirPath: string): Promise<IndexedMediaFile[]> {
+  const rootPath = normalizeMediaIndexRootPath(dirPath);
+  const out: IndexedMediaFile[] = [];
+
+  async function walk(currentPath: string) {
+    const entries = await readdir(currentPath, { withFileTypes: true });
+    for (const entry of entries) {
+      const fullPath = path.join(currentPath, entry.name);
+      if (entry.isDirectory()) {
+        await walk(fullPath);
+      } else if (entry.isFile() && isMediaFile(entry.name)) {
+        const fileStat = await stat(fullPath).catch(() => null);
+        out.push({
+          relativePath: toPosixPath(path.relative(rootPath, fullPath)),
+          fullPath,
+          sizeBytes: fileStat?.size ?? 0,
+          mtimeMs: fileStat?.mtimeMs ?? 0
+        });
+      }
+    }
+  }
+
+  await walk(rootPath);
+  out.sort((a, b) => a.relativePath.localeCompare(b.relativePath));
+  return out;
+}
+
+async function collectIndexedMediaFiles(dirPath: string): Promise<IndexedMediaFile[]> {
+  const rootPath = normalizeMediaIndexRootPath(dirPath);
+  await ensureMediaIndexLoaded();
+  const cached = getFreshMediaIndexEntry(rootPath);
+  if (cached) {
+    return rowsFromMediaIndexEntry(rootPath, cached);
+  }
+
+  const pending = mediaIndexRebuildByRoot.get(rootPath);
+  if (pending) {
+    return rowsFromMediaIndexEntry(rootPath, await pending);
+  }
+
+  const refreshPromise = (async () => {
+    const rows = await scanMediaFilesWithStats(rootPath);
+    const entry = buildMediaIndexEntry(rows);
+    mediaIndexStore.roots[rootPath] = entry;
+    markMediaIndexDirty();
+    return entry;
+  })().finally(() => {
+    mediaIndexRebuildByRoot.delete(rootPath);
+  });
+
+  mediaIndexRebuildByRoot.set(rootPath, refreshPromise);
+  return rowsFromMediaIndexEntry(rootPath, await refreshPromise);
+}
+
+async function collectMediaFilesPreferIndex(dirPath: string): Promise<string[]> {
+  const rootPath = normalizeMediaIndexRootPath(dirPath);
+  await ensureMediaIndexLoaded();
+  const cached = getFreshMediaIndexEntry(rootPath);
+  if (cached) {
+    return rowsFromMediaIndexEntry(rootPath, cached).map((row) => row.fullPath);
+  }
+  return collectMediaFiles(rootPath);
+}
+
+async function invalidateMediaIndexPath(dirPath: string) {
+  const rootPath = normalizeMediaIndexRootPath(dirPath);
+  await ensureMediaIndexLoaded();
+  if (!mediaIndexStore.roots[rootPath]) return;
+  delete mediaIndexStore.roots[rootPath];
+  markMediaIndexDirty();
 }
 
 async function collectMediaFiles(dirPath: string): Promise<string[]> {
@@ -1406,6 +1577,9 @@ async function executeJob(
   };
   state.jobRuns.unshift(run);
   state.jobRuns = state.jobRuns.slice(0, 200);
+  await Promise.all([invalidateMediaIndexPath(sourceRoot), invalidateMediaIndexPath(destinationRoot)]).catch((error) => {
+    app.log.warn({ err: (error as Error).message, jobId: job.id }, "Failed to invalidate media index cache");
+  });
   emitProgress("finished", {
     totalCount: scannedCount,
     scannedCount,
@@ -2584,6 +2758,11 @@ app.addHook("onClose", async () => {
     clearInterval(watcherReconcileTimer);
     watcherReconcileTimer = null;
   }
+  if (mediaIndexSaveTimer) {
+    clearTimeout(mediaIndexSaveTimer);
+    mediaIndexSaveTimer = null;
+  }
+  await persistMediaIndexStore();
   for (const jobId of [...jobWatchers.keys()]) {
     await stopJobWatcher(jobId);
   }
