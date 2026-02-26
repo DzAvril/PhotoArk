@@ -8,7 +8,7 @@ const tabs = [
 
 export function SettingsLayoutPage() {
   return (
-    <section className="space-y-4">
+    <section className="space-y-4 md:flex md:h-full md:flex-col">
       <div className="mp-panel mp-panel-soft p-3">
         <nav className="grid grid-cols-3 gap-2">
           {tabs.map((tab) => (
@@ -30,7 +30,9 @@ export function SettingsLayoutPage() {
         </nav>
       </div>
 
-      <Outlet />
+      <div className="md:min-h-0 md:flex-1">
+        <Outlet />
+      </div>
     </section>
   );
 }

@@ -15,6 +15,9 @@ import type {
   PreviewResult,
   PreviewTokenResult,
   StorageCapacityItem,
+  StorageRelationEdgeItem,
+  StorageRelationNodeItem,
+  StorageMediaSummaryItem,
   StorageTarget,
   VersionInfo
 } from "../types/api";
@@ -172,6 +175,14 @@ export function getStorages() {
 
 export function getStorageCapacities() {
   return fetchJson<{ items: StorageCapacityItem[] }>("/api/storages/capacity");
+}
+
+export function getStorageMediaSummary() {
+  return fetchJson<{ items: StorageMediaSummaryItem[] }>("/api/backups/storage-media-summary");
+}
+
+export function getStorageRelations() {
+  return fetchJson<{ nodes: StorageRelationNodeItem[]; edges: StorageRelationEdgeItem[] }>("/api/storages/relations");
 }
 
 export function browseDirectories(dirPath?: string) {

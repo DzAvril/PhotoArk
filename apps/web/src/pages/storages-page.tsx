@@ -139,12 +139,11 @@ export function StoragesPage() {
   const allCurrentPageSelected = table.paged.length > 0 && table.paged.every((s) => selected.has(s.id));
 
   return (
-    <section className="space-y-3">
+    <section className="space-y-3 md:flex md:h-full md:flex-col">
       <Collapsible.Root open={formOpen} onOpenChange={setFormOpen} className="mp-panel mp-panel-soft p-4">
         <div className="flex items-center justify-between">
           <div>
             <h3 className="text-base font-semibold">目标存储</h3>
-            <p className="mt-1 text-sm mp-muted">支持本地目录下拉选择和手动输入路径</p>
           </div>
           <Collapsible.Trigger className="mp-btn">{formOpen ? "收起" : "新增存储"}</Collapsible.Trigger>
         </div>
@@ -204,7 +203,6 @@ export function StoragesPage() {
                   required
                 />
               )}
-              <p className="mt-1 text-sm mp-muted">本地路径建议使用绝对路径；云端路径请使用完整 URI。</p>
             </div>
 
             <label className="flex items-center gap-2 text-sm">
@@ -220,7 +218,7 @@ export function StoragesPage() {
         </Collapsible.Content>
       </Collapsible.Root>
 
-      <div className="mp-panel p-4">
+      <div className="mp-panel p-4 md:flex md:min-h-0 md:flex-1 md:flex-col">
         <TableToolbar
           title="存储列表"
           search={search}
@@ -272,7 +270,7 @@ export function StoragesPage() {
           {!table.paged.length ? <p className="py-4 text-center text-sm mp-muted">暂无数据</p> : null}
         </div>
 
-        <div className="hidden overflow-auto md:block">
+        <div className="hidden md:block md:min-h-0 md:flex-1 md:overflow-auto">
           <table className="mp-data-table min-w-full text-base">
             <thead>
               <tr className="border-b border-[var(--ark-line)] text-left text-sm mp-muted">

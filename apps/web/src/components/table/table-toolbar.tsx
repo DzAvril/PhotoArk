@@ -23,7 +23,7 @@ export function TableToolbar({ title, search, onSearchChange, pageSize, onPageSi
             </svg>
           </span>
           <input
-            className="mp-input w-full pl-9"
+            className="mp-input mp-input-with-icon w-full"
             placeholder="搜索名称或关键字"
             aria-label="搜索"
             value={search}

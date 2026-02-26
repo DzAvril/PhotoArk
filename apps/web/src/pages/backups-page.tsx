@@ -9,6 +9,11 @@ import { deleteRun, getJobs, getRuns } from "../lib/api";
 import type { BackupJob, JobRun } from "../types/api";
 
 type SortKey = "finishedAt" | "status" | "copiedCount";
+type PendingDeleteAction = {
+  mode: "single" | "batch";
+  ids: string[];
+  label: string;
+};
 
 function getTriggerLabel(trigger: JobRun["trigger"]) {
   if (trigger === "manual") return "手动执行";
@@ -34,8 +39,10 @@ export function BackupsPage() {
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("finishedAt");
   const [sortAsc, setSortAsc] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   const [deletingRunIds, setDeletingRunIds] = useState<Set<string>>(new Set());
-  const [pendingDeleteRunId, setPendingDeleteRunId] = useState<string | null>(null);
+  const [deletingSelected, setDeletingSelected] = useState(false);
+  const [pendingDeleteAction, setPendingDeleteAction] = useState<PendingDeleteAction | null>(null);
   const [message, setMessage] = useState("");
 
   const jobById = useMemo(() => Object.fromEntries(jobs.map((j) => [j.id, j])), [jobs]);
@@ -45,6 +52,7 @@ export function BackupsPage() {
       const [jobsRes, runsRes] = await Promise.all([getJobs(), getRuns()]);
       setJobs(jobsRes.items);
       setRuns(runsRes.items);
+      setSelected(new Set());
     } catch (err) {
       setError((err as Error).message);
     }
@@ -62,23 +70,58 @@ export function BackupsPage() {
     }
   }
 
-  async function handleDeleteRun(runId: string) {
+  async function handleDeleteRuns(action: PendingDeleteAction) {
+    if (!action.ids.length) return;
     setError("");
     setMessage("");
-    setDeletingRunIds((prev) => new Set(prev).add(runId));
+    setDeletingRunIds((prev) => {
+      const next = new Set(prev);
+      action.ids.forEach((id) => next.add(id));
+      return next;
+    });
+    if (action.mode === "batch") {
+      setDeletingSelected(true);
+    }
     try {
-      await deleteRun(runId);
-      setRuns((prev) => prev.filter((run) => run.id !== runId));
-      setMessage("执行记录已删除");
-      setPendingDeleteRunId(null);
+      const results = await Promise.allSettled(action.ids.map((id) => deleteRun(id)));
+      const failedIds: string[] = [];
+      results.forEach((result, index) => {
+        if (result.status === "rejected") {
+          failedIds.push(action.ids[index]);
+        }
+      });
+      const successIds = action.ids.filter((id) => !failedIds.includes(id));
+      const successCount = successIds.length;
+
+      if (successCount > 0) {
+        setRuns((prev) => prev.filter((run) => !successIds.includes(run.id)));
+        setSelected((prev) => {
+          const next = new Set(prev);
+          successIds.forEach((id) => next.delete(id));
+          return next;
+        });
+      }
+
+      if (failedIds.length) {
+        setError(`已删除 ${successCount} 条记录，${failedIds.length} 条删除失败。`);
+        if (action.mode === "batch") {
+          setSelected(new Set(failedIds));
+        }
+      } else {
+        setMessage(action.mode === "single" ? `${action.label}已删除。` : `已删除 ${successCount} 条记录。`);
+      }
+      setPendingDeleteAction(null);
     } catch (err) {
       setError((err as Error).message);
     } finally {
       setDeletingRunIds((prev) => {
         const next = new Set(prev);
-        next.delete(runId);
+        action.ids.forEach((id) => next.delete(id));
         return next;
       });
+      if (action.mode === "batch") {
+        setDeletingSelected(false);
+      }
     }
   }
 
@@ -106,10 +149,11 @@ export function BackupsPage() {
     ),
     { pageSizeStorageKey: "ark-runs-page-size" }
   );
+  const allCurrentPageSelected = table.paged.length > 0 && table.paged.every((run) => selected.has(run.id));
 
   return (
-    <section className="space-y-3">
-      <div className="mp-panel p-4">
+    <section className="space-y-3 md:flex md:h-full md:flex-col">
+      <div className="mp-panel p-4 md:flex md:min-h-0 md:flex-1 md:flex-col">
         {message ? <p className="mb-3 text-sm mp-status-success">{message}</p> : null}
         {error ? <p className="mp-error mb-3">{error}</p> : null}
         <TableToolbar
@@ -120,6 +164,22 @@ export function BackupsPage() {
           onPageSizeChange={table.setPageSize}
           totalItems={table.totalItems}
         />
+        <div className="mb-2 flex justify-end">
+          <button
+            className="mp-btn"
+            type="button"
+            disabled={!selected.size || deletingSelected}
+            onClick={() =>
+              setPendingDeleteAction({
+                mode: "batch",
+                ids: [...selected],
+                label: `选中的 ${selected.size} 条记录`
+              })
+            }
+          >
+            {deletingSelected ? "删除中..." : `批量删除 (${selected.size})`}
+          </button>
+        </div>
 
         <div className="space-y-2 md:hidden">
           {table.paged.map((run) => {
@@ -127,8 +187,18 @@ export function BackupsPage() {
             const deleting = deletingRunIds.has(run.id);
             return (
               <article key={run.id} className="mp-mobile-card">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
+                <div className="flex items-start gap-2">
+                  <input
+                    type="checkbox"
+                    checked={selected.has(run.id)}
+                    onChange={(e) => {
+                      const next = new Set(selected);
+                      if (e.target.checked) next.add(run.id);
+                      else next.delete(run.id);
+                      setSelected(next);
+                    }}
+                  />
+                  <div className="min-w-0 flex-1">
                     <h4 className="truncate text-sm font-semibold">{job?.name ?? run.jobId}</h4>
                   </div>
                   <span className={run.status === "success" ? "text-base mp-status-success" : "text-base mp-status-danger"}>
@@ -154,7 +224,18 @@ export function BackupsPage() {
                 {run.errors[0] ? <p className="mt-2 text-sm mp-status-danger">首个错误：{run.errors[0].path} - {run.errors[0].error}</p> : null}
 
                 <div className="mt-3 flex justify-end">
-                  <button type="button" className="mp-btn" disabled={deleting} onClick={() => setPendingDeleteRunId(run.id)}>
+                  <button
+                    type="button"
+                    className="mp-btn"
+                    disabled={deleting}
+                    onClick={() =>
+                      setPendingDeleteAction({
+                        mode: "single",
+                        ids: [run.id],
+                        label: "执行记录"
+                      })
+                    }
+                  >
                     {deleting ? "删除中" : "删除"}
                   </button>
                 </div>
@@ -164,10 +245,22 @@ export function BackupsPage() {
           {!table.paged.length ? <p className="py-4 text-center text-sm mp-muted">暂无记录</p> : null}
         </div>
 
-        <div className="hidden overflow-auto md:block">
+        <div className="hidden md:block md:min-h-0 md:flex-1 md:overflow-auto">
           <table className="mp-data-table min-w-full text-base">
             <thead>
               <tr className="border-b border-[var(--ark-line)] text-left text-sm mp-muted">
+                <th className="px-2 py-2">
+                  <input
+                    type="checkbox"
+                    checked={allCurrentPageSelected}
+                    onChange={(e) => {
+                      const next = new Set(selected);
+                      if (e.target.checked) table.paged.forEach((run) => next.add(run.id));
+                      else table.paged.forEach((run) => next.delete(run.id));
+                      setSelected(next);
+                    }}
+                  />
+                </th>
                 <th className="px-2 py-2">任务</th>
                 <th className="px-2 py-2" aria-sort={getAriaSort(sortKey === "finishedAt", sortAsc)}>
                   <SortableHeader
@@ -203,6 +296,18 @@ export function BackupsPage() {
                 const job = jobById[run.jobId];
                 return (
                   <tr key={run.id} className="border-b border-[var(--ark-line)]/70 align-top">
+                    <td className="px-2 py-2">
+                      <input
+                        type="checkbox"
+                        checked={selected.has(run.id)}
+                        onChange={(e) => {
+                          const next = new Set(selected);
+                          if (e.target.checked) next.add(run.id);
+                          else next.delete(run.id);
+                          setSelected(next);
+                        }}
+                      />
+                    </td>
                     <td className="px-2 py-2 text-sm">
                       <div>{job?.name ?? run.jobId}</div>
                     </td>
@@ -227,7 +332,13 @@ export function BackupsPage() {
                         type="button"
                         className="mp-btn"
                         disabled={deletingRunIds.has(run.id)}
-                        onClick={() => setPendingDeleteRunId(run.id)}
+                        onClick={() =>
+                          setPendingDeleteAction({
+                            mode: "single",
+                            ids: [run.id],
+                            label: "执行记录"
+                          })
+                        }
                       >
                         {deletingRunIds.has(run.id) ? "删除中" : "删除"}
                       </button>
@@ -237,7 +348,7 @@ export function BackupsPage() {
               })}
               {!table.paged.length ? (
                 <tr>
-                  <td className="px-2 py-4 text-center text-sm mp-muted" colSpan={7}>暂无记录</td>
+                  <td className="px-2 py-4 text-center text-sm mp-muted" colSpan={8}>暂无记录</td>
                 </tr>
               ) : null}
             </tbody>
@@ -255,15 +366,23 @@ export function BackupsPage() {
       </div>
 
       <ConfirmDialog
-        open={Boolean(pendingDeleteRunId)}
+        open={Boolean(pendingDeleteAction)}
         title="删除执行记录"
-        description="该操作不可恢复，确认后将永久删除所选记录。"
+        description={
+          pendingDeleteAction?.mode === "single"
+            ? `将删除${pendingDeleteAction.label}，该操作不可恢复。`
+            : `将删除 ${pendingDeleteAction?.ids.length ?? 0} 条记录，该操作不可恢复。`
+        }
         confirmText="确认删除"
-        busy={pendingDeleteRunId ? deletingRunIds.has(pendingDeleteRunId) : false}
-        onCancel={() => setPendingDeleteRunId(null)}
+        busy={
+          pendingDeleteAction?.mode === "single"
+            ? Boolean(pendingDeleteAction.ids[0] && deletingRunIds.has(pendingDeleteAction.ids[0]))
+            : deletingSelected
+        }
+        onCancel={() => setPendingDeleteAction(null)}
         onConfirm={() => {
-          if (!pendingDeleteRunId) return;
-          void handleDeleteRun(pendingDeleteRunId);
+          if (!pendingDeleteAction) return;
+          void handleDeleteRuns(pendingDeleteAction);
         }}
       />
     </section>

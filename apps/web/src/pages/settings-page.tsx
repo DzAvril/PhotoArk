@@ -68,11 +68,10 @@ export function SettingsPage() {
   }
 
   return (
-    <div className="mp-panel mp-panel-soft p-4">
+    <div className="mp-panel mp-panel-soft p-4 md:flex md:h-full md:flex-col">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h3 className="text-base font-semibold">Telegram 通知</h3>
-          <p className="mt-1 text-sm mp-muted">启用后每次备份执行都会自动发送摘要，建议先发送测试消息确认可达性。</p>
         </div>
         <span className={`mp-chip ${form.telegram.enabled ? "mp-chip-success" : ""}`}>
           {form.telegram.enabled ? "已启用" : "未启用"}
@@ -83,7 +82,7 @@ export function SettingsPage() {
       {error ? <p className="mp-error mt-3">{error}</p> : null}
       {message ? <p className="mt-3 text-sm mp-status-success">{message}</p> : null}
 
-      <form onSubmit={(e) => void onSubmit(e)} className="mt-3 space-y-3">
+      <form onSubmit={(e) => void onSubmit(e)} className="mt-3 space-y-3 md:min-h-0 md:flex-1 md:overflow-auto">
         <fieldset className="rounded-xl border border-[var(--ark-line)] bg-[var(--ark-surface)] p-3">
           <label className="flex items-center gap-2 text-sm font-medium">
             <input
@@ -98,7 +97,6 @@ export function SettingsPage() {
             />
             启用 Telegram 备份摘要通知
           </label>
-          <p className="mt-1 text-xs mp-muted">关闭后不会发送任何自动通知，手动测试按钮也会禁用。</p>
         </fieldset>
 
         <fieldset className="rounded-xl border border-[var(--ark-line)] bg-[var(--ark-surface)] p-3">
@@ -133,7 +131,6 @@ export function SettingsPage() {
                   {showBotToken ? "隐藏" : "显示"}
                 </button>
               </div>
-              <p className="text-sm mp-muted">可在 Telegram BotFather 创建机器人并获取 Token。</p>
             </div>
 
             <div className="space-y-1">
@@ -154,7 +151,6 @@ export function SettingsPage() {
                   }))
                 }
               />
-              <p className="text-sm mp-muted">填写接收通知的个人或群组 Chat ID。</p>
             </div>
           </div>
         </fieldset>

@@ -445,6 +445,315 @@ function mergeStorageCapacitySnapshots(snapshots: StorageCapacitySnapshot[]): St
   return items;
 }
 
+type StorageMediaSummaryMetrics = {
+  counts: {
+    image: number;
+    video: number;
+    livePhoto: number;
+  };
+  bytes: {
+    image: number;
+    video: number;
+    livePhoto: number;
+  };
+};
+
+function createEmptyStorageMediaSummaryMetrics(): StorageMediaSummaryMetrics {
+  return {
+    counts: {
+      image: 0,
+      video: 0,
+      livePhoto: 0
+    },
+    bytes: {
+      image: 0,
+      video: 0,
+      livePhoto: 0
+    }
+  };
+}
+
+function buildStorageMediaSummaryFromAssets(storageId: string, assets: BackupState["assets"]): StorageMediaSummaryMetrics {
+  const summary = createEmptyStorageMediaSummaryMetrics();
+  const livePhotoBytesById = new Map<string, number>();
+
+  for (const asset of assets) {
+    if (asset.storageTargetId !== storageId) continue;
+
+    if (asset.kind === "photo") {
+      summary.counts.image += 1;
+      summary.bytes.image += asset.sizeBytes;
+      continue;
+    }
+
+    if (asset.kind === "video") {
+      summary.counts.video += 1;
+      summary.bytes.video += asset.sizeBytes;
+      continue;
+    }
+
+    const livePhotoAssetId = asset.livePhotoAssetId?.trim();
+    if (!livePhotoAssetId) {
+      summary.counts.livePhoto += 1;
+      summary.bytes.livePhoto += asset.sizeBytes;
+      continue;
+    }
+
+    livePhotoBytesById.set(livePhotoAssetId, (livePhotoBytesById.get(livePhotoAssetId) ?? 0) + asset.sizeBytes);
+  }
+
+  for (const bytes of livePhotoBytesById.values()) {
+    summary.counts.livePhoto += 1;
+    summary.bytes.livePhoto += bytes;
+  }
+
+  return summary;
+}
+
+async function buildStorageMediaSummaryFromLocalScan(storage: StorageTarget): Promise<StorageMediaSummaryMetrics> {
+  const summary = createEmptyStorageMediaSummaryMetrics();
+  const rootPath = resolvePathInStorage(storage, storage.basePath);
+  const files = await collectMediaFiles(rootPath);
+  const relativePaths = files.map((fullPath) => toPosixPath(path.relative(rootPath, fullPath)));
+  const livePhotoMap = buildLivePhotoIdByRelativePath(relativePaths);
+  const fileStats = await Promise.all(files.map((fullPath) => stat(fullPath).catch(() => null)));
+  const livePhotoBytesById = new Map<string, number>();
+
+  for (let i = 0; i < files.length; i += 1) {
+    const relativePath = relativePaths[i];
+    const sizeBytes = fileStats[i]?.size ?? 0;
+    const ext = path.extname(relativePath).toLowerCase();
+    const livePhotoAssetId = livePhotoMap.get(relativePath);
+
+    if (livePhotoAssetId) {
+      livePhotoBytesById.set(livePhotoAssetId, (livePhotoBytesById.get(livePhotoAssetId) ?? 0) + sizeBytes);
+      continue;
+    }
+
+    if (VIDEO_EXTENSIONS.has(ext)) {
+      summary.counts.video += 1;
+      summary.bytes.video += sizeBytes;
+    } else if (IMAGE_EXTENSIONS.has(ext)) {
+      summary.counts.image += 1;
+      summary.bytes.image += sizeBytes;
+    }
+  }
+
+  for (const bytes of livePhotoBytesById.values()) {
+    summary.counts.livePhoto += 1;
+    summary.bytes.livePhoto += bytes;
+  }
+
+  return summary;
+}
+
+async function buildStorageMediaSummary(state: BackupState): Promise<StorageMediaSummaryItem[]> {
+  const items = await Promise.all(
+    state.storages.map(async (storage) => {
+      let metrics: StorageMediaSummaryMetrics;
+
+      if (isLocalStorage(storage.type)) {
+        try {
+          metrics = await buildStorageMediaSummaryFromLocalScan(storage);
+        } catch (error) {
+          app.log.warn(
+            {
+              storageId: storage.id,
+              storageName: storage.name,
+              err: (error as Error).message
+            },
+            "Failed to scan storage for media summary, fallback to backup assets"
+          );
+          metrics = buildStorageMediaSummaryFromAssets(storage.id, state.assets);
+        }
+      } else {
+        metrics = buildStorageMediaSummaryFromAssets(storage.id, state.assets);
+      }
+
+      const totalCount = metrics.counts.image + metrics.counts.video + metrics.counts.livePhoto;
+      const totalBytes = metrics.bytes.image + metrics.bytes.video + metrics.bytes.livePhoto;
+
+      return {
+        storageId: storage.id,
+        storageName: storage.name,
+        basePath: storage.basePath,
+        counts: metrics.counts,
+        bytes: metrics.bytes,
+        totalCount,
+        totalBytes
+      };
+    })
+  );
+
+  return items.sort((a, b) => a.storageName.localeCompare(b.storageName, "zh-CN"));
+}
+
+type JobRelationCheckStatus = "synced" | "lagging" | "unknown";
+
+type MediaPathSnapshotResult =
+  | {
+      ok: true;
+      relativePaths: Set<string>;
+    }
+  | {
+      ok: false;
+      error: string;
+    };
+
+async function buildStorageRelationGraph(state: BackupState): Promise<{ nodes: StorageRelationNodeItem[]; edges: StorageRelationEdgeItem[] }> {
+  const nodes = state.storages
+    .map((storage) => ({
+      storageId: storage.id,
+      storageName: storage.name,
+      basePath: storage.basePath,
+      type: storage.type
+    }))
+    .sort((a, b) => a.storageName.localeCompare(b.storageName, "zh-CN"));
+
+  const storageById = new Map(state.storages.map((storage) => [storage.id, storage]));
+  const snapshotCache = new Map<string, Promise<MediaPathSnapshotResult>>();
+
+  const getMediaPathSnapshot = async (storage: StorageTarget, scanPath: string): Promise<MediaPathSnapshotResult> => {
+    const cacheKey = `${storage.id}:${scanPath}`;
+    const cached = snapshotCache.get(cacheKey);
+    if (cached) return cached;
+
+    const promise = (async (): Promise<MediaPathSnapshotResult> => {
+      try {
+        const files = await collectMediaFiles(scanPath);
+        const relativePaths = new Set(files.map((filePath) => toPosixPath(path.relative(scanPath, filePath))));
+        return { ok: true, relativePaths };
+      } catch (error) {
+        return { ok: false, error: (error as Error).message };
+      }
+    })();
+
+    snapshotCache.set(cacheKey, promise);
+    return promise;
+  };
+
+  const jobChecks = await Promise.all(
+    state.jobs.map(async (job) => {
+      const sourceStorage = storageById.get(job.sourceTargetId);
+      const destinationStorage = storageById.get(job.destinationTargetId);
+      if (!sourceStorage || !destinationStorage) {
+        return null;
+      }
+
+      let status: JobRelationCheckStatus = "unknown";
+
+      if (isLocalStorage(sourceStorage.type) && isLocalStorage(destinationStorage.type)) {
+        try {
+          const sourceRoot = resolvePathInStorage(sourceStorage, job.sourcePath);
+          const destinationRoot = resolvePathInStorage(destinationStorage, job.destinationPath);
+          const [sourceSnapshot, destinationSnapshot] = await Promise.all([
+            getMediaPathSnapshot(sourceStorage, sourceRoot),
+            getMediaPathSnapshot(destinationStorage, destinationRoot)
+          ]);
+
+          if (sourceSnapshot.ok && destinationSnapshot.ok) {
+            let missingInDestination = 0;
+            for (const relativePath of sourceSnapshot.relativePaths) {
+              if (!destinationSnapshot.relativePaths.has(relativePath)) {
+                missingInDestination += 1;
+              }
+            }
+            status = missingInDestination === 0 ? "synced" : "lagging";
+          }
+        } catch {
+          status = "unknown";
+        }
+      }
+
+      return {
+        jobId: job.id,
+        enabled: job.enabled,
+        sourceStorageId: sourceStorage.id,
+        sourceStorageName: sourceStorage.name,
+        destinationStorageId: destinationStorage.id,
+        destinationStorageName: destinationStorage.name,
+        status
+      };
+    })
+  );
+
+  const edgeMap = new Map<
+    string,
+    Omit<StorageRelationEdgeItem, "status" | "summary"> & { status: StorageRelationEdgeStatus; summary: string }
+  >();
+
+  for (const row of jobChecks) {
+    if (!row) continue;
+    const edgeId = `${row.sourceStorageId}->${row.destinationStorageId}`;
+    const existing = edgeMap.get(edgeId);
+    if (!existing) {
+      edgeMap.set(edgeId, {
+        id: edgeId,
+        sourceStorageId: row.sourceStorageId,
+        sourceStorageName: row.sourceStorageName,
+        destinationStorageId: row.destinationStorageId,
+        destinationStorageName: row.destinationStorageName,
+        status: "synced",
+        jobCount: 0,
+        syncedJobCount: 0,
+        laggingJobCount: 0,
+        unknownJobCount: 0,
+        jobIds: [],
+        pendingJobIds: [],
+        enabledJobIds: [],
+        summary: ""
+      });
+    }
+
+    const edge = edgeMap.get(edgeId);
+    if (!edge) continue;
+    edge.jobCount += 1;
+    edge.jobIds.push(row.jobId);
+    if (row.enabled) {
+      edge.enabledJobIds.push(row.jobId);
+    }
+    if (row.status === "synced") {
+      edge.syncedJobCount += 1;
+    } else if (row.status === "lagging") {
+      edge.laggingJobCount += 1;
+      edge.pendingJobIds.push(row.jobId);
+    } else {
+      edge.unknownJobCount += 1;
+      edge.pendingJobIds.push(row.jobId);
+    }
+  }
+
+  const edges = [...edgeMap.values()]
+    .map((item) => {
+      const status: StorageRelationEdgeStatus = item.laggingJobCount > 0 || item.unknownJobCount > 0 ? "attention" : "synced";
+      const summary =
+        status === "synced"
+          ? `${item.syncedJobCount}/${item.jobCount} 个任务已同步`
+          : [
+              item.laggingJobCount > 0 ? `待同步 ${item.laggingJobCount}` : "",
+              item.unknownJobCount > 0 ? `无法校验 ${item.unknownJobCount}` : ""
+            ]
+              .filter(Boolean)
+              .join("，");
+
+      return {
+        ...item,
+        jobIds: [...item.jobIds],
+        pendingJobIds: [...item.pendingJobIds],
+        enabledJobIds: [...item.enabledJobIds],
+        status,
+        summary
+      };
+    })
+    .sort((a, b) => {
+      const sourceCompare = a.sourceStorageName.localeCompare(b.sourceStorageName, "zh-CN");
+      if (sourceCompare !== 0) return sourceCompare;
+      return a.destinationStorageName.localeCompare(b.destinationStorageName, "zh-CN");
+    });
+
+  return { nodes, edges };
+}
+
 function sendBufferWithRange(reply: FastifyReply, plain: Buffer, mimeType: string, rangeHeader: string | undefined) {
   const parsed = parseByteRange(rangeHeader, plain.length);
   if (parsed.error) {
@@ -567,6 +876,50 @@ type StorageCapacityItem = {
   usedBytes: number | null;
   freeBytes: number | null;
   usedPercent: number | null;
+};
+
+type StorageMediaSummaryItem = {
+  storageId: string;
+  storageName: string;
+  basePath: string;
+  counts: {
+    image: number;
+    video: number;
+    livePhoto: number;
+  };
+  bytes: {
+    image: number;
+    video: number;
+    livePhoto: number;
+  };
+  totalCount: number;
+  totalBytes: number;
+};
+
+type StorageRelationNodeItem = {
+  storageId: string;
+  storageName: string;
+  basePath: string;
+  type: StorageTarget["type"];
+};
+
+type StorageRelationEdgeStatus = "synced" | "attention";
+
+type StorageRelationEdgeItem = {
+  id: string;
+  sourceStorageId: string;
+  sourceStorageName: string;
+  destinationStorageId: string;
+  destinationStorageName: string;
+  status: StorageRelationEdgeStatus;
+  jobCount: number;
+  syncedJobCount: number;
+  laggingJobCount: number;
+  unknownJobCount: number;
+  jobIds: string[];
+  pendingJobIds: string[];
+  enabledJobIds: string[];
+  summary: string;
 };
 
 function normalizeVersion(input: string): string {
@@ -1719,6 +2072,11 @@ app.get("/api/storages/capacity", async () => {
   return { items };
 });
 
+app.get("/api/storages/relations", async () => {
+  const state = await stateRepo.loadState();
+  return buildStorageRelationGraph(state);
+});
+
 app.get<{ Querystring: { path?: string } }>("/api/fs/directories", async (req, reply) => {
   const inputPath = req.query.path ?? env.FS_BROWSE_ROOT ?? "/";
   const currentPath = path.resolve(inputPath);
@@ -2041,6 +2399,14 @@ app.get("/api/backups", async () => {
   return {
     items: state.assets,
     livePhotoPairs
+  };
+});
+
+app.get("/api/backups/storage-media-summary", async () => {
+  const state = await stateRepo.loadState();
+  const items = await buildStorageMediaSummary(state);
+  return {
+    items
   };
 });
 

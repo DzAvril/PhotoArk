@@ -5,11 +5,51 @@ import { getVersionInfo } from "../lib/api";
 import type { AuthUser, VersionInfo } from "../types/api";
 
 const tabs = [
-  { to: "/", label: "总览", short: "总" },
-  { to: "/media", label: "媒体", short: "媒" },
-  { to: "/records", label: "记录", short: "记" },
-  { to: "/settings", label: "配置", short: "配" }
-];
+  { to: "/", label: "总览" },
+  { to: "/media", label: "媒体" },
+  { to: "/records", label: "记录" },
+  { to: "/settings", label: "配置" }
+] as const;
+
+type TabPath = (typeof tabs)[number]["to"];
+
+function NavTabIcon({ to, className }: { to: TabPath; className?: string }) {
+  if (to === "/") {
+    return (
+      <svg viewBox="0 0 20 20" fill="none" className={className} aria-hidden="true">
+        <path d="M3.5 10.2 10 4.5l6.5 5.7v5.3a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-5.3Z" stroke="currentColor" strokeWidth="1.7" />
+        <path d="M8.2 16.5V11h3.6v5.5" stroke="currentColor" strokeWidth="1.7" />
+      </svg>
+    );
+  }
+  if (to === "/media") {
+    return (
+      <svg viewBox="0 0 20 20" fill="none" className={className} aria-hidden="true">
+        <rect x="2.8" y="3.2" width="14.4" height="13.6" rx="2.2" stroke="currentColor" strokeWidth="1.7" />
+        <circle cx="7" cy="7" r="1.4" fill="currentColor" />
+        <path d="M4.8 14.6 8.1 11.3 10.6 13.8 13.1 11.2 15.2 13.3" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  if (to === "/records") {
+    return (
+      <svg viewBox="0 0 20 20" fill="none" className={className} aria-hidden="true">
+        <rect x="3.2" y="2.8" width="13.6" height="14.4" rx="2.2" stroke="currentColor" strokeWidth="1.7" />
+        <path d="M6.5 7h7M6.5 10h7M6.5 13h5.1" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  return (
+    <svg viewBox="0 0 20 20" fill="none" className={className} aria-hidden="true">
+      <path
+        d="M10 4.4a1.2 1.2 0 0 1 2.1-.8l.4.7c.2.3.6.5 1 .5l.8-.1a1.2 1.2 0 0 1 1.3 1.8l-.4.7c-.2.3-.2.7 0 1l.4.7a1.2 1.2 0 0 1-1.3 1.8l-.8-.1a1 1 0 0 0-1 .5l-.4.7a1.2 1.2 0 0 1-2.1 0l-.4-.7a1 1 0 0 0-1-.5l-.8.1a1.2 1.2 0 0 1-1.3-1.8l.4-.7a1 1 0 0 0 0-1l-.4-.7a1.2 1.2 0 0 1 1.3-1.8l.8.1c.4.1.8-.1 1-.5l.4-.7A1.2 1.2 0 0 1 10 4.4Z"
+        stroke="currentColor"
+        strokeWidth="1.7"
+      />
+      <circle cx="10" cy="10" r="1.8" stroke="currentColor" strokeWidth="1.7" />
+    </svg>
+  );
+}
 
 type ThemeMode = "light" | "dark";
 const themeColorByMode: Record<ThemeMode, string> = {
@@ -25,7 +65,7 @@ function normalizePathname(pathname: string) {
 }
 
 function getPageMeta(pathname: string) {
-  if (pathname === "/") return { title: "总览", subtitle: "NAS 多目标照片备份平台" };
+  if (pathname === "/") return { title: "总览", subtitle: "多存储目标备份、浏览与任务调度" };
   if (pathname === "/media") return { title: "媒体预览", subtitle: "按存储浏览图片和视频" };
   if (pathname === "/records") return { title: "执行记录", subtitle: "查看任务历史执行结果" };
   if (pathname.startsWith("/settings/jobs")) return { title: "任务配置", subtitle: "管理备份任务与执行策略" };
@@ -108,10 +148,10 @@ export function AppShell({ authUser, onLogout }: AppShellProps) {
         className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(circle_at_8%_2%,color-mix(in_oklab,var(--ark-primary)_16%,transparent)_0%,transparent_32%),radial-gradient(circle_at_94%_18%,color-mix(in_oklab,var(--ark-primary)_10%,transparent)_0%,transparent_28%)]"
       />
 
-      <div className="mx-auto max-w-[1480px] px-3 pb-24 pt-3 md:px-5 md:pb-5 md:pt-4">
-        <div className="grid gap-4 md:grid-cols-[244px_minmax(0,1fr)]">
+      <div className="w-full min-h-screen px-3 pb-24 pt-3 md:px-5 md:pb-5 md:pt-4">
+        <div className="grid min-h-[calc(100vh-7rem)] gap-4 md:min-h-[calc(100vh-2.25rem)] md:grid-cols-[244px_minmax(0,1fr)]">
           <motion.aside
-            className="mp-panel mp-panel-soft hidden self-start p-4 md:sticky md:top-4 md:block"
+            className="mp-panel mp-panel-soft hidden p-4 md:sticky md:top-4 md:block md:h-[calc(100vh-2.25rem)] md:overflow-auto"
             initial={{ opacity: 0, x: -12 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ duration: 0.25, ease: "easeOut" }}
@@ -143,15 +183,17 @@ export function AppShell({ authUser, onLogout }: AppShellProps) {
                   }
                 >
                   <span className="flex items-center justify-between gap-2">
-                    <span>{tab.label}</span>
-                    <span className="text-xs opacity-70 transition-opacity group-hover:opacity-100">{tab.short}</span>
+                    <span className="inline-flex items-center gap-2">
+                      <NavTabIcon to={tab.to} className="h-4 w-4" />
+                      <span>{tab.label}</span>
+                    </span>
                   </span>
                 </NavLink>
               ))}
             </nav>
           </motion.aside>
 
-          <section className="min-w-0">
+          <section className="min-w-0 flex min-h-0 flex-col">
             <motion.header
               key={isDashboard ? "hero-header" : `page-header:${pathname}`}
               className={`mb-4 p-4 backdrop-blur-[2px] ${isDashboard ? "mp-panel mp-panel-hero" : "mp-panel mp-panel-soft py-3.5"}`}
@@ -159,7 +201,7 @@ export function AppShell({ authUser, onLogout }: AppShellProps) {
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.24, ease: "easeOut" }}
             >
-              <div className="flex items-start justify-between gap-3">
+              <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                 <div className="flex min-w-0 items-start gap-3">
                   <img
                     src="/logo.svg"
@@ -168,13 +210,13 @@ export function AppShell({ authUser, onLogout }: AppShellProps) {
                   />
                   <div className="min-w-0">
                     {isDashboard ? <p className="text-sm uppercase tracking-[0.22em] text-[var(--ark-primary)]">PhotoArk</p> : null}
-                    <h2 className={`font-bold tracking-tight ${isDashboard ? "mt-1 text-lg sm:text-2xl" : "text-lg sm:text-xl"}`}>
+                    <h2 className={`break-keep font-bold tracking-tight ${isDashboard ? "mt-1 text-lg sm:text-2xl" : "text-lg sm:text-xl"}`}>
                       {isDashboard ? "NAS 多目标照片备份平台" : pageMeta.title}
                     </h2>
-                    <p className={`text-sm mp-muted ${isDashboard ? "mt-1.5" : "mt-1"}`}>{pageMeta.subtitle}</p>
+                    <p className={`break-keep text-sm mp-muted ${isDashboard ? "mt-1.5" : "mt-1"}`}>{pageMeta.subtitle}</p>
                   </div>
                 </div>
-                <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                <div className="flex w-full flex-wrap items-center gap-2 md:w-auto md:shrink-0 md:justify-end">
                   <span className="mp-chip text-sm">{authUser.username}</span>
                   {renderCompactVersionBadge()}
                   <button type="button" onClick={toggleTheme} className="mp-btn">
@@ -190,6 +232,7 @@ export function AppShell({ authUser, onLogout }: AppShellProps) {
 
             <AnimatePresence mode="wait">
               <motion.div
+                className="min-h-0 flex-1"
                 key={location.pathname}
                 initial={{ opacity: 0, y: 12 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -218,7 +261,7 @@ export function AppShell({ authUser, onLogout }: AppShellProps) {
                     }`
                   }
                 >
-                  <span className="text-sm font-semibold">{tab.short}</span>
+                  <NavTabIcon to={tab.to} className="h-4 w-4" />
                   <span className="mt-0.5">{tab.label}</span>
                 </NavLink>
               </li>

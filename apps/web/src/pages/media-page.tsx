@@ -340,7 +340,7 @@ function MediaPane({ storages }: MediaPaneProps) {
   }, [allFiles, livePhotoPairByPath]);
 
   return (
-    <article className="mp-panel flex min-h-[calc(100vh-12rem)] flex-col p-4">
+    <article className="mp-panel flex min-h-[calc(100vh-12rem)] flex-col p-4 md:min-h-0 md:flex-1">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h3 className="text-base font-semibold">存储媒体</h3>
@@ -777,7 +777,7 @@ export function MediaPage() {
   }, []);
 
   return (
-    <section className="space-y-3">
+    <section className="space-y-3 md:flex md:h-full md:flex-col">
       {error ? <p className="mp-error">{error}</p> : null}
       <MediaPane storages={storages} />
     </section>

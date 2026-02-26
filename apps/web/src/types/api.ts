@@ -68,6 +68,48 @@ export interface StorageCapacityItem {
   usedPercent: number | null;
 }
 
+export interface StorageMediaSummaryItem {
+  storageId: string;
+  storageName: string;
+  basePath: string;
+  counts: {
+    image: number;
+    video: number;
+    livePhoto: number;
+  };
+  bytes: {
+    image: number;
+    video: number;
+    livePhoto: number;
+  };
+  totalCount: number;
+  totalBytes: number;
+}
+
+export interface StorageRelationNodeItem {
+  storageId: string;
+  storageName: string;
+  basePath: string;
+  type: StorageTarget["type"];
+}
+
+export interface StorageRelationEdgeItem {
+  id: string;
+  sourceStorageId: string;
+  sourceStorageName: string;
+  destinationStorageId: string;
+  destinationStorageName: string;
+  status: "synced" | "attention";
+  jobCount: number;
+  syncedJobCount: number;
+  laggingJobCount: number;
+  unknownJobCount: number;
+  jobIds: string[];
+  pendingJobIds: string[];
+  enabledJobIds: string[];
+  summary: string;
+}
+
 export interface BackupJob {
   id: string;
   name: string;

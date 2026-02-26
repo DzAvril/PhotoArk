@@ -1,5 +1,6 @@
 import * as Collapsible from "@radix-ui/react-collapsible";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useSearchParams } from "react-router-dom";
 import { ConfirmDialog } from "../components/confirm-dialog";
 import { TablePagination } from "../components/table/table-pagination";
 import { SortableHeader } from "../components/table/sortable-header";
@@ -63,6 +64,7 @@ function getExecutionStatusLabel(execution: JobExecution): string {
 }
 
 export function JobsPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [items, setItems] = useState<BackupJob[]>([]);
   const [storages, setStorages] = useState<StorageTarget[]>([]);
   const [runs, setRuns] = useState<JobRun[]>([]);
@@ -85,6 +87,7 @@ export function JobsPage() {
   const [deletingSelected, setDeletingSelected] = useState(false);
   const [pendingDeleteAction, setPendingDeleteAction] = useState<PendingDeleteAction | null>(null);
   const [progressDialogExecutionId, setProgressDialogExecutionId] = useState<string | null>(null);
+  const editJobIdFromQuery = searchParams.get("editJobId");
 
   const storageById = useMemo(() => Object.fromEntries(storages.map((s) => [s.id, s])), [storages]);
   const sourceStorage = form.sourceTargetId ? storageById[form.sourceTargetId] : undefined;
@@ -216,6 +219,21 @@ export function JobsPage() {
     });
     setFormOpen(true);
   }
+
+  useEffect(() => {
+    if (!editJobIdFromQuery || !items.length) return;
+    const target = items.find((item) => item.id === editJobIdFromQuery);
+    if (target) {
+      startEdit(target);
+      setMessage(`已打开任务“${target.name}”编辑。`);
+    } else {
+      setError(`未找到要编辑的任务：${editJobIdFromQuery}`);
+    }
+
+    const next = new URLSearchParams(searchParams);
+    next.delete("editJobId");
+    setSearchParams(next, { replace: true });
+  }, [editJobIdFromQuery, items, searchParams, setSearchParams]);
 
   async function confirmDeleteJobs(action: PendingDeleteAction) {
     if (!action.ids.length) return;
@@ -362,17 +380,17 @@ export function JobsPage() {
   const allCurrentPageSelected = table.paged.length > 0 && table.paged.every((j) => selected.has(j.id));
 
   return (
-    <section className="space-y-3">
+    <section className="space-y-3 md:flex md:h-full md:flex-col">
+      {message ? <p className="text-sm mp-status-success">{message}</p> : null}
+      {error ? <p className="mp-error">{error}</p> : null}
+
       <Collapsible.Root open={formOpen} onOpenChange={setFormOpen} className="mp-panel mp-panel-soft p-4">
         <div className="flex items-center justify-between">
           <div>
             <h3 className="text-base font-semibold">备份任务</h3>
-            <p className="mt-1 text-sm mp-muted">选择源存储和目标存储即可创建同步任务</p>
           </div>
           <Collapsible.Trigger className="mp-btn">{formOpen ? "收起" : "新增任务"}</Collapsible.Trigger>
         </div>
-        {message ? <p className="mt-3 text-sm mp-status-success">{message}</p> : null}
-        {error ? <p className="mp-error mt-3">{error}</p> : null}
 
         <Collapsible.Content>
           <form onSubmit={(e) => void onSubmit(e)} className="mt-3 grid gap-2 sm:grid-cols-2">
@@ -453,7 +471,6 @@ export function JobsPage() {
                 value={form.schedule ?? ""}
                 onChange={(e) => setForm((p) => ({ ...p, schedule: e.target.value }))}
               />
-              <p className="text-sm mp-muted">按服务器本地时区执行，例如每天 02:00 使用 `0 2 * * *`。</p>
             </div>
             <div className="flex items-center gap-4 text-sm">
               <label className="flex items-center gap-2">
@@ -486,7 +503,7 @@ export function JobsPage() {
         </Collapsible.Content>
       </Collapsible.Root>
 
-      <div className="mp-panel p-4">
+      <div className="mp-panel p-4 md:flex md:min-h-0 md:flex-1 md:flex-col">
         <TableToolbar
           title="任务列表"
           search={search}
@@ -626,7 +643,7 @@ export function JobsPage() {
           {!table.paged.length ? <p className="py-4 text-center text-sm mp-muted">暂无数据</p> : null}
         </div>
 
-        <div className="hidden overflow-auto md:block">
+        <div className="hidden md:block md:min-h-0 md:flex-1 md:overflow-auto">
           <table className="mp-data-table min-w-full text-base">
             <thead>
               <tr className="border-b border-[var(--ark-line)] text-left text-sm mp-muted">
