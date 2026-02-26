@@ -140,6 +140,10 @@ const assetCreateSchema = z.object({
   livePhotoAssetId: z.string().optional()
 });
 
+const mediaIndexRebuildSchema = z.object({
+  storageId: z.string().optional()
+});
+
 const settingsSchema = z.object({
   telegram: z.object({
     enabled: z.boolean(),
@@ -1129,10 +1133,10 @@ async function scanMediaFilesWithStats(dirPath: string): Promise<IndexedMediaFil
   return out;
 }
 
-async function collectIndexedMediaFiles(dirPath: string): Promise<IndexedMediaFile[]> {
+async function collectIndexedMediaFiles(dirPath: string, forceRefresh = false): Promise<IndexedMediaFile[]> {
   const rootPath = normalizeMediaIndexRootPath(dirPath);
   await ensureMediaIndexLoaded();
-  const cached = getFreshMediaIndexEntry(rootPath);
+  const cached = forceRefresh ? null : getFreshMediaIndexEntry(rootPath);
   if (cached) {
     return rowsFromMediaIndexEntry(rootPath, cached);
   }
@@ -1172,6 +1176,31 @@ async function invalidateMediaIndexPath(dirPath: string) {
   if (!mediaIndexStore.roots[rootPath]) return;
   delete mediaIndexStore.roots[rootPath];
   markMediaIndexDirty();
+}
+
+async function listMediaIndexStatusItems(): Promise<
+  Array<{
+    rootPath: string;
+    fileCount: number;
+    generatedAt: string;
+    ageMs: number;
+    fresh: boolean;
+  }>
+> {
+  await ensureMediaIndexLoaded();
+  return Object.entries(mediaIndexStore.roots)
+    .map(([rootPath, entry]) => {
+      const generatedAtMs = Date.parse(entry.generatedAt);
+      const ageMs = Number.isFinite(generatedAtMs) ? Math.max(0, Date.now() - generatedAtMs) : Number.POSITIVE_INFINITY;
+      return {
+        rootPath,
+        fileCount: Object.keys(entry.files).length,
+        generatedAt: entry.generatedAt,
+        ageMs,
+        fresh: ageMs <= MEDIA_INDEX_MAX_AGE_MS
+      };
+    })
+    .sort((a, b) => a.rootPath.localeCompare(b.rootPath));
 }
 
 async function collectMediaFiles(dirPath: string): Promise<string[]> {
@@ -1897,14 +1926,21 @@ async function createJobWatcher(job: BackupJob, sourceRoot: string, usePolling: 
     if (!isMediaFile(path.basename(watchPath))) {
       return;
     }
+    void invalidateMediaIndexPath(sourceRoot).catch(() => undefined);
     scheduleWatchedJob(job.id, reason, watchPath);
   };
 
   watcher.on("add", (watchPath) => onMediaChange(watchPath, "add"));
   watcher.on("change", (watchPath) => onMediaChange(watchPath, "change"));
   watcher.on("unlink", (watchPath) => onMediaChange(watchPath, "unlink"));
-  watcher.on("addDir", (watchPath) => scheduleWatchedJob(job.id, "add_dir", watchPath));
-  watcher.on("unlinkDir", (watchPath) => scheduleWatchedJob(job.id, "unlink_dir", watchPath));
+  watcher.on("addDir", (watchPath) => {
+    void invalidateMediaIndexPath(sourceRoot).catch(() => undefined);
+    scheduleWatchedJob(job.id, "add_dir", watchPath);
+  });
+  watcher.on("unlinkDir", (watchPath) => {
+    void invalidateMediaIndexPath(sourceRoot).catch(() => undefined);
+    scheduleWatchedJob(job.id, "unlink_dir", watchPath);
+  });
   watcher.on("error", (error) => {
     const control = jobWatchers.get(job.id);
     if (control) {
@@ -2251,6 +2287,57 @@ app.get("/api/storages/relations", async () => {
   return buildStorageRelationGraph(state);
 });
 
+app.get("/api/media-index", async () => {
+  const items = await listMediaIndexStatusItems();
+  return {
+    maxAgeMs: MEDIA_INDEX_MAX_AGE_MS,
+    items
+  };
+});
+
+app.post<{ Body: { storageId?: string } }>("/api/media-index/rebuild", async (req, reply) => {
+  const body = mediaIndexRebuildSchema.parse(req.body ?? {});
+  const state = await stateRepo.loadState();
+  const localStorages = state.storages.filter((storage) => isLocalStorage(storage.type));
+  const targets = body.storageId ? localStorages.filter((storage) => storage.id === body.storageId) : localStorages;
+
+  if (body.storageId && !targets.length) {
+    return reply.code(404).send({ message: "Storage not found or not a local storage target" });
+  }
+
+  const items = await Promise.all(
+    targets.map(async (storage) => {
+      try {
+        const rootPath = resolvePathInStorage(storage, storage.basePath);
+        const rows = await collectIndexedMediaFiles(rootPath, true);
+        return {
+          storageId: storage.id,
+          storageName: storage.name,
+          rootPath,
+          fileCount: rows.length,
+          ok: true,
+          error: null as string | null
+        };
+      } catch (error) {
+        return {
+          storageId: storage.id,
+          storageName: storage.name,
+          rootPath: storage.basePath,
+          fileCount: 0,
+          ok: false,
+          error: (error as Error).message
+        };
+      }
+    })
+  );
+
+  return {
+    refreshedCount: items.filter((item) => item.ok).length,
+    failedCount: items.filter((item) => !item.ok).length,
+    items
+  };
+});
+
 app.get<{ Querystring: { path?: string } }>("/api/fs/directories", async (req, reply) => {
   const inputPath = req.query.path ?? env.FS_BROWSE_ROOT ?? "/";
   const currentPath = path.resolve(inputPath);
@@ -2442,18 +2529,25 @@ app.post<{ Body: Omit<StorageTarget, "id"> }>("/api/storages", async (req) => {
   const item: StorageTarget = { id: `st_${randomUUID()}`, ...body };
   state.storages.push(item);
   await stateRepo.saveState(state);
+  if (isLocalStorage(item.type)) {
+    await invalidateMediaIndexPath(item.basePath).catch(() => undefined);
+  }
   await reconcileJobWatchers(state);
   return item;
 });
 
 app.delete<{ Params: { storageId: string } }>("/api/storages/:storageId", async (req, reply) => {
   const state = await stateRepo.loadState();
+  const removed = state.storages.find((s) => s.id === req.params.storageId);
   const before = state.storages.length;
   state.storages = state.storages.filter((s) => s.id !== req.params.storageId);
   if (state.storages.length === before) {
     return reply.code(404).send({ message: "Storage not found" });
   }
   await stateRepo.saveState(state);
+  if (removed && isLocalStorage(removed.type)) {
+    await invalidateMediaIndexPath(removed.basePath).catch(() => undefined);
+  }
   await reconcileJobWatchers(state);
   return { ok: true };
 });
