@@ -653,7 +653,7 @@ export function JobsPage() {
         </div>
 
         <div className="hidden md:block md:min-h-0 md:flex-1 md:overflow-auto">
-          <table className="mp-data-table min-w-full text-base">
+          <table className="mp-data-table min-w-full text-sm">
             <thead>
               <tr className="border-b border-[var(--ark-line)] text-left text-sm mp-muted">
                 <th className="px-2 py-2">

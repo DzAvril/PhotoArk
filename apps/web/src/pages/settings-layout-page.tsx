@@ -1,16 +1,52 @@
 import { NavLink, Outlet } from "react-router-dom";
 
 const tabs = [
-  { to: "/settings", label: "通知" },
-  { to: "/settings/storages", label: "存储" },
-  { to: "/settings/jobs", label: "任务" }
+  { to: "/settings", label: "通知", icon: "bell" },
+  { to: "/settings/storages", label: "存储", icon: "storage" },
+  { to: "/settings/jobs", label: "任务", icon: "job" },
+  { to: "/settings/diff", label: "差异", icon: "diff" }
 ];
+
+function TabIcon({ kind }: { kind: (typeof tabs)[number]["icon"] }) {
+  if (kind === "bell") {
+    return (
+      <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" aria-hidden="true">
+        <path d="M10 3.5a3.3 3.3 0 0 0-3.3 3.3v1.5c0 .8-.3 1.6-.8 2.2L4.3 12a1 1 0 0 0 .7 1.7h10a1 1 0 0 0 .7-1.7l-1.6-1.5a3.2 3.2 0 0 1-.8-2.2V6.8A3.3 3.3 0 0 0 10 3.5Z" stroke="currentColor" strokeWidth="1.6" />
+        <path d="M8.3 14.2a1.8 1.8 0 0 0 3.4 0" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  if (kind === "storage") {
+    return (
+      <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" aria-hidden="true">
+        <ellipse cx="10" cy="5.2" rx="5.8" ry="2.3" stroke="currentColor" strokeWidth="1.6" />
+        <path d="M4.2 5.2v6.4c0 1.3 2.6 2.3 5.8 2.3s5.8-1 5.8-2.3V5.2" stroke="currentColor" strokeWidth="1.6" />
+        <path d="M4.2 8.4c0 1.3 2.6 2.3 5.8 2.3s5.8-1 5.8-2.3" stroke="currentColor" strokeWidth="1.6" />
+      </svg>
+    );
+  }
+  if (kind === "job") {
+    return (
+      <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" aria-hidden="true">
+        <rect x="3.1" y="4" width="13.8" height="11.8" rx="2" stroke="currentColor" strokeWidth="1.6" />
+        <path d="M6.5 8.2h7M6.5 11h4.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  return (
+    <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" aria-hidden="true">
+      <path d="M3.5 5h5.8M3.5 10h13M10.7 15h5.8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <circle cx="11" cy="5" r="1.7" fill="currentColor" />
+      <circle cx="8.4" cy="15" r="1.7" fill="currentColor" />
+    </svg>
+  );
+}
 
 export function SettingsLayoutPage() {
   return (
     <section className="space-y-4 md:flex md:h-full md:flex-col">
       <div className="mp-panel mp-panel-soft p-3">
-        <nav className="grid grid-cols-3 gap-2">
+        <nav className="grid grid-cols-2 gap-2 md:grid-cols-4">
           {tabs.map((tab) => (
             <NavLink
               key={tab.to}
@@ -24,7 +60,10 @@ export function SettingsLayoutPage() {
                 }`
               }
             >
-              {tab.label}
+              <span className="inline-flex items-center gap-1.5">
+                <TabIcon kind={tab.icon} />
+                <span>{tab.label}</span>
+              </span>
             </NavLink>
           ))}
         </nav>

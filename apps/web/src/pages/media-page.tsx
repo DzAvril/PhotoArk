@@ -343,8 +343,8 @@ function MediaPane({ storages }: MediaPaneProps) {
     <article className="mp-panel flex min-h-[calc(100vh-12rem)] flex-col p-4 md:min-h-0 md:flex-1">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h3 className="text-base font-semibold">存储媒体</h3>
-          <p className="mt-1 text-sm mp-muted">按存储浏览媒体，支持 Live Photo 动态预览与元数据查看</p>
+          <h3 className="text-sm font-semibold">存储媒体</h3>
+          <p className="mt-1 text-xs mp-muted">按存储浏览媒体，支持 Live Photo 动态预览与元数据查看</p>
         </div>
         <div className="flex flex-wrap gap-2 text-xs sm:text-sm">
           <span className="mp-chip">总计 {mediaSummary.total}</span>
@@ -380,7 +380,7 @@ function MediaPane({ storages }: MediaPaneProps) {
               刷新
             </button>
           </div>
-          <p className="mt-2 text-xs mp-muted break-all">
+          <p className="mt-2 text-[11px] mp-muted break-all">
             {selectedStorage ? `${selectedStorage.name} · ${selectedStorage.basePath}` : "选择存储后可浏览媒体内容"}
           </p>
 

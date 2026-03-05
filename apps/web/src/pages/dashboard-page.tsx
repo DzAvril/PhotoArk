@@ -360,6 +360,15 @@ function PieStatCard({
 
   const activeSliceKey = hoverSliceKey ?? selectedSliceKey;
   const activeSlice = useMemo(() => arcs.find((slice) => slice.key === activeSliceKey) ?? null, [arcs, activeSliceKey]);
+  const sideStats = useMemo(
+    () =>
+      slices.map((slice, index) => ({
+        ...slice,
+        key: `${title}:${slice.label}:${index}`,
+        percent: total > 0 ? toPercent((slice.value / total) * 100) : 0
+      })),
+    [slices, title, total]
+  );
 
   useEffect(() => {
     if (!arcs.length) {
@@ -433,21 +442,25 @@ function PieStatCard({
           </div>
         </div>
         <div className="min-w-0 flex-1 space-y-1.5">
-          {slices.map((slice) => {
+          {sideStats.map((slice) => {
+            const active = activeSlice?.key === slice.key;
             return (
-              <div key={`${title}-${slice.label}`} className="flex items-center gap-1.5 text-xs">
-                <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: slice.color }} />
-                <span className="truncate">{slice.label}</span>
+              <div
+                key={slice.key}
+                className={`flex items-center justify-between gap-2 rounded-md px-1.5 py-1 text-xs ${
+                  active ? "bg-[var(--ark-surface-soft)]" : ""
+                }`}
+              >
+                <span className="inline-flex min-w-0 items-center gap-1.5">
+                  <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: slice.color }} />
+                  <span className="truncate">{slice.label}</span>
+                </span>
+                <span className="shrink-0 font-medium text-[var(--ark-ink-soft)]">
+                  {slice.formattedValue} · {slice.percent}%
+                </span>
               </div>
             );
           })}
-          {total > 0 ? (
-            activeSlice ? (
-              <p className="rounded-md border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] px-2 py-1 text-xs">
-                {activeSlice.label}：{activeSlice.formattedValue} · {activeSlice.percent}%
-              </p>
-            ) : null
-          ) : null}
         </div>
       </div>
     </div>

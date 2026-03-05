@@ -41,9 +41,9 @@ export function MetricCard({ title, value, meta, icon, tone = "blue" }: MetricCa
       >
         {icon}
       </div>
-      <p className="text-xs font-semibold tracking-[0.12em] uppercase mp-muted">{title}</p>
-      <p className="mt-1 text-3xl font-bold tracking-tight">{value}</p>
-      <p className={`mt-1 text-sm font-medium ${toneClass.text}`}>{meta}</p>
+      <p className="text-[11px] font-semibold tracking-[0.08em] uppercase mp-muted">{title}</p>
+      <p className="mt-1 text-2xl font-bold tracking-tight">{value}</p>
+      <p className={`mt-1 text-xs font-medium ${toneClass.text}`}>{meta}</p>
     </article>
   );
 }

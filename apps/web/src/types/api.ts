@@ -139,6 +139,64 @@ export interface BackupJob {
   enabled: boolean;
 }
 
+export type JobDiffStatus = "source_only" | "destination_only" | "changed";
+export type JobDiffKind = "image" | "video";
+
+export interface JobDiffFile {
+  absolutePath: string;
+  sizeBytes: number;
+  modifiedAt: string | null;
+}
+
+export interface JobDiffItem {
+  id: string;
+  relativePath: string;
+  kind: JobDiffKind;
+  status: JobDiffStatus;
+  source: JobDiffFile | null;
+  destination: JobDiffFile | null;
+  sizeDeltaBytes: number | null;
+  mtimeDeltaMs: number | null;
+  changeReason: "size" | "mtime" | "size_mtime" | null;
+}
+
+export interface JobDiffSummary {
+  totalDiffCount: number;
+  sourceOnlyCount: number;
+  destinationOnlyCount: number;
+  changedCount: number;
+  imageCount: number;
+  videoCount: number;
+  sourceOnlyBytes: number;
+  destinationOnlyBytes: number;
+  changedSourceBytes: number;
+  changedDestinationBytes: number;
+}
+
+export interface JobDiffResult {
+  generatedAt: string;
+  job: {
+    id: string;
+    name: string;
+    sourceStorageId: string;
+    sourceStorageName: string;
+    sourcePath: string;
+    destinationStorageId: string;
+    destinationStorageName: string;
+    destinationPath: string;
+  };
+  scan: {
+    sourceFileCount: number;
+    destinationFileCount: number;
+  };
+  summary: JobDiffSummary;
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+  items: JobDiffItem[];
+}
+
 export interface JobRunErrorItem {
   path: string;
   error: string;

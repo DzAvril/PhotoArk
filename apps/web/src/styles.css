@@ -223,7 +223,7 @@ textarea:focus-visible {
 }
 
 .mp-section-title {
-  font-size: 22px;
+  font-size: 18px;
   font-weight: 700;
   color: var(--ark-ink);
   letter-spacing: -0.01em;
@@ -237,8 +237,10 @@ textarea:focus-visible {
   border: 1px solid color-mix(in oklab, var(--ark-line) 80%, var(--ark-surface));
   border-radius: 999px;
   background: color-mix(in oklab, var(--ark-surface-soft) 82%, var(--ark-surface));
-  padding: 3px 10px;
+  padding: 2px 9px;
   font-weight: 600;
+  font-size: 12px;
+  line-height: 1.2;
 }
 
 .mp-chip-success {
@@ -296,6 +298,8 @@ textarea:focus-visible {
 .mp-data-table {
   border-collapse: separate;
   border-spacing: 0;
+  font-size: 13px;
+  line-height: 1.45;
 }
 
 .mp-data-table thead tr {

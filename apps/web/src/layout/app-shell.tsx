@@ -69,6 +69,7 @@ function getPageMeta(pathname: string) {
   if (pathname === "/media") return { title: "媒体预览", subtitle: "按存储浏览图片和视频" };
   if (pathname === "/records") return { title: "执行记录", subtitle: "查看任务历史执行结果" };
   if (pathname.startsWith("/settings/jobs")) return { title: "任务配置", subtitle: "管理备份任务与执行策略" };
+  if (pathname.startsWith("/settings/diff")) return { title: "差异浏览", subtitle: "查看源目录与目标目录的媒体差异并预览" };
   if (pathname.startsWith("/settings/storages")) return { title: "存储配置", subtitle: "管理源存储和目标存储" };
   if (pathname.startsWith("/settings/notifications")) return { title: "通知配置", subtitle: "配置 Telegram 通知" };
   if (pathname.startsWith("/settings")) return { title: "配置中心", subtitle: "通知、存储、任务统一管理" };
@@ -126,19 +127,19 @@ export function AppShell({ authUser, onLogout }: AppShellProps) {
 
   function renderCompactVersionBadge() {
     if (!version) {
-      return <span className="mp-chip text-sm mp-muted">版本加载中...</span>;
+      return <span className="mp-chip mp-muted">版本加载中...</span>;
     }
     if (version.hasUpdate) {
       return (
-        <a className="mp-chip mp-chip-warning text-sm" href={version.latestUrl ?? undefined} target="_blank" rel="noreferrer">
+        <a className="mp-chip mp-chip-warning" href={version.latestUrl ?? undefined} target="_blank" rel="noreferrer">
           更新 {version.latestVersion}
         </a>
       );
     }
     if (version.upToDate) {
-      return <span className="mp-chip mp-chip-success text-sm">v{version.currentVersion}</span>;
+      return <span className="mp-chip mp-chip-success">v{version.currentVersion}</span>;
     }
-    return <span className="mp-chip text-sm mp-muted">v{version.currentVersion}</span>;
+    return <span className="mp-chip mp-muted">v{version.currentVersion}</span>;
   }
 
   return (
@@ -164,8 +165,8 @@ export function AppShell({ authUser, onLogout }: AppShellProps) {
                   className="h-11 w-11 rounded-xl border border-[var(--ark-line)] bg-[var(--ark-surface)] p-1.5 shadow-sm"
                 />
                 <div>
-                  <h1 className="text-xl font-bold">PhotoArk</h1>
-                  <p className="mt-0.5 text-xs uppercase tracking-[0.08em] mp-muted">Backup Control Center</p>
+                  <h1 className="text-lg font-bold">PhotoArk</h1>
+                  <p className="mt-0.5 text-[11px] uppercase tracking-[0.06em] mp-muted">Backup Control Center</p>
                 </div>
               </div>
             </div>
@@ -209,15 +210,15 @@ export function AppShell({ authUser, onLogout }: AppShellProps) {
                     className={`rounded-xl border border-[var(--ark-line)] bg-[var(--ark-surface)] p-1 shadow-sm ${isDashboard ? "h-11 w-11" : "h-9 w-9"}`}
                   />
                   <div className="min-w-0">
-                    {isDashboard ? <p className="text-sm uppercase tracking-[0.22em] text-[var(--ark-primary)]">PhotoArk</p> : null}
-                    <h2 className={`break-keep font-bold tracking-tight ${isDashboard ? "mt-1 text-lg sm:text-2xl" : "text-lg sm:text-xl"}`}>
+                    {isDashboard ? <p className="text-xs uppercase tracking-[0.14em] text-[var(--ark-primary)]">PhotoArk</p> : null}
+                    <h2 className={`break-keep font-bold tracking-tight ${isDashboard ? "mt-1 text-base sm:text-lg" : "text-base sm:text-lg"}`}>
                       {isDashboard ? "NAS 多目标照片备份平台" : pageMeta.title}
                     </h2>
                     <p className={`break-keep text-sm mp-muted ${isDashboard ? "mt-1.5" : "mt-1"}`}>{pageMeta.subtitle}</p>
                   </div>
                 </div>
                 <div className="flex w-full flex-wrap items-center gap-2 md:w-auto md:shrink-0 md:justify-end">
-                  <span className="mp-chip text-sm">{authUser.username}</span>
+                  <span className="mp-chip">{authUser.username}</span>
                   {renderCompactVersionBadge()}
                   <button type="button" onClick={toggleTheme} className="mp-btn">
                     {theme === "light" ? "暗色" : "亮色"}

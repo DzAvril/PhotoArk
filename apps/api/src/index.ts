@@ -144,6 +144,15 @@ const mediaIndexRebuildSchema = z.object({
   storageId: z.string().optional()
 });
 
+const jobDiffQuerySchema = z.object({
+  status: z.enum(["all", "source_only", "destination_only", "changed"]).optional(),
+  kind: z.enum(["all", "image", "video"]).optional(),
+  keyword: z.string().optional(),
+  page: z.coerce.number().int().min(1).optional(),
+  pageSize: z.coerce.number().int().min(1).max(200).optional(),
+  refresh: z.union([z.string(), z.boolean()]).optional()
+});
+
 const settingsSchema = z.object({
   telegram: z.object({
     enabled: z.boolean(),
@@ -311,6 +320,7 @@ const MIME_BY_EXT: Record<string, string> = {
 
 const MEDIA_INDEX_MAX_AGE_MS = 30_000;
 const MEDIA_INDEX_SAVE_DEBOUNCE_MS = 1_200;
+const JOB_DIFF_MTIME_TOLERANCE_MS = 1_000;
 
 type IndexedMediaFile = {
   relativePath: string;
@@ -780,6 +790,205 @@ async function buildStorageRelationGraph(state: BackupState): Promise<{ nodes: S
   return { nodes, edges };
 }
 
+function buildEmptyJobDiffSummary(): JobDiffSummary {
+  return {
+    totalDiffCount: 0,
+    sourceOnlyCount: 0,
+    destinationOnlyCount: 0,
+    changedCount: 0,
+    imageCount: 0,
+    videoCount: 0,
+    sourceOnlyBytes: 0,
+    destinationOnlyBytes: 0,
+    changedSourceBytes: 0,
+    changedDestinationBytes: 0
+  };
+}
+
+function parseBooleanQueryValue(value: string | boolean | undefined): boolean {
+  if (typeof value === "boolean") return value;
+  if (typeof value !== "string") return false;
+  const normalized = value.trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
+}
+
+function detectJobDiffKind(relativePath: string): JobDiffKind {
+  const ext = path.extname(relativePath).toLowerCase();
+  return VIDEO_EXTENSIONS.has(ext) ? "video" : "image";
+}
+
+function toIsoDateFromMs(value: number): string | null {
+  if (!Number.isFinite(value) || value <= 0) return null;
+  return new Date(value).toISOString();
+}
+
+function toJobDiffFile(rootPath: string, row: IndexedMediaFile): JobDiffFile {
+  return {
+    absolutePath: toSystemPathFromPosixRelative(rootPath, row.relativePath),
+    sizeBytes: row.sizeBytes,
+    modifiedAt: toIsoDateFromMs(row.mtimeMs)
+  };
+}
+
+async function buildJobDiff(
+  state: BackupState,
+  jobId: string,
+  options: {
+    statusFilter: "all" | JobDiffStatus;
+    kindFilter: "all" | JobDiffKind;
+    keyword: string;
+    page: number;
+    pageSize: number;
+    forceRefresh: boolean;
+  }
+): Promise<JobDiffResponse> {
+  const job = state.jobs.find((item) => item.id === jobId);
+  if (!job) {
+    throw new Error("Job not found");
+  }
+
+  const sourceStorage = state.storages.find((item) => item.id === job.sourceTargetId);
+  const destinationStorage = state.storages.find((item) => item.id === job.destinationTargetId);
+  if (!sourceStorage || !destinationStorage) {
+    throw new Error("Storage target for this job is missing");
+  }
+  if (!isLocalStorage(sourceStorage.type) || !isLocalStorage(destinationStorage.type)) {
+    throw new Error("Diff only supports local-to-local jobs in current version");
+  }
+
+  const sourceRoot = resolvePathInStorage(sourceStorage, job.sourcePath);
+  const destinationRoot = resolvePathInStorage(destinationStorage, job.destinationPath);
+
+  const [sourceRows, destinationRows] = await Promise.all([
+    collectIndexedMediaFiles(sourceRoot, options.forceRefresh),
+    collectIndexedMediaFiles(destinationRoot, options.forceRefresh)
+  ]);
+
+  const sourceByRelativePath = new Map(sourceRows.map((row) => [row.relativePath, row]));
+  const destinationByRelativePath = new Map(destinationRows.map((row) => [row.relativePath, row]));
+  const allRelativePaths = new Set<string>([...sourceByRelativePath.keys(), ...destinationByRelativePath.keys()]);
+  const orderedRelativePaths = [...allRelativePaths].sort((a, b) => a.localeCompare(b, "zh-CN"));
+
+  const summary = buildEmptyJobDiffSummary();
+  const diffItems: JobDiffItem[] = [];
+  for (const relativePath of orderedRelativePaths) {
+    const sourceRow = sourceByRelativePath.get(relativePath);
+    const destinationRow = destinationByRelativePath.get(relativePath);
+    if (!sourceRow && !destinationRow) {
+      continue;
+    }
+
+    let status: JobDiffStatus | null = null;
+    let sizeDeltaBytes: number | null = null;
+    let mtimeDeltaMs: number | null = null;
+    let changeReason: JobDiffChangeReason = null;
+
+    if (sourceRow && !destinationRow) {
+      status = "source_only";
+      summary.sourceOnlyCount += 1;
+      summary.sourceOnlyBytes += sourceRow.sizeBytes;
+    } else if (!sourceRow && destinationRow) {
+      status = "destination_only";
+      summary.destinationOnlyCount += 1;
+      summary.destinationOnlyBytes += destinationRow.sizeBytes;
+    } else if (sourceRow && destinationRow) {
+      const sourceSize = sourceRow.sizeBytes;
+      const destinationSize = destinationRow.sizeBytes;
+      const sizeChanged = sourceSize !== destinationSize;
+      const rawMtimeDelta = sourceRow.mtimeMs - destinationRow.mtimeMs;
+      const mtimeChanged = Math.abs(rawMtimeDelta) > JOB_DIFF_MTIME_TOLERANCE_MS;
+
+      if (sizeChanged || mtimeChanged) {
+        status = "changed";
+        sizeDeltaBytes = sourceSize - destinationSize;
+        mtimeDeltaMs = Math.round(rawMtimeDelta);
+        changeReason = sizeChanged && mtimeChanged ? "size_mtime" : sizeChanged ? "size" : "mtime";
+        summary.changedCount += 1;
+        summary.changedSourceBytes += sourceSize;
+        summary.changedDestinationBytes += destinationSize;
+      }
+    }
+
+    if (!status) continue;
+
+    const kind = detectJobDiffKind(relativePath);
+    if (kind === "video") {
+      summary.videoCount += 1;
+    } else {
+      summary.imageCount += 1;
+    }
+
+    diffItems.push({
+      id: `${status}:${relativePath}`,
+      relativePath,
+      kind,
+      status,
+      source: sourceRow ? toJobDiffFile(sourceRoot, sourceRow) : null,
+      destination: destinationRow ? toJobDiffFile(destinationRoot, destinationRow) : null,
+      sizeDeltaBytes,
+      mtimeDeltaMs,
+      changeReason
+    });
+  }
+
+  summary.totalDiffCount = diffItems.length;
+  const statusOrder: Record<JobDiffStatus, number> = {
+    source_only: 0,
+    changed: 1,
+    destination_only: 2
+  };
+  diffItems.sort((a, b) => {
+    const statusCompare = statusOrder[a.status] - statusOrder[b.status];
+    if (statusCompare !== 0) return statusCompare;
+    return a.relativePath.localeCompare(b.relativePath, "zh-CN");
+  });
+
+  const normalizedKeyword = options.keyword.trim().toLowerCase();
+  const filteredItems = diffItems.filter((item) => {
+    if (options.statusFilter !== "all" && item.status !== options.statusFilter) {
+      return false;
+    }
+    if (options.kindFilter !== "all" && item.kind !== options.kindFilter) {
+      return false;
+    }
+    if (normalizedKeyword && !item.relativePath.toLowerCase().includes(normalizedKeyword)) {
+      return false;
+    }
+    return true;
+  });
+
+  const pageSize = Math.max(1, Math.min(200, Math.round(options.pageSize)));
+  const total = filteredItems.length;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const page = total === 0 ? 1 : Math.min(Math.max(1, Math.round(options.page)), totalPages);
+  const start = (page - 1) * pageSize;
+  const items = filteredItems.slice(start, start + pageSize);
+
+  return {
+    generatedAt: new Date().toISOString(),
+    job: {
+      id: job.id,
+      name: job.name,
+      sourceStorageId: sourceStorage.id,
+      sourceStorageName: sourceStorage.name,
+      sourcePath: sourceRoot,
+      destinationStorageId: destinationStorage.id,
+      destinationStorageName: destinationStorage.name,
+      destinationPath: destinationRoot
+    },
+    scan: {
+      sourceFileCount: sourceRows.length,
+      destinationFileCount: destinationRows.length
+    },
+    summary,
+    page,
+    pageSize,
+    total,
+    totalPages,
+    items
+  };
+}
+
 function sendBufferWithRange(reply: FastifyReply, plain: Buffer, mimeType: string, rangeHeader: string | undefined) {
   const parsed = parseByteRange(rangeHeader, plain.length);
   if (parsed.error) {
@@ -946,6 +1155,65 @@ type StorageRelationEdgeItem = {
   pendingJobIds: string[];
   enabledJobIds: string[];
   summary: string;
+};
+
+type JobDiffStatus = "source_only" | "destination_only" | "changed";
+type JobDiffKind = "image" | "video";
+type JobDiffChangeReason = "size" | "mtime" | "size_mtime" | null;
+
+type JobDiffFile = {
+  absolutePath: string;
+  sizeBytes: number;
+  modifiedAt: string | null;
+};
+
+type JobDiffItem = {
+  id: string;
+  relativePath: string;
+  kind: JobDiffKind;
+  status: JobDiffStatus;
+  source: JobDiffFile | null;
+  destination: JobDiffFile | null;
+  sizeDeltaBytes: number | null;
+  mtimeDeltaMs: number | null;
+  changeReason: JobDiffChangeReason;
+};
+
+type JobDiffSummary = {
+  totalDiffCount: number;
+  sourceOnlyCount: number;
+  destinationOnlyCount: number;
+  changedCount: number;
+  imageCount: number;
+  videoCount: number;
+  sourceOnlyBytes: number;
+  destinationOnlyBytes: number;
+  changedSourceBytes: number;
+  changedDestinationBytes: number;
+};
+
+type JobDiffResponse = {
+  generatedAt: string;
+  job: {
+    id: string;
+    name: string;
+    sourceStorageId: string;
+    sourceStorageName: string;
+    sourcePath: string;
+    destinationStorageId: string;
+    destinationStorageName: string;
+    destinationPath: string;
+  };
+  scan: {
+    sourceFileCount: number;
+    destinationFileCount: number;
+  };
+  summary: JobDiffSummary;
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+  items: JobDiffItem[];
 };
 
 function normalizeVersion(input: string): string {
@@ -2555,6 +2823,38 @@ app.delete<{ Params: { storageId: string } }>("/api/storages/:storageId", async 
 app.get("/api/jobs", async () => {
   const state = await stateRepo.loadState();
   return { items: state.jobs };
+});
+
+app.get<{
+  Params: { jobId: string };
+  Querystring: {
+    status?: "all" | "source_only" | "destination_only" | "changed";
+    kind?: "all" | "image" | "video";
+    keyword?: string;
+    page?: string;
+    pageSize?: string;
+    refresh?: string;
+  };
+}>("/api/jobs/:jobId/diff", async (req, reply) => {
+  const query = jobDiffQuerySchema.parse(req.query ?? {});
+  const state = await stateRepo.loadState();
+  try {
+    const result = await buildJobDiff(state, req.params.jobId, {
+      statusFilter: query.status ?? "all",
+      kindFilter: query.kind ?? "all",
+      keyword: (query.keyword ?? "").trim(),
+      page: query.page ?? 1,
+      pageSize: query.pageSize ?? 60,
+      forceRefresh: parseBooleanQueryValue(query.refresh)
+    });
+    return result;
+  } catch (error) {
+    const message = (error as Error).message;
+    if (message === "Job not found") {
+      return reply.code(404).send({ message });
+    }
+    return reply.code(400).send({ message });
+  }
 });
 
 app.post<{ Body: Omit<BackupJob, "id"> }>("/api/jobs", async (req, reply) => {

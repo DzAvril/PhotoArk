@@ -7,6 +7,7 @@ import type {
   BackupJob,
   DirectoryBrowseResult,
   JobExecution,
+  JobDiffResult,
   JobRun,
   MediaBrowseResult,
   LivePhotoPair,
@@ -23,6 +24,7 @@ import type {
   StorageTarget,
   VersionInfo
 } from "../types/api";
+import type { DiffResult } from "../types/diff";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
 const AUTH_TOKEN_KEY = "photoark-auth-token";
@@ -222,6 +224,15 @@ export function getStorageMediaStreamUrl(storageId: string, filePath: string) {
   return withAccessToken(`${API_BASE}/api/storages/${storageId}/media/stream?${q.toString()}`);
 }
 
+export function compareStorages(leftStorageId: string, rightStorageId: string, leftPath?: string, rightPath?: string) {
+  const q = new URLSearchParams();
+  q.set("leftStorageId", leftStorageId);
+  q.set("rightStorageId", rightStorageId);
+  if (leftPath) q.set("leftPath", leftPath);
+  if (rightPath) q.set("rightPath", rightPath);
+  return fetchJson<DiffResult>(`/api/storages/diff?${q.toString()}`);
+}
+
 export function createStorage(payload: Omit<StorageTarget, "id">) {
   return fetchJson<StorageTarget>("/api/storages", {
     method: "POST",
@@ -235,6 +246,28 @@ export function deleteStorage(storageId: string) {
 
 export function getJobs() {
   return fetchJson<{ items: BackupJob[] }>("/api/jobs");
+}
+
+export function getJobDiff(
+  jobId: string,
+  query?: {
+    status?: "all" | "source_only" | "destination_only" | "changed";
+    kind?: "all" | "image" | "video";
+    keyword?: string;
+    page?: number;
+    pageSize?: number;
+    refresh?: boolean;
+  }
+) {
+  const q = new URLSearchParams();
+  if (query?.status && query.status !== "all") q.set("status", query.status);
+  if (query?.kind && query.kind !== "all") q.set("kind", query.kind);
+  if (query?.keyword?.trim()) q.set("keyword", query.keyword.trim());
+  if (query?.page && query.page > 1) q.set("page", String(query.page));
+  if (query?.pageSize) q.set("pageSize", String(query.pageSize));
+  if (query?.refresh) q.set("refresh", "1");
+  const suffix = q.toString() ? `?${q.toString()}` : "";
+  return fetchJson<JobDiffResult>(`/api/jobs/${jobId}/diff${suffix}`);
 }
 
 export function createJob(payload: Omit<BackupJob, "id">) {

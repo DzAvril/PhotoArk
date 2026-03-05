@@ -244,14 +244,24 @@ export function SettingsPage() {
 
         <fieldset className="rounded-xl border border-[var(--ark-line)] bg-[var(--ark-surface)] p-3">
           <legend className="px-1 text-sm font-semibold">媒体索引</legend>
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2 text-xs">
             <span className="mp-chip">缓存根目录 {mediaIndexItems.length}</span>
             <span className="mp-chip">新鲜阈值 {formatDurationMs(mediaIndexMaxAgeMs)}</span>
             {indexLoading ? <span className="mp-chip">读取中...</span> : null}
-            <button type="button" className="mp-btn" disabled={indexLoading || indexRebuilding} onClick={() => void loadMediaIndexStatus(true)}>
+            <button
+              type="button"
+              className="mp-btn px-2.5 py-1.5 text-xs"
+              disabled={indexLoading || indexRebuilding}
+              onClick={() => void loadMediaIndexStatus(true)}
+            >
               刷新状态
             </button>
-            <button type="button" className="mp-btn" disabled={indexRebuilding} onClick={() => void handleRebuildMediaIndex()}>
+            <button
+              type="button"
+              className="mp-btn px-2.5 py-1.5 text-xs"
+              disabled={indexRebuilding}
+              onClick={() => void handleRebuildMediaIndex()}
+            >
               {indexRebuilding ? "重建中..." : "重建索引"}
             </button>
           </div>
@@ -260,8 +270,8 @@ export function SettingsPage() {
               mediaIndexItems.map((item) => (
                 <div key={item.rootPath} className="rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] px-3 py-2">
                   <div className="flex flex-wrap items-center gap-2">
-                    <p className="text-sm font-medium">{item.rootPath}</p>
-                    <span className={`mp-chip ${item.fresh ? "mp-chip-success" : "mp-chip-warning"}`}>
+                    <p className="text-xs font-medium">{item.rootPath}</p>
+                    <span className={`mp-chip text-xs ${item.fresh ? "mp-chip-success" : "mp-chip-warning"}`}>
                       {item.fresh ? "新鲜" : "过期"}
                     </span>
                   </div>

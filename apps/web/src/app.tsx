@@ -4,6 +4,7 @@ import { getCurrentUser, getStoredAuthToken, logout, onAuthRequired, setStoredAu
 import { AppShell } from "./layout/app-shell";
 import { BackupsPage } from "./pages/backups-page";
 import { DashboardPage } from "./pages/dashboard-page";
+import { JobDiffPage } from "./pages/job-diff-page";
 import { JobsPage } from "./pages/jobs-page";
 import { LoginPage } from "./pages/login-page";
 import { MediaPage } from "./pages/media-page";
@@ -101,6 +102,7 @@ export function App() {
           <Route path="notifications" element={<SettingsPage />} />
           <Route path="storages" element={<StoragesPage />} />
           <Route path="jobs" element={<JobsPage />} />
+          <Route path="diff" element={<JobDiffPage />} />
         </Route>
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

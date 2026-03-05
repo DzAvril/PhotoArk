@@ -210,7 +210,7 @@ export function BackupsPage() {
                   <div className="min-w-0 flex-1">
                     <h4 className="truncate text-sm font-semibold">{job?.name ?? run.jobId}</h4>
                   </div>
-                  <span className={run.status === "success" ? "text-base mp-status-success" : "text-base mp-status-danger"}>
+                  <span className={run.status === "success" ? "text-sm mp-status-success" : "text-sm mp-status-danger"}>
                     {run.status === "success" ? "成功" : "失败"}
                   </span>
                 </div>
@@ -255,7 +255,7 @@ export function BackupsPage() {
         </div>
 
         <div className="hidden md:block md:min-h-0 md:flex-1 md:overflow-auto">
-          <table className="mp-data-table min-w-full text-base">
+          <table className="mp-data-table min-w-full text-sm">
             <thead>
               <tr className="border-b border-[var(--ark-line)] text-left text-sm mp-muted">
                 <th className="px-2 py-2">
