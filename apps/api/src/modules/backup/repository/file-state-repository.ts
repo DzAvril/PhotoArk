@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { AppSettings, BackupState } from "./types.js";
 
@@ -24,14 +24,26 @@ const defaultState: BackupState = {
 };
 
 export class FileStateRepository {
+  private cachedState: BackupState | null = null;
+  private cachedMtimeMs = -1;
+
   constructor(private readonly stateFilePath: string) {}
 
   async loadState(): Promise<BackupState> {
     try {
+      const fileStat = await stat(this.stateFilePath);
+      if (
+        this.cachedState &&
+        Number.isFinite(fileStat.mtimeMs) &&
+        Math.abs(fileStat.mtimeMs - this.cachedMtimeMs) < 0.001
+      ) {
+        return structuredClone(this.cachedState);
+      }
+
       const raw = await readFile(this.stateFilePath, "utf8");
       const parsed = JSON.parse(raw) as Partial<BackupState>;
       const parsedTelegram = parsed.settings?.telegram;
-      return {
+      const nextState: BackupState = {
         storages: parsed.storages ?? [],
         jobs: parsed.jobs ?? [],
         assets: parsed.assets ?? [],
@@ -47,7 +59,12 @@ export class FileStateRepository {
           }
         }
       };
+      this.cachedState = structuredClone(nextState);
+      this.cachedMtimeMs = fileStat.mtimeMs;
+      return nextState;
     } catch {
+      this.cachedState = structuredClone(defaultState);
+      this.cachedMtimeMs = -1;
       return structuredClone(defaultState);
     }
   }
@@ -55,5 +72,8 @@ export class FileStateRepository {
   async saveState(state: BackupState): Promise<void> {
     await mkdir(path.dirname(this.stateFilePath), { recursive: true });
     await writeFile(this.stateFilePath, JSON.stringify(state, null, 2), "utf8");
+    this.cachedState = structuredClone(state);
+    const fileStat = await stat(this.stateFilePath).catch(() => null);
+    this.cachedMtimeMs = fileStat?.mtimeMs ?? Date.now();
   }
 }

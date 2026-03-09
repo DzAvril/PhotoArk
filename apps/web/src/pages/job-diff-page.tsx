@@ -72,31 +72,14 @@ function getCellColorClass(item: JobDiffItem, side: "source" | "destination"): s
     : "bg-slate-300 shadow-[0_0_0_1px_rgba(100,116,139,0.22)_inset]";
 }
 
-function getSquareSizePx(item: JobDiffItem): number {
-  const candidateSize = Math.max(item.source?.sizeBytes ?? 0, item.destination?.sizeBytes ?? 0);
-  if (!candidateSize) return 11;
-  const kb = Math.max(1, candidateSize / 1024);
-  const adaptive = 11 + Math.log2(kb) * 1.7;
-  return Math.max(10, Math.min(22, Math.round(adaptive)));
+function getSquareSizePx(itemCount: number): number {
+  if (!Number.isFinite(itemCount) || itemCount <= 0) return 12;
+  const adaptive = 22 - Math.log2(Math.max(1, itemCount)) * 1.15;
+  return Math.max(10, Math.min(20, Math.round(adaptive)));
 }
 
-function buildHoverTitle(item: JobDiffItem): string {
-  const lines: string[] = [item.relativePath, `状态: ${getStatusLabel(item.status)}`, `类型: ${getKindLabel(item.kind)}`];
-  if (item.source) {
-    lines.push(`源: ${formatBytes(item.source.sizeBytes)} · ${formatDateTime(item.source.modifiedAt)}`);
-  } else {
-    lines.push("源: 无文件");
-  }
-  if (item.destination) {
-    lines.push(`目标: ${formatBytes(item.destination.sizeBytes)} · ${formatDateTime(item.destination.modifiedAt)}`);
-  } else {
-    lines.push("目标: 无文件");
-  }
-  if (item.status === "changed") {
-    lines.push(`Diff: ${describeChangeReason(item)} · 时间差 ${formatSignedMs(item.mtimeDeltaMs)}`);
-  }
-  return lines.join("\n");
-}
+const DIFF_INITIAL_RENDER_COUNT = 1200;
+const DIFF_RENDER_BATCH = 1200;
 
 function DiffFileMeta({
   title,
@@ -149,9 +132,9 @@ export function JobDiffPage() {
   const [selectedJobId, setSelectedJobId] = useState("");
   const [kindFilter, setKindFilter] = useState<"all" | JobDiffKind>("all");
   const [hideSame, setHideSame] = useState(true);
+  const [visibleCount, setVisibleCount] = useState(DIFF_INITIAL_RENDER_COUNT);
   const [result, setResult] = useState<JobDiffResult | null>(null);
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
-  const [hoveredItemId, setHoveredItemId] = useState<string | null>(null);
   const [loadingSetup, setLoadingSetup] = useState(true);
   const [loadingDiff, setLoadingDiff] = useState(false);
   const [refreshingDiff, setRefreshingDiff] = useState(false);
@@ -180,7 +163,6 @@ export function JobDiffPage() {
       if (!selectedJobId) {
         setResult(null);
         setSelectedItemId(null);
-        setHoveredItemId(null);
         return;
       }
 
@@ -205,7 +187,6 @@ export function JobDiffPage() {
         if (requestSeqRef.current !== reqSeq) return;
         setResult(null);
         setSelectedItemId(null);
-        setHoveredItemId(null);
         setError((err as Error).message);
       } finally {
         if (requestSeqRef.current === reqSeq) {
@@ -263,26 +244,31 @@ export function JobDiffPage() {
   }, [result, hideSame]);
 
   useEffect(() => {
+    setVisibleCount(DIFF_INITIAL_RENDER_COUNT);
+  }, [selectedJobId, kindFilter, hideSame, result?.generatedAt]);
+
+  const visibleItems = useMemo(
+    () => displayItems.slice(0, Math.min(displayItems.length, visibleCount)),
+    [displayItems, visibleCount]
+  );
+  const displayItemById = useMemo(() => new Map(displayItems.map((item) => [item.id, item])), [displayItems]);
+  const squareSizePx = useMemo(() => getSquareSizePx(displayItems.length), [displayItems.length]);
+
+  useEffect(() => {
     if (!displayItems.length) {
       setSelectedItemId(null);
-      setHoveredItemId(null);
       return;
     }
-    if (selectedItemId && displayItems.some((item) => item.id === selectedItemId)) return;
+    if (selectedItemId && displayItemById.has(selectedItemId)) return;
     setSelectedItemId(displayItems[0].id);
-  }, [displayItems, selectedItemId]);
+  }, [displayItems, displayItemById, selectedItemId]);
 
   const selectedItem = useMemo(
-    () => displayItems.find((item) => item.id === selectedItemId) ?? displayItems[0] ?? null,
-    [displayItems, selectedItemId]
+    () => (selectedItemId ? displayItemById.get(selectedItemId) ?? null : displayItems[0] ?? null),
+    [displayItems, displayItemById, selectedItemId]
   );
 
-  const hoveredItem = useMemo(
-    () => displayItems.find((item) => item.id === hoveredItemId) ?? null,
-    [displayItems, hoveredItemId]
-  );
-
-  const detailItem = hoveredItem ?? selectedItem;
+  const detailItem = selectedItem;
   const previewSourceAvailable = Boolean(detailItem?.source && result);
   const previewDestinationAvailable = Boolean(detailItem?.destination && result);
   const previewStorageId =
@@ -304,6 +290,9 @@ export function JobDiffPage() {
     syncScrollSourceRef.current = "left";
     target.scrollTop = source.scrollTop;
     target.scrollLeft = source.scrollLeft;
+    if (source.scrollTop + source.clientHeight >= source.scrollHeight - 220) {
+      setVisibleCount((prev) => Math.min(displayItems.length, prev + DIFF_RENDER_BATCH));
+    }
     window.requestAnimationFrame(() => {
       if (syncScrollSourceRef.current === "left") syncScrollSourceRef.current = null;
     });
@@ -317,6 +306,9 @@ export function JobDiffPage() {
     syncScrollSourceRef.current = "right";
     target.scrollTop = source.scrollTop;
     target.scrollLeft = source.scrollLeft;
+    if (source.scrollTop + source.clientHeight >= source.scrollHeight - 220) {
+      setVisibleCount((prev) => Math.min(displayItems.length, prev + DIFF_RENDER_BATCH));
+    }
     window.requestAnimationFrame(() => {
       if (syncScrollSourceRef.current === "right") syncScrollSourceRef.current = null;
     });
@@ -459,7 +451,7 @@ export function JobDiffPage() {
       </div>
 
       <div className="grid gap-3 md:min-h-0 md:flex-1 xl:grid-cols-[minmax(0,1fr)_390px]">
-        <article className="mp-panel p-3 md:flex md:min-h-0 md:flex-col">
+        <article className="mp-panel p-3 md:flex md:h-full md:min-h-0 md:flex-col">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="mp-segment">
               {[
@@ -491,27 +483,25 @@ export function JobDiffPage() {
           </div>
 
           <div className="mt-3 grid gap-2 md:min-h-0 md:flex-1 md:grid-cols-2">
-            <div className="rounded-xl border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-2">
+            <div className="rounded-xl border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-2 md:flex md:min-h-0 md:flex-col">
               <div className="mb-2 flex items-center justify-between">
                 <p className="text-xs font-semibold">源目录视图</p>
                 <span className="text-[11px] mp-muted">{result ? result.job.sourceStorageName : "-"}</span>
               </div>
-              <div ref={leftPaneRef} className="h-[44vh] overflow-auto rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface)] p-2" onScroll={handleLeftPaneScroll}>
+              <div
+                ref={leftPaneRef}
+                className="h-[46vh] min-h-[280px] overflow-auto rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface)] p-2 md:h-auto md:min-h-0 md:flex-1"
+                onScroll={handleLeftPaneScroll}
+              >
                 <div className="flex flex-wrap content-start gap-1.5">
-                  {displayItems.map((item) => {
-                    const size = getSquareSizePx(item);
+                  {visibleItems.map((item) => {
                     const active = selectedItem?.id === item.id;
                     return (
                       <button
                         key={`left:${item.id}`}
                         type="button"
-                        title={buildHoverTitle(item)}
                         className={`rounded-[3px] transition-transform ${getCellColorClass(item, "source")} ${active ? "ring-2 ring-[var(--ark-primary)]" : ""}`}
-                        style={{ width: `${size}px`, height: `${size}px` }}
-                        onMouseEnter={() => setHoveredItemId(item.id)}
-                        onMouseLeave={() => setHoveredItemId((prev) => (prev === item.id ? null : prev))}
-                        onFocus={() => setHoveredItemId(item.id)}
-                        onBlur={() => setHoveredItemId((prev) => (prev === item.id ? null : prev))}
+                        style={{ width: `${squareSizePx}px`, height: `${squareSizePx}px` }}
                         onClick={() => setSelectedItemId(item.id)}
                       />
                     );
@@ -520,27 +510,25 @@ export function JobDiffPage() {
               </div>
             </div>
 
-            <div className="rounded-xl border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-2">
+            <div className="rounded-xl border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-2 md:flex md:min-h-0 md:flex-col">
               <div className="mb-2 flex items-center justify-between">
                 <p className="text-xs font-semibold">目标目录视图</p>
                 <span className="text-[11px] mp-muted">{result ? result.job.destinationStorageName : "-"}</span>
               </div>
-              <div ref={rightPaneRef} className="h-[44vh] overflow-auto rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface)] p-2" onScroll={handleRightPaneScroll}>
+              <div
+                ref={rightPaneRef}
+                className="h-[46vh] min-h-[280px] overflow-auto rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface)] p-2 md:h-auto md:min-h-0 md:flex-1"
+                onScroll={handleRightPaneScroll}
+              >
                 <div className="flex flex-wrap content-start gap-1.5">
-                  {displayItems.map((item) => {
-                    const size = getSquareSizePx(item);
+                  {visibleItems.map((item) => {
                     const active = selectedItem?.id === item.id;
                     return (
                       <button
                         key={`right:${item.id}`}
                         type="button"
-                        title={buildHoverTitle(item)}
                         className={`rounded-[3px] transition-transform ${getCellColorClass(item, "destination")} ${active ? "ring-2 ring-[var(--ark-primary)]" : ""}`}
-                        style={{ width: `${size}px`, height: `${size}px` }}
-                        onMouseEnter={() => setHoveredItemId(item.id)}
-                        onMouseLeave={() => setHoveredItemId((prev) => (prev === item.id ? null : prev))}
-                        onFocus={() => setHoveredItemId(item.id)}
-                        onBlur={() => setHoveredItemId((prev) => (prev === item.id ? null : prev))}
+                        style={{ width: `${squareSizePx}px`, height: `${squareSizePx}px` }}
                         onClick={() => setSelectedItemId(item.id)}
                       />
                     );
@@ -549,6 +537,9 @@ export function JobDiffPage() {
               </div>
             </div>
           </div>
+          <p className="mt-2 text-xs mp-muted">
+            已渲染 {visibleItems.length}/{displayItems.length} 项
+          </p>
 
         </article>
 

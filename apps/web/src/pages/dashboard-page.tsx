@@ -1135,9 +1135,6 @@ export function DashboardPage() {
                   <filter id="relation-node-shadow" x="-30%" y="-30%" width="160%" height="180%">
                     <feDropShadow dx="0" dy="9" stdDeviation="6.5" floodColor="#0f172a" floodOpacity="0.15" />
                   </filter>
-                  <filter id="relation-edge-shadow" x="-30%" y="-30%" width="180%" height="180%">
-                    <feDropShadow dx="0" dy="0" stdDeviation="1.4" floodColor="#0f172a" floodOpacity="0.26" />
-                  </filter>
                 </defs>
 
                 <rect x={0} y={0} width={RELATION_GRAPH_WIDTH} height={relationGraphHeight} fill="url(#relation-grid)" opacity={0.68} />
@@ -1155,7 +1152,6 @@ export function DashboardPage() {
                       markerEnd={`url(#${edge.markerId})`}
                       strokeDasharray={edge.strokeDasharray}
                       opacity={0.96}
-                      filter="url(#relation-edge-shadow)"
                     >
                       <title>{edge.description}</title>
                     </path>

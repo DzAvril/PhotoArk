@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import Fastify, { type FastifyReply } from "fastify";
 import cors from "@fastify/cors";
 import fastifyStatic from "@fastify/static";
+import exifr from "exifr";
 import { watch as chokidarWatch, type FSWatcher } from "chokidar";
 import type { BackupJob, StorageTarget } from "@photoark/shared";
 import { z } from "zod";
@@ -94,6 +95,7 @@ declare module "fastify" {
   interface FastifyRequest {
     authUser?: AuthUser;
     authTokenHash?: string;
+    appState?: BackupState;
   }
 }
 
@@ -332,6 +334,7 @@ const MIME_BY_EXT: Record<string, string> = {
 
 const MEDIA_INDEX_MAX_AGE_MS = 30_000;
 const MEDIA_INDEX_SAVE_DEBOUNCE_MS = 1_200;
+const MEDIA_INDEX_STAT_CONCURRENCY = 32;
 const JOB_DIFF_MTIME_TOLERANCE_MS = 1_000;
 
 type IndexedMediaFile = {
@@ -644,16 +647,18 @@ function formatLocalDateKeyFromMs(ms: number): string {
   return `${y}-${m}-${d}`;
 }
 
-async function buildSourceMediaActivity(state: BackupState, dayCount: number): Promise<{
+type SourceMediaActivityDay = {
+  date: string;
+  count: number;
+  imageCount: number;
+  videoCount: number;
+  livePhotoCount: number;
+};
+
+type SourceMediaActivityResult = {
   year: number;
   years: number[];
-  days: Array<{
-    date: string;
-    count: number;
-    imageCount: number;
-    videoCount: number;
-    livePhotoCount: number;
-  }>;
+  days: SourceMediaActivityDay[];
   sourceRootCount: number;
   totalAddedCount: number;
   imageAddedCount: number;
@@ -662,7 +667,80 @@ async function buildSourceMediaActivity(state: BackupState, dayCount: number): P
   maxDailyCount: number;
   startDate: string;
   endDate: string;
-}> {
+};
+
+const SOURCE_ACTIVITY_CACHE_TTL_MS = 30_000;
+const SOURCE_ACTIVITY_CACHE_MAX_ENTRIES = 24;
+const sourceActivityCache = new Map<string, { expiresAt: number; data: SourceMediaActivityResult }>();
+const SOURCE_ACTIVITY_METADATA_BATCH_SIZE = 24;
+const SOURCE_ACTIVITY_MEDIA_DATE_CACHE_MAX_ENTRIES = 60_000;
+const sourceActivityMediaDateCache = new Map<string, { mtimeMs: number; mediaDateMs: number | null }>();
+
+function parseMetadataDateMs(value: unknown): number | null {
+  if (!value) return null;
+  let ms = Number.NaN;
+  if (value instanceof Date) {
+    ms = value.getTime();
+  } else if (typeof value === "number") {
+    ms = value;
+  } else if (typeof value === "string") {
+    ms = Date.parse(value);
+  }
+  if (!Number.isFinite(ms) || ms <= 0) return null;
+  const year = new Date(ms).getFullYear();
+  if (year < 1990 || year > 2100) return null;
+  return ms;
+}
+
+async function readMediaDateFromMetadata(fullPath: string): Promise<number | null> {
+  const ext = path.extname(fullPath).toLowerCase();
+  if (!IMAGE_EXTENSIONS.has(ext) && !VIDEO_EXTENSIONS.has(ext)) return null;
+  try {
+    const metadata = (await exifr.parse(fullPath, {
+      pick: ["DateTimeOriginal", "CreateDate", "MediaCreateDate", "TrackCreateDate", "ModifyDate"]
+    })) as Record<string, unknown> | null;
+    if (!metadata) return null;
+    const candidates = [
+      metadata.DateTimeOriginal,
+      metadata.CreateDate,
+      metadata.MediaCreateDate,
+      metadata.TrackCreateDate,
+      metadata.ModifyDate
+    ];
+    for (const candidate of candidates) {
+      const parsed = parseMetadataDateMs(candidate);
+      if (parsed !== null) return parsed;
+    }
+  } catch {
+    // Ignore parse failure and fallback to filesystem mtime.
+  }
+  return null;
+}
+
+function pruneSourceActivityMediaDateCache() {
+  while (sourceActivityMediaDateCache.size > SOURCE_ACTIVITY_MEDIA_DATE_CACHE_MAX_ENTRIES) {
+    const firstKey = sourceActivityMediaDateCache.keys().next().value;
+    if (!firstKey) break;
+    sourceActivityMediaDateCache.delete(firstKey);
+  }
+}
+
+async function resolveSourceMediaDateMs(row: IndexedMediaFile): Promise<number> {
+  const cacheKey = row.fullPath;
+  const cached = sourceActivityMediaDateCache.get(cacheKey);
+  if (cached && Math.abs(cached.mtimeMs - row.mtimeMs) < 0.001) {
+    return cached.mediaDateMs ?? row.mtimeMs;
+  }
+  const mediaDateMs = await readMediaDateFromMetadata(row.fullPath);
+  sourceActivityMediaDateCache.set(cacheKey, {
+    mtimeMs: row.mtimeMs,
+    mediaDateMs
+  });
+  pruneSourceActivityMediaDateCache();
+  return mediaDateMs ?? row.mtimeMs;
+}
+
+async function buildSourceMediaActivity(state: BackupState, dayCount: number): Promise<SourceMediaActivityResult> {
   const requestedYear = Number.isFinite(dayCount) ? Math.round(dayCount) : NaN;
   const currentYear = new Date().getFullYear();
   const selectedYear = Number.isFinite(requestedYear) && requestedYear >= 2000 && requestedYear <= 2100 ? requestedYear : currentYear;
@@ -678,6 +756,14 @@ async function buildSourceMediaActivity(state: BackupState, dayCount: number): P
     } catch {
       // Ignore invalid source path for this job.
     }
+  }
+
+  const sortedSourceRoots = [...sourceRoots].sort((a, b) => a.localeCompare(b, "zh-CN"));
+  const cacheKey = `${selectedYear}::${sortedSourceRoots.join("||")}`;
+  const nowMs = Date.now();
+  const cached = sourceActivityCache.get(cacheKey);
+  if (cached && cached.expiresAt > nowMs) {
+    return cached.data;
   }
 
   const startDate = new Date(selectedYear, 0, 1);
@@ -708,35 +794,43 @@ async function buildSourceMediaActivity(state: BackupState, dayCount: number): P
     const livePhotoIdByRelativePath = buildLivePhotoIdByRelativePath(rows.map((row) => row.relativePath));
     const countedLivePhotoByDate = new Set<string>();
 
-    for (const row of rows) {
-      if (dedupAbsolutePath.has(row.fullPath)) continue;
-      dedupAbsolutePath.add(row.fullPath);
-      const mtimeMs = row.mtimeMs;
-      if (!Number.isFinite(mtimeMs)) continue;
-      yearsWithData.add(new Date(mtimeMs).getFullYear());
-      if (mtimeMs < startMs || mtimeMs >= endExclusiveMs) continue;
-      const dayKey = formatLocalDateKeyFromMs(mtimeMs);
-      const dayRow = counts.get(dayKey);
-      if (!dayRow) continue;
+    for (let idx = 0; idx < rows.length; idx += SOURCE_ACTIVITY_METADATA_BATCH_SIZE) {
+      const batch = rows.slice(idx, idx + SOURCE_ACTIVITY_METADATA_BATCH_SIZE);
+      const datedBatch = await Promise.all(
+        batch.map(async (row) => ({
+          row,
+          mediaDateMs: await resolveSourceMediaDateMs(row)
+        }))
+      );
+      for (const { row, mediaDateMs } of datedBatch) {
+        if (dedupAbsolutePath.has(row.fullPath)) continue;
+        dedupAbsolutePath.add(row.fullPath);
+        if (!Number.isFinite(mediaDateMs)) continue;
+        yearsWithData.add(new Date(mediaDateMs).getFullYear());
+        if (mediaDateMs < startMs || mediaDateMs >= endExclusiveMs) continue;
+        const dayKey = formatLocalDateKeyFromMs(mediaDateMs);
+        const dayRow = counts.get(dayKey);
+        if (!dayRow) continue;
 
-      dayRow.count += 1;
+        dayRow.count += 1;
 
-      const livePhotoAssetId = livePhotoIdByRelativePath.get(row.relativePath);
-      if (livePhotoAssetId) {
-        const livePhotoDayKey = `${dayKey}::${livePhotoAssetId}`;
-        if (!countedLivePhotoByDate.has(livePhotoDayKey)) {
-          countedLivePhotoByDate.add(livePhotoDayKey);
-          dayRow.livePhotoCount += 1;
-          livePhotoAddedCount += 1;
-        }
-      } else {
-        const ext = path.extname(row.relativePath).toLowerCase();
-        if (VIDEO_EXTENSIONS.has(ext)) {
-          dayRow.videoCount += 1;
-          videoAddedCount += 1;
+        const livePhotoAssetId = livePhotoIdByRelativePath.get(row.relativePath);
+        if (livePhotoAssetId) {
+          const livePhotoDayKey = `${dayKey}::${livePhotoAssetId}`;
+          if (!countedLivePhotoByDate.has(livePhotoDayKey)) {
+            countedLivePhotoByDate.add(livePhotoDayKey);
+            dayRow.livePhotoCount += 1;
+            livePhotoAddedCount += 1;
+          }
         } else {
-          dayRow.imageCount += 1;
-          imageAddedCount += 1;
+          const ext = path.extname(row.relativePath).toLowerCase();
+          if (VIDEO_EXTENSIONS.has(ext)) {
+            dayRow.videoCount += 1;
+            videoAddedCount += 1;
+          } else {
+            dayRow.imageCount += 1;
+            imageAddedCount += 1;
+          }
         }
       }
     }
@@ -753,7 +847,7 @@ async function buildSourceMediaActivity(state: BackupState, dayCount: number): P
   const maxDailyCount = days.reduce((max, item) => (item.count > max ? item.count : max), 0);
   const years = [...yearsWithData].filter((year) => year >= 2000 && year <= 2100).sort((a, b) => b - a);
 
-  return {
+  const result: SourceMediaActivityResult = {
     year: selectedYear,
     years,
     days,
@@ -766,6 +860,18 @@ async function buildSourceMediaActivity(state: BackupState, dayCount: number): P
     startDate: formatLocalDateKeyFromMs(startMs),
     endDate: formatLocalDateKeyFromMs(endDate.getTime())
   };
+
+  sourceActivityCache.set(cacheKey, {
+    expiresAt: nowMs + SOURCE_ACTIVITY_CACHE_TTL_MS,
+    data: result
+  });
+  while (sourceActivityCache.size > SOURCE_ACTIVITY_CACHE_MAX_ENTRIES) {
+    const firstKey = sourceActivityCache.keys().next().value;
+    if (!firstKey) break;
+    sourceActivityCache.delete(firstKey);
+  }
+
+  return result;
 }
 
 type JobRelationCheckStatus = "synced" | "lagging" | "unknown";
@@ -1020,18 +1126,61 @@ async function buildJobDiff(
     return typeof logicalSize === "number" && Number.isFinite(logicalSize) && logicalSize >= 0 ? logicalSize : physicalSize;
   };
 
-  const sourceByRelativePath = new Map(sourceRows.map((row) => [row.relativePath, row]));
-  const destinationByRelativePath = new Map(destinationRows.map((row) => [row.relativePath, row]));
-  const allRelativePaths = new Set<string>([...sourceByRelativePath.keys(), ...destinationByRelativePath.keys()]);
-  const orderedRelativePaths = [...allRelativePaths].sort((a, b) => a.localeCompare(b, "zh-CN"));
-
   const summary = buildEmptyJobDiffSummary();
-  const diffItems: JobDiffItem[] = [];
-  for (const relativePath of orderedRelativePaths) {
-    const sourceRow = sourceByRelativePath.get(relativePath);
-    const destinationRow = destinationByRelativePath.get(relativePath);
-    if (!sourceRow && !destinationRow) {
-      continue;
+  const normalizedKeyword = options.keyword.trim().toLowerCase();
+  const statusBuckets: Record<JobDiffStatus, JobDiffItem[]> = {
+    source_only: [],
+    changed: [],
+    destination_only: [],
+    same: []
+  };
+
+  const matchFilters = (item: { status: JobDiffStatus; kind: JobDiffKind; relativePath: string }) => {
+    if (options.statusFilter !== "all" && item.status !== options.statusFilter) return false;
+    if (options.kindFilter !== "all" && item.kind !== options.kindFilter) return false;
+    if (normalizedKeyword && !item.relativePath.toLowerCase().includes(normalizedKeyword)) return false;
+    return true;
+  };
+
+  let sourceIndex = 0;
+  let destinationIndex = 0;
+  let comparedCount = 0;
+
+  while (sourceIndex < sourceRows.length || destinationIndex < destinationRows.length) {
+    const sourceCandidate = sourceRows[sourceIndex];
+    const destinationCandidate = destinationRows[destinationIndex];
+
+    let sourceRow: IndexedMediaFile | undefined;
+    let destinationRow: IndexedMediaFile | undefined;
+    let relativePath = "";
+
+    if (sourceCandidate && destinationCandidate) {
+      const pathCompare = sourceCandidate.relativePath.localeCompare(destinationCandidate.relativePath, "zh-CN");
+      if (pathCompare === 0) {
+        sourceRow = sourceCandidate;
+        destinationRow = destinationCandidate;
+        relativePath = sourceCandidate.relativePath;
+        sourceIndex += 1;
+        destinationIndex += 1;
+      } else if (pathCompare < 0) {
+        sourceRow = sourceCandidate;
+        relativePath = sourceCandidate.relativePath;
+        sourceIndex += 1;
+      } else {
+        destinationRow = destinationCandidate;
+        relativePath = destinationCandidate.relativePath;
+        destinationIndex += 1;
+      }
+    } else if (sourceCandidate) {
+      sourceRow = sourceCandidate;
+      relativePath = sourceCandidate.relativePath;
+      sourceIndex += 1;
+    } else if (destinationCandidate) {
+      destinationRow = destinationCandidate;
+      relativePath = destinationCandidate.relativePath;
+      destinationIndex += 1;
+    } else {
+      break;
     }
 
     let status: JobDiffStatus | null = null;
@@ -1069,6 +1218,7 @@ async function buildJobDiff(
     }
 
     if (!status) continue;
+    comparedCount += 1;
 
     const kind = detectJobDiffKind(relativePath);
     if (kind === "video") {
@@ -1077,7 +1227,11 @@ async function buildJobDiff(
       summary.imageCount += 1;
     }
 
-    diffItems.push({
+    if (!matchFilters({ status, kind, relativePath })) {
+      continue;
+    }
+
+    statusBuckets[status].push({
       id: `${status}:${relativePath}`,
       relativePath,
       kind,
@@ -1090,33 +1244,12 @@ async function buildJobDiff(
     });
   }
 
-  summary.totalComparedCount = diffItems.length;
+  summary.totalComparedCount = comparedCount;
   summary.totalDiffCount = summary.sourceOnlyCount + summary.destinationOnlyCount + summary.changedCount;
-  const statusOrder: Record<JobDiffStatus, number> = {
-    source_only: 0,
-    changed: 1,
-    destination_only: 2,
-    same: 3
-  };
-  diffItems.sort((a, b) => {
-    const statusCompare = statusOrder[a.status] - statusOrder[b.status];
-    if (statusCompare !== 0) return statusCompare;
-    return a.relativePath.localeCompare(b.relativePath, "zh-CN");
-  });
-
-  const normalizedKeyword = options.keyword.trim().toLowerCase();
-  const filteredItems = diffItems.filter((item) => {
-    if (options.statusFilter !== "all" && item.status !== options.statusFilter) {
-      return false;
-    }
-    if (options.kindFilter !== "all" && item.kind !== options.kindFilter) {
-      return false;
-    }
-    if (normalizedKeyword && !item.relativePath.toLowerCase().includes(normalizedKeyword)) {
-      return false;
-    }
-    return true;
-  });
+  const filteredItems = statusBuckets.source_only
+    .concat(statusBuckets.changed)
+    .concat(statusBuckets.destination_only)
+    .concat(statusBuckets.same);
 
   const total = filteredItems.length;
   let pageSize = Math.max(1, Math.min(200, Math.round(options.pageSize)));
@@ -1583,26 +1716,40 @@ function rowsFromMediaIndexEntry(rootPath: string, entry: MediaIndexRootEntry): 
 async function scanMediaFilesWithStats(dirPath: string): Promise<IndexedMediaFile[]> {
   const rootPath = normalizeMediaIndexRootPath(dirPath);
   const out: IndexedMediaFile[] = [];
+  const dirQueue: string[] = [rootPath];
 
-  async function walk(currentPath: string) {
+  while (dirQueue.length > 0) {
+    const currentPath = dirQueue.pop();
+    if (!currentPath) continue;
     const entries = await readdir(currentPath, { withFileTypes: true });
+    const mediaFilesInDir: string[] = [];
+
     for (const entry of entries) {
       const fullPath = path.join(currentPath, entry.name);
       if (entry.isDirectory()) {
-        await walk(fullPath);
+        dirQueue.push(fullPath);
       } else if (entry.isFile() && isMediaFile(entry.name)) {
-        const fileStat = await stat(fullPath).catch(() => null);
-        out.push({
-          relativePath: toPosixPath(path.relative(rootPath, fullPath)),
-          fullPath,
-          sizeBytes: fileStat?.size ?? 0,
-          mtimeMs: fileStat?.mtimeMs ?? 0
-        });
+        mediaFilesInDir.push(fullPath);
       }
+    }
+
+    for (let idx = 0; idx < mediaFilesInDir.length; idx += MEDIA_INDEX_STAT_CONCURRENCY) {
+      const batch = mediaFilesInDir.slice(idx, idx + MEDIA_INDEX_STAT_CONCURRENCY);
+      const rows = await Promise.all(
+        batch.map(async (fullPath) => {
+          const fileStat = await stat(fullPath).catch(() => null);
+          return {
+            relativePath: toPosixPath(path.relative(rootPath, fullPath)),
+            fullPath,
+            sizeBytes: fileStat?.size ?? 0,
+            mtimeMs: fileStat?.mtimeMs ?? 0
+          };
+        })
+      );
+      out.push(...rows);
     }
   }
 
-  await walk(rootPath);
   out.sort((a, b) => a.relativePath.localeCompare(b.relativePath));
   return out;
 }
@@ -1620,12 +1767,35 @@ async function collectIndexedMediaFiles(dirPath: string, forceRefresh = false): 
     return rowsFromMediaIndexEntry(rootPath, await pending);
   }
 
+  const refreshStartedMs = Date.now();
   const refreshPromise = (async () => {
-    const rows = await scanMediaFilesWithStats(rootPath);
-    const entry = buildMediaIndexEntry(rows);
-    mediaIndexStore.roots[rootPath] = entry;
-    markMediaIndexDirty();
-    return entry;
+    try {
+      const rows = await scanMediaFilesWithStats(rootPath);
+      const entry = buildMediaIndexEntry(rows);
+      mediaIndexStore.roots[rootPath] = entry;
+      markMediaIndexDirty();
+      app.log.info(
+        {
+          event: "media.index.rebuild",
+          rootPath,
+          fileCount: rows.length,
+          tookMs: Date.now() - refreshStartedMs
+        },
+        "Media index rebuilt"
+      );
+      return entry;
+    } catch (error) {
+      app.log.warn(
+        {
+          event: "media.index.rebuild.error",
+          rootPath,
+          tookMs: Date.now() - refreshStartedMs,
+          message: (error as Error).message
+        },
+        "Failed to rebuild media index"
+      );
+      throw error;
+    }
   })().finally(() => {
     mediaIndexRebuildByRoot.delete(rootPath);
   });
@@ -2686,6 +2856,7 @@ app.addHook("onRequest", async (req, reply) => {
     return reply.code(401).send({ message: "Session user not found", code: "AUTH_INVALID_USER" });
   }
 
+  req.appState = state;
   req.authUser = user;
   req.authTokenHash = tokenHash;
 });
@@ -2699,8 +2870,9 @@ app.get("/api/metrics", async () => {
 
 app.get<{ Querystring: { year?: string } }>("/api/dashboard/source-activity", async (req) => {
   const query = sourceActivityQuerySchema.parse(req.query ?? {});
-  const state = await stateRepo.loadState();
+  const state = req.appState ?? (await stateRepo.loadState());
   const year = query.year ?? new Date().getFullYear();
+  const startedMs = Date.now();
   const result = await buildSourceMediaActivity(state, year);
   app.log.info(
     {
@@ -2708,7 +2880,8 @@ app.get<{ Querystring: { year?: string } }>("/api/dashboard/source-activity", as
       year: result.year,
       sourceRootCount: result.sourceRootCount,
       totalAddedCount: result.totalAddedCount,
-      maxDailyCount: result.maxDailyCount
+      maxDailyCount: result.maxDailyCount,
+      tookMs: Date.now() - startedMs
     },
     "Built source activity heatmap data"
   );
@@ -3203,7 +3376,8 @@ app.get<{
   };
 }>("/api/jobs/:jobId/diff", async (req, reply) => {
   const query = jobDiffQuerySchema.parse(req.query ?? {});
-  const state = await stateRepo.loadState();
+  const state = req.appState ?? (await stateRepo.loadState());
+  const startedMs = Date.now();
   try {
     app.log.info(
       {
@@ -3238,14 +3412,15 @@ app.get<{
         changedCount: result.summary.changedCount,
         sourceOnlyCount: result.summary.sourceOnlyCount,
         destinationOnlyCount: result.summary.destinationOnlyCount,
-        sameCount: result.summary.sameCount
+        sameCount: result.summary.sameCount,
+        tookMs: Date.now() - startedMs
       },
       "Job diff built"
     );
     return result;
   } catch (error) {
     const message = (error as Error).message;
-    app.log.warn({ event: "job.diff.error", jobId: req.params.jobId, message }, "Failed to build job diff");
+    app.log.warn({ event: "job.diff.error", jobId: req.params.jobId, message, tookMs: Date.now() - startedMs }, "Failed to build job diff");
     if (message === "Job not found") {
       return reply.code(404).send({ message });
     }
@@ -3365,7 +3540,7 @@ app.post<{ Params: { jobId: string }; Body: { relativePath: string } }>(
       "Single-file sync requested"
     );
     try {
-      const state = await stateRepo.loadState();
+      const state = req.appState ?? (await stateRepo.loadState());
       const result = await syncSingleFileForJob(state, req.params.jobId, body.relativePath);
       await stateRepo.saveState(state);
        app.log.info(
@@ -3406,7 +3581,7 @@ app.post<{ Params: { jobId: string }; Body: { relativePath: string; side: "sourc
       "Single-file delete requested"
     );
     try {
-      const state = await stateRepo.loadState();
+      const state = req.appState ?? (await stateRepo.loadState());
       const result = await deleteSingleFileForJob(state, req.params.jobId, body.relativePath, body.side);
       await stateRepo.saveState(state);
       app.log.info(
