@@ -150,7 +150,8 @@ const jobDiffQuerySchema = z.object({
   keyword: z.string().optional(),
   page: z.coerce.number().int().min(1).optional(),
   pageSize: z.coerce.number().int().min(1).max(200).optional(),
-  refresh: z.union([z.string(), z.boolean()]).optional()
+  refresh: z.union([z.string(), z.boolean()]).optional(),
+  all: z.union([z.string(), z.boolean()]).optional()
 });
 
 const jobSyncFileSchema = z.object({
@@ -985,6 +986,7 @@ async function buildJobDiff(
     page: number;
     pageSize: number;
     forceRefresh: boolean;
+    includeAll: boolean;
   }
 ): Promise<JobDiffResponse> {
   const job = state.jobs.find((item) => item.id === jobId);
@@ -1116,12 +1118,18 @@ async function buildJobDiff(
     return true;
   });
 
-  const pageSize = Math.max(1, Math.min(200, Math.round(options.pageSize)));
   const total = filteredItems.length;
-  const totalPages = Math.max(1, Math.ceil(total / pageSize));
-  const page = total === 0 ? 1 : Math.min(Math.max(1, Math.round(options.page)), totalPages);
-  const start = (page - 1) * pageSize;
-  const items = filteredItems.slice(start, start + pageSize);
+  let pageSize = Math.max(1, Math.min(200, Math.round(options.pageSize)));
+  let totalPages = Math.max(1, Math.ceil(total / pageSize));
+  let page = total === 0 ? 1 : Math.min(Math.max(1, Math.round(options.page)), totalPages);
+  let items = filteredItems.slice((page - 1) * pageSize, (page - 1) * pageSize + pageSize);
+
+  if (options.includeAll) {
+    page = 1;
+    totalPages = 1;
+    pageSize = Math.max(1, total);
+    items = filteredItems;
+  }
 
   return {
     generatedAt: new Date().toISOString(),
@@ -2692,7 +2700,19 @@ app.get("/api/metrics", async () => {
 app.get<{ Querystring: { year?: string } }>("/api/dashboard/source-activity", async (req) => {
   const query = sourceActivityQuerySchema.parse(req.query ?? {});
   const state = await stateRepo.loadState();
-  return buildSourceMediaActivity(state, query.year ?? new Date().getFullYear());
+  const year = query.year ?? new Date().getFullYear();
+  const result = await buildSourceMediaActivity(state, year);
+  app.log.info(
+    {
+      event: "dashboard.source_activity",
+      year: result.year,
+      sourceRootCount: result.sourceRootCount,
+      totalAddedCount: result.totalAddedCount,
+      maxDailyCount: result.maxDailyCount
+    },
+    "Built source activity heatmap data"
+  );
+  return result;
 });
 
 app.get("/api/version", async () => {
@@ -3179,22 +3199,53 @@ app.get<{
     page?: string;
     pageSize?: string;
     refresh?: string;
+    all?: string;
   };
 }>("/api/jobs/:jobId/diff", async (req, reply) => {
   const query = jobDiffQuerySchema.parse(req.query ?? {});
   const state = await stateRepo.loadState();
   try {
+    app.log.info(
+      {
+        event: "job.diff.request",
+        jobId: req.params.jobId,
+        status: query.status ?? "all",
+        kind: query.kind ?? "all",
+        keyword: (query.keyword ?? "").trim(),
+        page: query.page ?? 1,
+        pageSize: query.pageSize ?? 60,
+        refresh: parseBooleanQueryValue(query.refresh),
+        all: parseBooleanQueryValue(query.all)
+      },
+      "Job diff requested"
+    );
     const result = await buildJobDiff(state, req.params.jobId, {
       statusFilter: query.status ?? "all",
       kindFilter: query.kind ?? "all",
       keyword: (query.keyword ?? "").trim(),
       page: query.page ?? 1,
       pageSize: query.pageSize ?? 60,
-      forceRefresh: parseBooleanQueryValue(query.refresh)
+      forceRefresh: parseBooleanQueryValue(query.refresh),
+      includeAll: parseBooleanQueryValue(query.all)
     });
+    app.log.info(
+      {
+        event: "job.diff.result",
+        jobId: req.params.jobId,
+        total: result.total,
+        page: result.page,
+        totalPages: result.totalPages,
+        changedCount: result.summary.changedCount,
+        sourceOnlyCount: result.summary.sourceOnlyCount,
+        destinationOnlyCount: result.summary.destinationOnlyCount,
+        sameCount: result.summary.sameCount
+      },
+      "Job diff built"
+    );
     return result;
   } catch (error) {
     const message = (error as Error).message;
+    app.log.warn({ event: "job.diff.error", jobId: req.params.jobId, message }, "Failed to build job diff");
     if (message === "Job not found") {
       return reply.code(404).send({ message });
     }
@@ -3309,13 +3360,32 @@ app.post<{ Params: { jobId: string }; Body: { relativePath: string } }>(
   "/api/jobs/:jobId/sync-file",
   async (req, reply) => {
     const body = jobSyncFileSchema.parse(req.body ?? {});
+    app.log.info(
+      { event: "job.sync_file.request", jobId: req.params.jobId, relativePath: body.relativePath },
+      "Single-file sync requested"
+    );
     try {
       const state = await stateRepo.loadState();
       const result = await syncSingleFileForJob(state, req.params.jobId, body.relativePath);
       await stateRepo.saveState(state);
+       app.log.info(
+        {
+          event: "job.sync_file.success",
+          jobId: req.params.jobId,
+          relativePath: result.relativePath,
+          kind: result.kind,
+          sizeBytes: result.sizeBytes,
+          destinationPath: result.destinationPath
+        },
+        "Single-file sync completed"
+      );
       return { synced: true as const, ...result };
     } catch (error) {
       const message = (error as Error).message;
+      app.log.warn(
+        { event: "job.sync_file.error", jobId: req.params.jobId, relativePath: body.relativePath, message },
+        "Single-file sync failed"
+      );
       if (message === "Job not found") {
         return reply.code(404).send({ message });
       }
@@ -3331,13 +3401,25 @@ app.post<{ Params: { jobId: string }; Body: { relativePath: string; side: "sourc
   "/api/jobs/:jobId/delete-file",
   async (req, reply) => {
     const body = jobDeleteFileSchema.parse(req.body ?? {});
+    app.log.info(
+      { event: "job.delete_file.request", jobId: req.params.jobId, relativePath: body.relativePath, side: body.side },
+      "Single-file delete requested"
+    );
     try {
       const state = await stateRepo.loadState();
       const result = await deleteSingleFileForJob(state, req.params.jobId, body.relativePath, body.side);
       await stateRepo.saveState(state);
+      app.log.info(
+        { event: "job.delete_file.success", jobId: req.params.jobId, relativePath: result.relativePath, side: result.side },
+        "Single-file delete completed"
+      );
       return result;
     } catch (error) {
       const message = (error as Error).message;
+      app.log.warn(
+        { event: "job.delete_file.error", jobId: req.params.jobId, relativePath: body.relativePath, side: body.side, message },
+        "Single-file delete failed"
+      );
       if (message === "Job not found" || message === "File not found") {
         return reply.code(404).send({ message });
       }

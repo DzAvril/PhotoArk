@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { InlineAlert } from "../components/inline-alert";
-import { TablePagination } from "../components/table/table-pagination";
 import { deleteJobFile, getJobDiff, getJobs, getStorageMediaStreamUrl, getStorages, runJob, syncJobFile } from "../lib/api";
 import type { BackupJob, JobDiffFile, JobDiffItem, JobDiffKind, JobDiffResult, JobDiffStatus, StorageTarget } from "../types/api";
 
@@ -150,8 +149,6 @@ export function JobDiffPage() {
   const [selectedJobId, setSelectedJobId] = useState("");
   const [kindFilter, setKindFilter] = useState<"all" | JobDiffKind>("all");
   const [hideSame, setHideSame] = useState(true);
-  const [page, setPage] = useState(1);
-  const pageSize = 120;
   const [result, setResult] = useState<JobDiffResult | null>(null);
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [hoveredItemId, setHoveredItemId] = useState<string | null>(null);
@@ -178,10 +175,6 @@ export function JobDiffPage() {
     [jobs, storageById]
   );
 
-  useEffect(() => {
-    setPage(1);
-  }, [selectedJobId, kindFilter]);
-
   const loadDiff = useCallback(
     async (forceRefresh = false) => {
       if (!selectedJobId) {
@@ -203,13 +196,11 @@ export function JobDiffPage() {
         const res = await getJobDiff(selectedJobId, {
           status: "all",
           kind: kindFilter,
-          page,
-          pageSize,
-          refresh: forceRefresh
+          refresh: forceRefresh,
+          all: true
         });
         if (requestSeqRef.current !== reqSeq) return;
         setResult(res);
-        setPage(res.page);
       } catch (err) {
         if (requestSeqRef.current !== reqSeq) return;
         setResult(null);
@@ -223,7 +214,7 @@ export function JobDiffPage() {
         }
       }
     },
-    [selectedJobId, kindFilter, page, pageSize]
+    [selectedJobId, kindFilter]
   );
 
   useEffect(() => {
@@ -559,7 +550,6 @@ export function JobDiffPage() {
             </div>
           </div>
 
-          {result ? <TablePagination page={result.page} totalPages={result.totalPages} onChange={setPage} /> : null}
         </article>
 
         <aside className="mp-panel p-3 md:min-h-0 md:overflow-auto">

@@ -266,6 +266,7 @@ export function getJobDiff(
     page?: number;
     pageSize?: number;
     refresh?: boolean;
+    all?: boolean;
   }
 ) {
   const q = new URLSearchParams();
@@ -278,6 +279,7 @@ export function getJobDiff(
     q.set("pageSize", String(normalizedPageSize));
   }
   if (query?.refresh) q.set("refresh", "1");
+  if (query?.all) q.set("all", "1");
   const suffix = q.toString() ? `?${q.toString()}` : "";
   return fetchJson<JobDiffResult>(`/api/jobs/${jobId}/diff${suffix}`);
 }

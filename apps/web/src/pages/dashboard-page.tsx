@@ -481,7 +481,7 @@ function SourceActivityPieChart({ data }: { data: SourceMediaActivity }) {
 
   const total = slices.reduce((sum, item) => sum + item.value, 0);
   if (!total) {
-    return <p className="px-2 py-6 text-center text-sm mp-muted">当前年份暂无新增媒体</p>;
+    return <p className="px-2 py-6 text-center text-sm mp-muted">当前年份暂无媒体文件</p>;
   }
 
   const cx = 72;
@@ -511,7 +511,7 @@ function SourceActivityPieChart({ data }: { data: SourceMediaActivity }) {
           ))}
           <circle cx={cx} cy={cy} r={innerRadius} fill="var(--ark-surface)" />
           <text x={cx} y={cy - 4} textAnchor="middle" className="fill-[var(--ark-ink-soft)] text-[10px]">
-            总新增
+            总文件
           </text>
           <text x={cx} y={cy + 12} textAnchor="middle" className="fill-[var(--ark-ink)] text-[14px] font-semibold">
             {total}
@@ -549,7 +549,7 @@ function SourceActivityHeatmap({
   const [hoveredDate, setHoveredDate] = useState<SourceMediaActivity["days"][number] | null>(null);
 
   if (!data || !data.days.length) {
-    return <p className="text-sm mp-muted">暂无源目录活跃数据</p>;
+    return <p className="text-sm mp-muted">暂无媒体日期分布数据</p>;
   }
 
   const firstDate = new Date(`${data.days[0].date}T00:00:00`);
@@ -565,9 +565,9 @@ function SourceActivityHeatmap({
     <div className="rounded-2xl border border-[var(--ark-line)] bg-[var(--ark-surface)] p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-lg font-semibold text-[var(--ark-ink)]">
-          {data.year} 年新增媒体 {data.totalAddedCount} 个
+          {data.year} 年媒体文件分布（共 {data.totalAddedCount} 个）
         </p>
-        <span className="text-xs mp-muted">源目录 {data.sourceRootCount} · 单日峰值 {data.maxDailyCount}</span>
+        <span className="text-xs mp-muted">统计目录 {data.sourceRootCount} · 单日峰值 {data.maxDailyCount}</span>
       </div>
 
       <div className="mt-2.5 grid items-start gap-2.5 lg:grid-cols-[minmax(0,1fr)_220px]">
@@ -575,7 +575,7 @@ function SourceActivityHeatmap({
           <div className="min-h-5 text-xs mp-muted">
             {hoveredDate ? (
               <span>
-                {hoveredDate.date} · 新增 {hoveredDate.count}（图片 {hoveredDate.imageCount} / 视频 {hoveredDate.videoCount} / Live Photo {hoveredDate.livePhotoCount}）
+                {hoveredDate.date} · 文件 {hoveredDate.count}（图片 {hoveredDate.imageCount} / 视频 {hoveredDate.videoCount} / Live Photo {hoveredDate.livePhotoCount}）
               </span>
             ) : (
               <span>{data.startDate} - {data.endDate}</span>
@@ -618,7 +618,7 @@ function SourceActivityHeatmap({
                               onMouseLeave={() => setHoveredDate((prev) => (prev?.date === cell.date ? null : prev))}
                               onFocus={() => setHoveredDate(cell)}
                               onBlur={() => setHoveredDate((prev) => (prev?.date === cell.date ? null : prev))}
-                              aria-label={`${cell.date} 新增 ${cell.count}`}
+                              aria-label={`${cell.date} 文件 ${cell.count}`}
                             />
                           );
                         })}
@@ -1290,7 +1290,7 @@ export function DashboardPage() {
       >
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h3 className="text-base font-semibold">源目录新增热力图</h3>
+            <h3 className="text-base font-semibold">媒体日期分布热力图</h3>
           </div>
         </div>
 
