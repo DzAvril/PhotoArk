@@ -4,7 +4,7 @@ const tabs = [
   { to: "/settings", label: "通知", icon: "bell" },
   { to: "/settings/storages", label: "存储", icon: "storage" },
   { to: "/settings/jobs", label: "任务", icon: "job" },
-  { to: "/settings/diff", label: "差异", icon: "diff" }
+  { to: "/settings/advanced", label: "高级", icon: "advanced" }
 ];
 
 function TabIcon({ kind }: { kind: (typeof tabs)[number]["icon"] }) {
@@ -33,11 +33,25 @@ function TabIcon({ kind }: { kind: (typeof tabs)[number]["icon"] }) {
       </svg>
     );
   }
+  if (kind === "advanced") {
+    return (
+      <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" aria-hidden="true">
+        <path
+          d="M10 3.7a1 1 0 0 1 1.8-.6l.4.6c.2.3.5.4.8.4l.8-.1a1 1 0 0 1 1.1 1.5l-.4.7a.9.9 0 0 0 0 .8l.4.7a1 1 0 0 1-1.1 1.5l-.8-.1a.9.9 0 0 0-.8.4l-.4.6a1 1 0 0 1-1.8 0l-.4-.6a.9.9 0 0 0-.8-.4l-.8.1a1 1 0 0 1-1.1-1.5l.4-.7a.9.9 0 0 0 0-.8l-.4-.7A1 1 0 0 1 7 4l.8.1c.3.1.6-.1.8-.4l.4-.6A1 1 0 0 1 10 3.7Z"
+          stroke="currentColor"
+          strokeWidth="1.5"
+        />
+        <circle cx="10" cy="7" r="1.5" fill="currentColor" />
+        <path d="M10 10.5v4.3M8.1 13.1h3.8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      </svg>
+    );
+  }
   return (
     <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" aria-hidden="true">
-      <path d="M3.5 5h5.8M3.5 10h13M10.7 15h5.8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-      <circle cx="11" cy="5" r="1.7" fill="currentColor" />
-      <circle cx="8.4" cy="15" r="1.7" fill="currentColor" />
+      <path d="M3.5 5h12.8M3.5 10h12.8M3.5 15h12.8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <circle cx="6.2" cy="5" r="1.4" fill="currentColor" />
+      <circle cx="13.8" cy="10" r="1.4" fill="currentColor" />
+      <circle cx="8.8" cy="15" r="1.4" fill="currentColor" />
     </svg>
   );
 }

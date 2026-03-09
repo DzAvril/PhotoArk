@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { InlineAlert } from "../components/inline-alert";
 import { TablePagination } from "../components/table/table-pagination";
-import { getJobDiff, getJobs, getStorageMediaStreamUrl, getStorages, runJob } from "../lib/api";
+import { deleteJobFile, getJobDiff, getJobs, getStorageMediaStreamUrl, getStorages, runJob, syncJobFile } from "../lib/api";
 import type { BackupJob, JobDiffFile, JobDiffItem, JobDiffKind, JobDiffResult, JobDiffStatus, StorageTarget } from "../types/api";
 
 function isLocalStorageType(type: StorageTarget["type"]): boolean {
@@ -37,27 +37,19 @@ function formatSignedMs(value: number | null): string {
 function getStatusLabel(status: JobDiffStatus): string {
   if (status === "source_only") return "仅源目录";
   if (status === "destination_only") return "仅目标目录";
-  return "内容差异";
+  if (status === "changed") return "元数据/内容差异";
+  return "完全一致";
 }
 
 function getStatusChipClass(status: JobDiffStatus): string {
-  if (status === "source_only") return "mp-chip border-sky-200 bg-sky-50 text-sky-700";
+  if (status === "source_only") return "mp-chip border-rose-200 bg-rose-50 text-rose-700";
   if (status === "destination_only") return "mp-chip border-violet-200 bg-violet-50 text-violet-700";
-  return "mp-chip mp-chip-warning";
+  if (status === "changed") return "mp-chip mp-chip-warning";
+  return "mp-chip mp-chip-success";
 }
 
 function getKindLabel(kind: JobDiffKind): string {
   return kind === "video" ? "视频" : "图片";
-}
-
-function describeItemSize(item: JobDiffItem): string {
-  if (item.status === "source_only") {
-    return `源 ${formatBytes(item.source?.sizeBytes ?? 0)}`;
-  }
-  if (item.status === "destination_only") {
-    return `目标 ${formatBytes(item.destination?.sizeBytes ?? 0)}`;
-  }
-  return `源 ${formatBytes(item.source?.sizeBytes ?? 0)} / 目标 ${formatBytes(item.destination?.sizeBytes ?? 0)}`;
 }
 
 function describeChangeReason(item: JobDiffItem): string {
@@ -68,61 +60,80 @@ function describeChangeReason(item: JobDiffItem): string {
   return "-";
 }
 
-function DiffFilePreview({
+function getCellColorClass(item: JobDiffItem, side: "source" | "destination"): string {
+  if (item.status === "same") return "bg-emerald-500 shadow-[0_0_0_1px_rgba(22,163,74,0.28)_inset]";
+  if (item.status === "changed") return "bg-amber-400 shadow-[0_0_0_1px_rgba(217,119,6,0.28)_inset]";
+  if (item.status === "source_only") {
+    return side === "source"
+      ? "bg-rose-500 shadow-[0_0_0_1px_rgba(190,18,60,0.28)_inset]"
+      : "bg-slate-300 shadow-[0_0_0_1px_rgba(100,116,139,0.22)_inset]";
+  }
+  return side === "destination"
+    ? "bg-rose-500 shadow-[0_0_0_1px_rgba(190,18,60,0.28)_inset]"
+    : "bg-slate-300 shadow-[0_0_0_1px_rgba(100,116,139,0.22)_inset]";
+}
+
+function getSquareSizePx(item: JobDiffItem): number {
+  const candidateSize = Math.max(item.source?.sizeBytes ?? 0, item.destination?.sizeBytes ?? 0);
+  if (!candidateSize) return 11;
+  const kb = Math.max(1, candidateSize / 1024);
+  const adaptive = 11 + Math.log2(kb) * 1.7;
+  return Math.max(10, Math.min(22, Math.round(adaptive)));
+}
+
+function buildHoverTitle(item: JobDiffItem): string {
+  const lines: string[] = [item.relativePath, `状态: ${getStatusLabel(item.status)}`, `类型: ${getKindLabel(item.kind)}`];
+  if (item.source) {
+    lines.push(`源: ${formatBytes(item.source.sizeBytes)} · ${formatDateTime(item.source.modifiedAt)}`);
+  } else {
+    lines.push("源: 无文件");
+  }
+  if (item.destination) {
+    lines.push(`目标: ${formatBytes(item.destination.sizeBytes)} · ${formatDateTime(item.destination.modifiedAt)}`);
+  } else {
+    lines.push("目标: 无文件");
+  }
+  if (item.status === "changed") {
+    lines.push(`Diff: ${describeChangeReason(item)} · 时间差 ${formatSignedMs(item.mtimeDeltaMs)}`);
+  }
+  return lines.join("\n");
+}
+
+function DiffFileMeta({
   title,
-  storageId,
-  kind,
   file
 }: {
   title: string;
-  storageId: string;
-  kind: JobDiffKind;
   file: JobDiffFile | null;
 }) {
-  const [previewFailed, setPreviewFailed] = useState(false);
-  useEffect(() => {
-    setPreviewFailed(false);
-  }, [file?.absolutePath, storageId, kind]);
-
   if (!file) {
     return (
       <div className="rounded-xl border border-dashed border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-3">
         <p className="text-xs font-semibold mp-muted">{title}</p>
-        <div className="mt-2 flex aspect-[4/3] items-center justify-center rounded-lg border border-dashed border-[var(--ark-line)] bg-[var(--ark-surface)] text-sm mp-muted">
+        <div className="mt-2 rounded-lg border border-dashed border-[var(--ark-line)] bg-[var(--ark-surface)] px-3 py-2 text-sm mp-muted">
           该侧无文件
         </div>
       </div>
     );
   }
 
-  const streamUrl = getStorageMediaStreamUrl(storageId, file.absolutePath);
   return (
     <div className="rounded-xl border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-3">
       <p className="text-xs font-semibold mp-muted">{title}</p>
-      <div className="mt-2 overflow-hidden rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface)]">
-        {previewFailed ? (
-          <div className="flex aspect-[4/3] items-center justify-center text-sm mp-muted">预览失败</div>
-        ) : kind === "video" ? (
-          <video
-            className="aspect-[4/3] h-full w-full bg-black"
-            controls
-            preload="metadata"
-            src={streamUrl}
-            onError={() => setPreviewFailed(true)}
-          />
-        ) : (
-          <img
-            className="aspect-[4/3] h-full w-full object-contain bg-black/5"
-            src={streamUrl}
-            alt={title}
-            loading="lazy"
-            onError={() => setPreviewFailed(true)}
-          />
-        )}
-      </div>
-      <p className="mt-2 text-xs mp-muted">
-        {formatBytes(file.sizeBytes)} · {formatDateTime(file.modifiedAt)}
-      </p>
+      <dl className="mt-2 space-y-1 rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface)] px-3 py-2 text-xs">
+        <div className="flex items-start justify-between gap-3">
+          <dt className="mp-muted">体积</dt>
+          <dd className="text-right font-medium">{formatBytes(file.sizeBytes)}</dd>
+        </div>
+        <div className="flex items-start justify-between gap-3">
+          <dt className="mp-muted">修改时间</dt>
+          <dd className="text-right font-medium">{formatDateTime(file.modifiedAt)}</dd>
+        </div>
+        <div className="flex items-start justify-between gap-3">
+          <dt className="mp-muted">路径</dt>
+          <dd className="max-w-[70%] break-all text-right font-medium">{file.absolutePath}</dd>
+        </div>
+      </dl>
     </div>
   );
 }
@@ -130,21 +141,29 @@ function DiffFilePreview({
 export function JobDiffPage() {
   const navigate = useNavigate();
   const requestSeqRef = useRef(0);
+  const leftPaneRef = useRef<HTMLDivElement | null>(null);
+  const rightPaneRef = useRef<HTMLDivElement | null>(null);
+  const syncScrollSourceRef = useRef<"left" | "right" | null>(null);
+
   const [jobs, setJobs] = useState<BackupJob[]>([]);
   const [storages, setStorages] = useState<StorageTarget[]>([]);
   const [selectedJobId, setSelectedJobId] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"all" | JobDiffStatus>("all");
   const [kindFilter, setKindFilter] = useState<"all" | JobDiffKind>("all");
-  const [searchInput, setSearchInput] = useState("");
-  const [keyword, setKeyword] = useState("");
+  const [hideSame, setHideSame] = useState(true);
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(30);
+  const pageSize = 120;
   const [result, setResult] = useState<JobDiffResult | null>(null);
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
+  const [hoveredItemId, setHoveredItemId] = useState<string | null>(null);
   const [loadingSetup, setLoadingSetup] = useState(true);
   const [loadingDiff, setLoadingDiff] = useState(false);
   const [refreshingDiff, setRefreshingDiff] = useState(false);
   const [runningSync, setRunningSync] = useState(false);
+  const [syncingFile, setSyncingFile] = useState(false);
+  const [deletingFile, setDeletingFile] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewSide, setPreviewSide] = useState<"source" | "destination">("source");
+  const [previewFailed, setPreviewFailed] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
 
@@ -160,21 +179,15 @@ export function JobDiffPage() {
   );
 
   useEffect(() => {
-    const timer = window.setTimeout(() => {
-      setKeyword(searchInput.trim());
-    }, 220);
-    return () => window.clearTimeout(timer);
-  }, [searchInput]);
-
-  useEffect(() => {
     setPage(1);
-  }, [selectedJobId, statusFilter, kindFilter, keyword, pageSize]);
+  }, [selectedJobId, kindFilter]);
 
   const loadDiff = useCallback(
     async (forceRefresh = false) => {
       if (!selectedJobId) {
         setResult(null);
         setSelectedItemId(null);
+        setHoveredItemId(null);
         return;
       }
 
@@ -188,9 +201,8 @@ export function JobDiffPage() {
 
       try {
         const res = await getJobDiff(selectedJobId, {
-          status: statusFilter,
+          status: "all",
           kind: kindFilter,
-          keyword,
           page,
           pageSize,
           refresh: forceRefresh
@@ -198,15 +210,11 @@ export function JobDiffPage() {
         if (requestSeqRef.current !== reqSeq) return;
         setResult(res);
         setPage(res.page);
-        setSelectedItemId((prev) => {
-          if (!res.items.length) return null;
-          if (prev && res.items.some((item) => item.id === prev)) return prev;
-          return res.items[0].id;
-        });
       } catch (err) {
         if (requestSeqRef.current !== reqSeq) return;
         setResult(null);
         setSelectedItemId(null);
+        setHoveredItemId(null);
         setError((err as Error).message);
       } finally {
         if (requestSeqRef.current === reqSeq) {
@@ -215,7 +223,7 @@ export function JobDiffPage() {
         }
       }
     },
-    [selectedJobId, statusFilter, kindFilter, keyword, page, pageSize]
+    [selectedJobId, kindFilter, page, pageSize]
   );
 
   useEffect(() => {
@@ -257,12 +265,71 @@ export function JobDiffPage() {
     void loadDiff(false);
   }, [loadDiff]);
 
+  const displayItems = useMemo(() => {
+    const rows = result?.items ?? [];
+    if (!hideSame) return rows;
+    return rows.filter((item) => item.status !== "same");
+  }, [result, hideSame]);
+
+  useEffect(() => {
+    if (!displayItems.length) {
+      setSelectedItemId(null);
+      setHoveredItemId(null);
+      return;
+    }
+    if (selectedItemId && displayItems.some((item) => item.id === selectedItemId)) return;
+    setSelectedItemId(displayItems[0].id);
+  }, [displayItems, selectedItemId]);
+
   const selectedItem = useMemo(
-    () => result?.items.find((item) => item.id === selectedItemId) ?? result?.items[0] ?? null,
-    [result, selectedItemId]
+    () => displayItems.find((item) => item.id === selectedItemId) ?? displayItems[0] ?? null,
+    [displayItems, selectedItemId]
   );
 
-  const selectedJob = useMemo(() => diffableJobs.find((item) => item.id === selectedJobId) ?? null, [diffableJobs, selectedJobId]);
+  const hoveredItem = useMemo(
+    () => displayItems.find((item) => item.id === hoveredItemId) ?? null,
+    [displayItems, hoveredItemId]
+  );
+
+  const detailItem = hoveredItem ?? selectedItem;
+  const previewSourceAvailable = Boolean(detailItem?.source && result);
+  const previewDestinationAvailable = Boolean(detailItem?.destination && result);
+  const previewStorageId =
+    detailItem && result
+      ? previewSide === "source"
+        ? result.job.sourceStorageId
+        : result.job.destinationStorageId
+      : "";
+  const previewFile =
+    detailItem ? (previewSide === "source" ? (detailItem.source ?? detailItem.destination) : (detailItem.destination ?? detailItem.source)) : null;
+  const previewStreamUrl = previewOpen && previewFile ? getStorageMediaStreamUrl(previewStorageId, previewFile.absolutePath) : "";
+  const previewTitle = previewSide === "source" ? "源目录预览" : "目标目录预览";
+
+  function handleLeftPaneScroll() {
+    const source = leftPaneRef.current;
+    const target = rightPaneRef.current;
+    if (!source || !target) return;
+    if (syncScrollSourceRef.current === "right") return;
+    syncScrollSourceRef.current = "left";
+    target.scrollTop = source.scrollTop;
+    target.scrollLeft = source.scrollLeft;
+    window.requestAnimationFrame(() => {
+      if (syncScrollSourceRef.current === "left") syncScrollSourceRef.current = null;
+    });
+  }
+
+  function handleRightPaneScroll() {
+    const source = rightPaneRef.current;
+    const target = leftPaneRef.current;
+    if (!source || !target) return;
+    if (syncScrollSourceRef.current === "left") return;
+    syncScrollSourceRef.current = "right";
+    target.scrollTop = source.scrollTop;
+    target.scrollLeft = source.scrollLeft;
+    window.requestAnimationFrame(() => {
+      if (syncScrollSourceRef.current === "right") syncScrollSourceRef.current = null;
+    });
+  }
 
   async function handleRunSync() {
     if (!selectedJobId) return;
@@ -277,6 +344,63 @@ export function JobDiffPage() {
     } finally {
       setRunningSync(false);
     }
+  }
+
+  async function handleSyncSelectedFile() {
+    if (!selectedJobId || !detailItem) return;
+    if (detailItem.status === "same") return;
+    if (detailItem.status === "destination_only") {
+      setError("该文件仅存在于目标目录，当前仅支持按源目录 -> 目标目录同步单文件。");
+      return;
+    }
+    setSyncingFile(true);
+    setError("");
+    try {
+      await syncJobFile(selectedJobId, detailItem.relativePath);
+      setMessage(`已同步文件：${detailItem.relativePath}`);
+      await loadDiff(true);
+      setSelectedItemId(detailItem.id);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setSyncingFile(false);
+    }
+  }
+
+  async function handleDeleteSelectedFile() {
+    if (!selectedJobId || !detailItem) return;
+    if (detailItem.status !== "source_only" && detailItem.status !== "destination_only") return;
+    const side = detailItem.status === "source_only" ? "source" : "destination";
+    const confirmText =
+      side === "source"
+        ? "确认删除源目录中的该文件吗？此操作不可恢复。"
+        : "确认删除目标目录中的该文件吗？此操作不可恢复。";
+    if (!window.confirm(confirmText)) return;
+    setDeletingFile(true);
+    setError("");
+    try {
+      await deleteJobFile(selectedJobId, detailItem.relativePath, side);
+      setMessage(`已删除${side === "source" ? "源目录" : "目标目录"}文件：${detailItem.relativePath}`);
+      await loadDiff(true);
+      setSelectedItemId(null);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setDeletingFile(false);
+    }
+  }
+
+  function handleOpenPreview() {
+    if (!detailItem || !result) return;
+    const initialSide: "source" | "destination" = detailItem.source ? "source" : "destination";
+    setPreviewSide(initialSide);
+    setPreviewFailed(false);
+    setPreviewOpen(true);
+  }
+
+  function handleClosePreview() {
+    setPreviewOpen(false);
+    setPreviewFailed(false);
   }
 
   return (
@@ -295,19 +419,8 @@ export function JobDiffPage() {
       <div className="mp-panel mp-panel-soft p-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h3 className="text-base font-semibold">同步差异浏览</h3>
-            <p className="mt-1 text-sm mp-muted">按任务对比源目录与目标目录差异，支持图片/视频预览。</p>
+            <h3 className="text-base font-semibold">目录差异</h3>
           </div>
-          {result ? (
-            <div className="flex flex-wrap gap-2 text-sm">
-              <span className="mp-chip">总差异 {result.summary.totalDiffCount}</span>
-              <span className="mp-chip border-sky-200 bg-sky-50 text-sky-700">仅源 {result.summary.sourceOnlyCount}</span>
-              <span className="mp-chip mp-chip-warning">内容差异 {result.summary.changedCount}</span>
-              <span className="mp-chip border-violet-200 bg-violet-50 text-violet-700">
-                仅目标 {result.summary.destinationOnlyCount}
-              </span>
-            </div>
-          ) : null}
         </div>
 
         <div className="mt-3 grid gap-2 md:grid-cols-[minmax(0,1fr)_auto_auto_auto]">
@@ -345,35 +458,18 @@ export function JobDiffPage() {
             {runningSync ? "启动中..." : "立即同步"}
           </button>
         </div>
-        {result ? (
-          <p className="mt-2 text-xs mp-muted">
-            扫描源 {result.scan.sourceFileCount} 个媒体，目标 {result.scan.destinationFileCount} 个媒体 · 最近更新{" "}
-            {formatDateTime(result.generatedAt)}
-          </p>
-        ) : null}
+
+        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+          <span className="inline-flex items-center gap-1"><span className="h-3 w-3 rounded-sm bg-emerald-500" /> 相同</span>
+          <span className="inline-flex items-center gap-1"><span className="h-3 w-3 rounded-sm bg-amber-400" /> 差异</span>
+          <span className="inline-flex items-center gap-1"><span className="h-3 w-3 rounded-sm bg-rose-500" /> 独有</span>
+          <span className="inline-flex items-center gap-1"><span className="h-3 w-3 rounded-sm bg-slate-300" /> 缺失</span>
+        </div>
       </div>
 
-      <div className="grid gap-3 md:min-h-0 md:flex-1 xl:grid-cols-[minmax(0,1fr)_360px]">
+      <div className="grid gap-3 md:min-h-0 md:flex-1 xl:grid-cols-[minmax(0,1fr)_390px]">
         <article className="mp-panel p-3 md:flex md:min-h-0 md:flex-col">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="mp-segment">
-              {[
-                { value: "all", label: "全部" },
-                { value: "source_only", label: "仅源" },
-                { value: "changed", label: "差异" },
-                { value: "destination_only", label: "仅目标" }
-              ].map((item) => (
-                <button
-                  key={item.value}
-                  type="button"
-                  className="mp-segment-item"
-                  aria-pressed={statusFilter === item.value}
-                  onClick={() => setStatusFilter(item.value as "all" | JobDiffStatus)}
-                >
-                  {item.label}
-                </button>
-              ))}
-            </div>
             <div className="mp-segment">
               {[
                 { value: "all", label: "全部类型" },
@@ -394,118 +490,212 @@ export function JobDiffPage() {
           </div>
 
           <div className="mt-2 flex flex-col gap-2 sm:flex-row">
-            <label className="relative block w-full">
-              <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--ark-ink-soft)]">
-                <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4" aria-hidden="true">
-                  <circle cx="11" cy="11" r="6.5" stroke="currentColor" strokeWidth="1.7" />
-                  <path d="M16 16 20 20" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
-                </svg>
-              </span>
-              <input
-                className="mp-input mp-input-with-icon w-full pr-10"
-                placeholder="搜索相对路径"
-                value={searchInput}
-                onChange={(event) => setSearchInput(event.target.value)}
-              />
-              {searchInput ? (
-                <button
-                  type="button"
-                  className="absolute right-2 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-[var(--ark-ink-soft)] transition-colors hover:bg-[var(--ark-surface-soft)] hover:text-[var(--ark-ink)]"
-                  aria-label="清空搜索"
-                  onClick={() => setSearchInput("")}
-                >
-                  <svg viewBox="0 0 20 20" fill="none" className="h-3.5 w-3.5" aria-hidden="true">
-                    <path d="M5 5 15 15M15 5 5 15" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
-                  </svg>
-                </button>
-              ) : null}
-            </label>
-            <select className="mp-select sm:w-[110px]" value={pageSize} onChange={(event) => setPageSize(Number(event.target.value))}>
-              <option value={20}>20 / 页</option>
-              <option value={30}>30 / 页</option>
-              <option value={50}>50 / 页</option>
-            </select>
+            <button
+              type="button"
+              className={`mp-btn ${hideSame ? "mp-btn-primary" : ""}`}
+              onClick={() => setHideSame((prev) => !prev)}
+            >
+              {hideSame ? "显示相同项" : "隐藏相同项"}
+            </button>
           </div>
 
-          <div className="mt-3 space-y-2 md:min-h-0 md:flex-1 md:overflow-auto">
-            {loadingSetup || loadingDiff ? (
-              <p className="py-12 text-center text-sm mp-muted">加载差异中...</p>
-            ) : !selectedJobId ? (
-              <p className="py-12 text-center text-sm mp-muted">暂无可比对的本地同步任务，请先创建 local {"->"} local 任务。</p>
-            ) : result && result.items.length > 0 ? (
-              result.items.map((item) => {
-                const active = selectedItem?.id === item.id;
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    className={`w-full rounded-xl border p-3 text-left transition ${
-                      active
-                        ? "border-[var(--ark-primary)] bg-[var(--ark-primary-soft)]/35"
-                        : "border-[var(--ark-line)] bg-[var(--ark-surface-soft)] hover:border-[var(--ark-line-strong)]"
-                    }`}
-                    onClick={() => setSelectedItemId(item.id)}
-                  >
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <p className="max-w-full break-all text-sm font-semibold">{item.relativePath}</p>
-                      <span className={getStatusChipClass(item.status)}>{getStatusLabel(item.status)}</span>
-                    </div>
-                    <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
-                      <span className="mp-chip">{getKindLabel(item.kind)}</span>
-                      <span className="mp-chip">{describeItemSize(item)}</span>
-                      {item.status === "changed" ? (
-                        <span className="mp-chip">原因 {describeChangeReason(item)}</span>
-                      ) : null}
-                    </div>
-                  </button>
-                );
-              })
-            ) : (
-              <p className="py-12 text-center text-sm mp-muted">当前筛选条件下没有差异项。</p>
-            )}
+          <div className="mt-3 grid gap-2 md:min-h-0 md:flex-1 md:grid-cols-2">
+            <div className="rounded-xl border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-2">
+              <div className="mb-2 flex items-center justify-between">
+                <p className="text-xs font-semibold">源目录视图</p>
+                <span className="text-[11px] mp-muted">{result ? result.job.sourceStorageName : "-"}</span>
+              </div>
+              <div ref={leftPaneRef} className="h-[44vh] overflow-auto rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface)] p-2" onScroll={handleLeftPaneScroll}>
+                <div className="flex flex-wrap content-start gap-1.5">
+                  {displayItems.map((item) => {
+                    const size = getSquareSizePx(item);
+                    const active = selectedItem?.id === item.id;
+                    return (
+                      <button
+                        key={`left:${item.id}`}
+                        type="button"
+                        title={buildHoverTitle(item)}
+                        className={`rounded-[3px] transition-transform ${getCellColorClass(item, "source")} ${active ? "ring-2 ring-[var(--ark-primary)]" : ""}`}
+                        style={{ width: `${size}px`, height: `${size}px` }}
+                        onMouseEnter={() => setHoveredItemId(item.id)}
+                        onMouseLeave={() => setHoveredItemId((prev) => (prev === item.id ? null : prev))}
+                        onFocus={() => setHoveredItemId(item.id)}
+                        onBlur={() => setHoveredItemId((prev) => (prev === item.id ? null : prev))}
+                        onClick={() => setSelectedItemId(item.id)}
+                      />
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-2">
+              <div className="mb-2 flex items-center justify-between">
+                <p className="text-xs font-semibold">目标目录视图</p>
+                <span className="text-[11px] mp-muted">{result ? result.job.destinationStorageName : "-"}</span>
+              </div>
+              <div ref={rightPaneRef} className="h-[44vh] overflow-auto rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface)] p-2" onScroll={handleRightPaneScroll}>
+                <div className="flex flex-wrap content-start gap-1.5">
+                  {displayItems.map((item) => {
+                    const size = getSquareSizePx(item);
+                    const active = selectedItem?.id === item.id;
+                    return (
+                      <button
+                        key={`right:${item.id}`}
+                        type="button"
+                        title={buildHoverTitle(item)}
+                        className={`rounded-[3px] transition-transform ${getCellColorClass(item, "destination")} ${active ? "ring-2 ring-[var(--ark-primary)]" : ""}`}
+                        style={{ width: `${size}px`, height: `${size}px` }}
+                        onMouseEnter={() => setHoveredItemId(item.id)}
+                        onMouseLeave={() => setHoveredItemId((prev) => (prev === item.id ? null : prev))}
+                        onFocus={() => setHoveredItemId(item.id)}
+                        onBlur={() => setHoveredItemId((prev) => (prev === item.id ? null : prev))}
+                        onClick={() => setSelectedItemId(item.id)}
+                      />
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
           </div>
 
           {result ? <TablePagination page={result.page} totalPages={result.totalPages} onChange={setPage} /> : null}
         </article>
 
         <aside className="mp-panel p-3 md:min-h-0 md:overflow-auto">
-          <h4 className="text-sm font-semibold">差异预览</h4>
-          {selectedItem && result ? (
+          <h4 className="text-sm font-semibold">选中项信息</h4>
+          {detailItem && result ? (
             <div className="mt-2 space-y-3">
               <div className="rounded-xl border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-3">
-                <p className="break-all text-sm font-semibold">{selectedItem.relativePath}</p>
+                <p className="break-all text-sm font-semibold">{detailItem.relativePath}</p>
                 <div className="mt-1 flex flex-wrap gap-2 text-xs">
-                  <span className={getStatusChipClass(selectedItem.status)}>{getStatusLabel(selectedItem.status)}</span>
-                  <span className="mp-chip">{getKindLabel(selectedItem.kind)}</span>
-                  <span className="mp-chip">时间差 {formatSignedMs(selectedItem.mtimeDeltaMs)}</span>
+                  <span className={getStatusChipClass(detailItem.status)}>{getStatusLabel(detailItem.status)}</span>
+                  <span className="mp-chip">{getKindLabel(detailItem.kind)}</span>
+                  <span className="mp-chip">时间差 {formatSignedMs(detailItem.mtimeDeltaMs)}</span>
                 </div>
+                {detailItem.status !== "same" ? (
+                  <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs text-amber-800">
+                    <p>Diff: {detailItem.status === "changed" ? describeChangeReason(detailItem) : getStatusLabel(detailItem.status)}</p>
+                  </div>
+                ) : null}
+                {detailItem.status !== "same" ? (
+                  <div className="mt-2">
+                    <button
+                      type="button"
+                      className="mp-btn mp-btn-primary"
+                      disabled={syncingFile || detailItem.status === "destination_only"}
+                      onClick={() => void handleSyncSelectedFile()}
+                    >
+                      {syncingFile ? "同步中..." : "仅同步该文件"}
+                    </button>
+                    {detailItem.status === "destination_only" ? (
+                      <p className="mt-1 text-xs mp-muted">该文件仅在目标目录存在，无法从源目录执行单文件同步。</p>
+                    ) : null}
+                    {(detailItem.status === "source_only" || detailItem.status === "destination_only") ? (
+                      <div className="mt-2">
+                        <button
+                          type="button"
+                          className="mp-btn"
+                          disabled={deletingFile}
+                          onClick={() => void handleDeleteSelectedFile()}
+                        >
+                          {deletingFile
+                            ? "删除中..."
+                            : detailItem.status === "source_only"
+                              ? "删除源目录该文件"
+                              : "删除目标目录该文件"}
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+                {detailItem ? (
+                  <div className="mt-2">
+                    <button type="button" className="mp-btn" disabled={!previewSourceAvailable && !previewDestinationAvailable} onClick={handleOpenPreview}>
+                      预览
+                    </button>
+                  </div>
+                ) : null}
               </div>
 
-              <DiffFilePreview
+              <DiffFileMeta
                 title={`源目录 · ${result.job.sourceStorageName}`}
-                storageId={result.job.sourceStorageId}
-                kind={selectedItem.kind}
-                file={selectedItem.source}
+                file={detailItem.source}
               />
-              <DiffFilePreview
+              <DiffFileMeta
                 title={`目标目录 · ${result.job.destinationStorageName}`}
-                storageId={result.job.destinationStorageId}
-                kind={selectedItem.kind}
-                file={selectedItem.destination}
+                file={detailItem.destination}
               />
             </div>
           ) : (
-            <p className="mt-3 text-sm mp-muted">选择左侧差异项后，在此查看双侧预览。</p>
+            <p className="mt-3 text-sm mp-muted">点击方块查看详情。</p>
           )}
         </aside>
       </div>
 
-      {selectedJob ? (
-        <p className="text-xs mp-muted">
-          当前任务路径：源 {selectedJob.sourcePath}
-          {" -> "}
-          目标 {selectedJob.destinationPath}
-        </p>
+      {previewOpen && detailItem && previewFile ? (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/55 p-4">
+          <div className="w-full max-w-4xl rounded-xl border border-[var(--ark-line)] bg-[var(--ark-surface)] p-3 shadow-2xl">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <p className="text-sm font-semibold">{previewTitle}</p>
+                <p className="text-xs mp-muted">{detailItem.relativePath}</p>
+              </div>
+              <div className="flex items-center gap-2">
+                {previewSourceAvailable && previewDestinationAvailable ? (
+                  <div className="mp-segment">
+                    <button
+                      type="button"
+                      className="mp-segment-item"
+                      aria-pressed={previewSide === "source"}
+                      onClick={() => {
+                        setPreviewSide("source");
+                        setPreviewFailed(false);
+                      }}
+                    >
+                      源
+                    </button>
+                    <button
+                      type="button"
+                      className="mp-segment-item"
+                      aria-pressed={previewSide === "destination"}
+                      onClick={() => {
+                        setPreviewSide("destination");
+                        setPreviewFailed(false);
+                      }}
+                    >
+                      目标
+                    </button>
+                  </div>
+                ) : null}
+                <button type="button" className="mp-btn" onClick={handleClosePreview}>
+                  关闭
+                </button>
+              </div>
+            </div>
+            <div className="mt-3 rounded-lg border border-[var(--ark-line)] bg-black/70 p-2">
+              {previewFailed ? (
+                <div className="flex h-[68vh] items-center justify-center text-sm text-white/75">预览失败</div>
+              ) : detailItem.kind === "video" ? (
+                <video
+                  className="h-[68vh] w-full rounded-md bg-black object-contain"
+                  controls
+                  preload="metadata"
+                  src={previewStreamUrl}
+                  onError={() => setPreviewFailed(true)}
+                />
+              ) : (
+                <img
+                  className="h-[68vh] w-full rounded-md bg-black object-contain"
+                  src={previewStreamUrl}
+                  alt={detailItem.relativePath}
+                  loading="eager"
+                  onError={() => setPreviewFailed(true)}
+                />
+              )}
+            </div>
+          </div>
+        </div>
       ) : null}
     </section>
   );

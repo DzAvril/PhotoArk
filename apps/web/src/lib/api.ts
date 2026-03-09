@@ -21,6 +21,7 @@ import type {
   StorageRelationEdgeItem,
   StorageRelationNodeItem,
   StorageMediaSummaryItem,
+  SourceMediaActivity,
   StorageTarget,
   VersionInfo
 } from "../types/api";
@@ -189,6 +190,14 @@ export function getStorageRelations() {
   return fetchJson<{ nodes: StorageRelationNodeItem[]; edges: StorageRelationEdgeItem[] }>("/api/storages/relations");
 }
 
+export function getSourceMediaActivity(year?: number) {
+  const q = new URLSearchParams();
+  if (typeof year === "number" && Number.isFinite(year)) {
+    q.set("year", String(Math.round(year)));
+  }
+  return fetchJson<SourceMediaActivity>(`/api/dashboard/source-activity?${q.toString()}`);
+}
+
 export function getMediaIndexStatus() {
   return fetchJson<{ maxAgeMs: number; items: MediaIndexStatusItem[] }>("/api/media-index");
 }
@@ -251,7 +260,7 @@ export function getJobs() {
 export function getJobDiff(
   jobId: string,
   query?: {
-    status?: "all" | "source_only" | "destination_only" | "changed";
+    status?: "all" | "source_only" | "destination_only" | "changed" | "same";
     kind?: "all" | "image" | "video";
     keyword?: string;
     page?: number;
@@ -264,7 +273,10 @@ export function getJobDiff(
   if (query?.kind && query.kind !== "all") q.set("kind", query.kind);
   if (query?.keyword?.trim()) q.set("keyword", query.keyword.trim());
   if (query?.page && query.page > 1) q.set("page", String(query.page));
-  if (query?.pageSize) q.set("pageSize", String(query.pageSize));
+  if (query?.pageSize) {
+    const normalizedPageSize = Math.max(1, Math.min(200, Math.round(query.pageSize)));
+    q.set("pageSize", String(normalizedPageSize));
+  }
   if (query?.refresh) q.set("refresh", "1");
   const suffix = q.toString() ? `?${q.toString()}` : "";
   return fetchJson<JobDiffResult>(`/api/jobs/${jobId}/diff${suffix}`);
@@ -290,6 +302,32 @@ export function deleteJob(jobId: string) {
 
 export function runJob(jobId: string) {
   return fetchJson<{ execution: JobExecution }>(`/api/jobs/${jobId}/run`, { method: "POST" });
+}
+
+export function syncJobFile(jobId: string, relativePath: string) {
+  return fetchJson<{
+    synced: true;
+    relativePath: string;
+    kind: "photo" | "video" | "live_photo_image" | "live_photo_video";
+    sizeBytes: number;
+    capturedAt: string;
+    destinationPath: string;
+  }>(`/api/jobs/${jobId}/sync-file`, {
+    method: "POST",
+    body: JSON.stringify({ relativePath })
+  });
+}
+
+export function deleteJobFile(jobId: string, relativePath: string, side: "source" | "destination") {
+  return fetchJson<{
+    deleted: true;
+    relativePath: string;
+    side: "source" | "destination";
+    deletedPath: string;
+  }>(`/api/jobs/${jobId}/delete-file`, {
+    method: "POST",
+    body: JSON.stringify({ relativePath, side })
+  });
 }
 
 export function getJobExecutions() {

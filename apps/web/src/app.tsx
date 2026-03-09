@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { getCurrentUser, getStoredAuthToken, logout, onAuthRequired, setStoredAuthToken } from "./lib/api";
 import { AppShell } from "./layout/app-shell";
+import { AdvancedSettingsPage } from "./pages/advanced-settings-page";
 import { BackupsPage } from "./pages/backups-page";
 import { DashboardPage } from "./pages/dashboard-page";
 import { JobDiffPage } from "./pages/job-diff-page";
@@ -93,6 +94,7 @@ export function App() {
       <Route path="/" element={<AppShell authUser={authUser} onLogout={handleLogout} />}>
         <Route index element={<DashboardPage />} />
         <Route path="media" element={<MediaPage />} />
+        <Route path="diff" element={<JobDiffPage />} />
         <Route path="records" element={<BackupsPage />} />
         <Route path="backups" element={<Navigate to="/records" replace />} />
         <Route path="storages" element={<Navigate to="/settings/storages" replace />} />
@@ -102,7 +104,8 @@ export function App() {
           <Route path="notifications" element={<SettingsPage />} />
           <Route path="storages" element={<StoragesPage />} />
           <Route path="jobs" element={<JobsPage />} />
-          <Route path="diff" element={<JobDiffPage />} />
+          <Route path="diff" element={<Navigate to="/diff" replace />} />
+          <Route path="advanced" element={<AdvancedSettingsPage />} />
         </Route>
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

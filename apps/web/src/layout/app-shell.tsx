@@ -7,6 +7,7 @@ import type { AuthUser, VersionInfo } from "../types/api";
 const tabs = [
   { to: "/", label: "总览" },
   { to: "/media", label: "媒体" },
+  { to: "/diff", label: "差异" },
   { to: "/records", label: "记录" },
   { to: "/settings", label: "配置" }
 ] as const;
@@ -28,6 +29,15 @@ function NavTabIcon({ to, className }: { to: TabPath; className?: string }) {
         <rect x="2.8" y="3.2" width="14.4" height="13.6" rx="2.2" stroke="currentColor" strokeWidth="1.7" />
         <circle cx="7" cy="7" r="1.4" fill="currentColor" />
         <path d="M4.8 14.6 8.1 11.3 10.6 13.8 13.1 11.2 15.2 13.3" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  if (to === "/diff") {
+    return (
+      <svg viewBox="0 0 20 20" fill="none" className={className} aria-hidden="true">
+        <path d="M3.5 5h5.8M10.7 15h5.8M3.5 10h13" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+        <circle cx="11" cy="5" r="1.5" fill="currentColor" />
+        <circle cx="8.7" cy="15" r="1.5" fill="currentColor" />
       </svg>
     );
   }
@@ -67,9 +77,10 @@ function normalizePathname(pathname: string) {
 function getPageMeta(pathname: string) {
   if (pathname === "/") return { title: "总览", subtitle: "多存储目标备份、浏览与任务调度" };
   if (pathname === "/media") return { title: "媒体预览", subtitle: "按存储浏览图片和视频" };
+  if (pathname === "/diff") return { title: "差异浏览", subtitle: "查看源目录与目标目录的媒体差异并预览" };
   if (pathname === "/records") return { title: "执行记录", subtitle: "查看任务历史执行结果" };
   if (pathname.startsWith("/settings/jobs")) return { title: "任务配置", subtitle: "管理备份任务与执行策略" };
-  if (pathname.startsWith("/settings/diff")) return { title: "差异浏览", subtitle: "查看源目录与目标目录的媒体差异并预览" };
+  if (pathname.startsWith("/settings/advanced")) return { title: "高级配置", subtitle: "索引与诊断工具，仅在排障时使用" };
   if (pathname.startsWith("/settings/storages")) return { title: "存储配置", subtitle: "管理源存储和目标存储" };
   if (pathname.startsWith("/settings/notifications")) return { title: "通知配置", subtitle: "配置 Telegram 通知" };
   if (pathname.startsWith("/settings")) return { title: "配置中心", subtitle: "通知、存储、任务统一管理" };
@@ -249,7 +260,7 @@ export function AppShell({ authUser, onLogout }: AppShellProps) {
 
       <nav className="fixed inset-x-2 bottom-[max(0.5rem,env(safe-area-inset-bottom))] z-50 md:hidden">
         <div className="mp-panel px-2 py-2">
-          <ul className="grid grid-cols-4 gap-1.5">
+          <ul className="grid grid-cols-5 gap-1.5">
             {tabs.map((tab) => (
               <li key={tab.to}>
                 <NavLink

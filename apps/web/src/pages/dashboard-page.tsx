@@ -1,11 +1,12 @@
 import { motion } from "framer-motion";
-import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ConfirmDialog } from "../components/confirm-dialog";
 import { InlineAlert } from "../components/inline-alert";
 import {
   getJobExecutions,
   getJobs,
+  getSourceMediaActivity,
   getStorageCapacities,
   getStorageMediaSummary,
   getStorageRelations,
@@ -14,6 +15,7 @@ import {
 import type {
   BackupJob,
   JobExecution,
+  SourceMediaActivity,
   StorageCapacityItem,
   StorageMediaSummaryItem,
   StorageRelationEdgeItem,
@@ -41,15 +43,6 @@ type RenderedRelationEdge = {
   description: string;
   isRunning: boolean;
   isInteractive: boolean;
-};
-
-type RelationGraphDragState = {
-  pointerId: number;
-  startX: number;
-  startY: number;
-  startLeft: number;
-  startTop: number;
-  moved: boolean;
 };
 
 const mediaColors = {
@@ -467,10 +460,220 @@ function PieStatCard({
   );
 }
 
+const ACTIVITY_LEVEL_COLORS = ["#cbd5e1", "#b7e4c7", "#95d5b2", "#74c69d", "#52b788"] as const;
+const MONTH_LABELS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"] as const;
+
+function resolveActivityLevel(count: number, maxCount: number): number {
+  if (count <= 0 || maxCount <= 0) return 0;
+  const ratio = count / maxCount;
+  if (ratio < 0.25) return 1;
+  if (ratio < 0.5) return 2;
+  if (ratio < 0.75) return 3;
+  return 4;
+}
+
+function SourceActivityPieChart({ data }: { data: SourceMediaActivity }) {
+  const slices = [
+    { key: "image", label: "图片", value: data.imageAddedCount, color: "#3b82f6" },
+    { key: "video", label: "视频", value: data.videoAddedCount, color: "#f59e0b" },
+    { key: "live", label: "Live Photo", value: data.livePhotoAddedCount, color: "#22c55e" }
+  ].filter((item) => item.value > 0);
+
+  const total = slices.reduce((sum, item) => sum + item.value, 0);
+  if (!total) {
+    return <p className="px-2 py-6 text-center text-sm mp-muted">当前年份暂无新增媒体</p>;
+  }
+
+  const cx = 72;
+  const cy = 72;
+  const outerRadius = 54;
+  const innerRadius = 30;
+  let angle = -90;
+
+  const arcs = slices.map((slice) => {
+    const sweep = (slice.value / total) * 360;
+    const start = angle;
+    const end = angle + sweep;
+    angle = end;
+    return {
+      ...slice,
+      percent: toPercent((slice.value / total) * 100),
+      path: describeDonutSlicePath(cx, cy, outerRadius, innerRadius, start, end)
+    };
+  });
+
+  return (
+    <div className="p-0.5">
+      <div className="flex flex-col items-center gap-1.5">
+        <svg viewBox="0 0 144 144" className="h-[118px] w-[118px] shrink-0">
+          {arcs.map((arc) => (
+            <path key={arc.key} d={arc.path} fill={arc.color} stroke="#ffffff" strokeWidth={1.1} />
+          ))}
+          <circle cx={cx} cy={cy} r={innerRadius} fill="var(--ark-surface)" />
+          <text x={cx} y={cy - 4} textAnchor="middle" className="fill-[var(--ark-ink-soft)] text-[10px]">
+            总新增
+          </text>
+          <text x={cx} y={cy + 12} textAnchor="middle" className="fill-[var(--ark-ink)] text-[14px] font-semibold">
+            {total}
+          </text>
+        </svg>
+        <div className="w-full space-y-0.5">
+          {arcs.map((arc) => (
+            <div key={`legend:${arc.key}`} className="flex items-center justify-between gap-2 text-xs">
+              <span className="inline-flex min-w-0 items-center gap-1.5">
+                <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: arc.color }} />
+                <span className="truncate">{arc.label}</span>
+              </span>
+              <span className="shrink-0 text-[var(--ark-ink-soft)]">
+                {arc.value} · {arc.percent}%
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SourceActivityHeatmap({
+  data,
+  selectedYear,
+  loading,
+  onSelectYear
+}: {
+  data: SourceMediaActivity | null;
+  selectedYear: number;
+  loading: boolean;
+  onSelectYear: (year: number) => void;
+}) {
+  const [hoveredDate, setHoveredDate] = useState<SourceMediaActivity["days"][number] | null>(null);
+
+  if (!data || !data.days.length) {
+    return <p className="text-sm mp-muted">暂无源目录活跃数据</p>;
+  }
+
+  const firstDate = new Date(`${data.days[0].date}T00:00:00`);
+  const firstDayOfWeek = (firstDate.getDay() + 6) % 7;
+  const leadingPlaceholders = Array.from({ length: firstDayOfWeek }, () => null as null | SourceMediaActivity["days"][number]);
+  const cells = [...leadingPlaceholders, ...data.days];
+  const columns: Array<Array<null | SourceMediaActivity["days"][number]>> = [];
+  for (let index = 0; index < cells.length; index += 7) {
+    columns.push(cells.slice(index, index + 7));
+  }
+
+  return (
+    <div className="rounded-2xl border border-[var(--ark-line)] bg-[var(--ark-surface)] p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-lg font-semibold text-[var(--ark-ink)]">
+          {data.year} 年新增媒体 {data.totalAddedCount} 个
+        </p>
+        <span className="text-xs mp-muted">源目录 {data.sourceRootCount} · 单日峰值 {data.maxDailyCount}</span>
+      </div>
+
+      <div className="mt-2.5 grid items-start gap-2.5 lg:grid-cols-[minmax(0,1fr)_220px]">
+        <div className="rounded-xl border border-[var(--ark-line)] bg-[var(--ark-surface)] p-2.5">
+          <div className="min-h-5 text-xs mp-muted">
+            {hoveredDate ? (
+              <span>
+                {hoveredDate.date} · 新增 {hoveredDate.count}（图片 {hoveredDate.imageCount} / 视频 {hoveredDate.videoCount} / Live Photo {hoveredDate.livePhotoCount}）
+              </span>
+            ) : (
+              <span>{data.startDate} - {data.endDate}</span>
+            )}
+          </div>
+
+          <div className="mt-1.5 grid items-start gap-2 lg:grid-cols-[minmax(0,1fr)_250px]">
+            <div className="overflow-x-auto pb-1">
+              <div className="inline-block min-w-[760px]">
+                <div className="mb-1 ml-9 flex items-center justify-between text-[10px] mp-muted">
+                  {MONTH_LABELS.map((month) => (
+                    <span key={`month:${month}`}>{month}</span>
+                  ))}
+                </div>
+                <div className="inline-flex gap-1.5">
+                  <div className="grid grid-rows-7 gap-1 text-[11px] mp-muted">
+                  <span className="h-3 leading-3">Mon</span>
+                  <span className="h-3 leading-3 opacity-0">Tue</span>
+                  <span className="h-3 leading-3">Wed</span>
+                  <span className="h-3 leading-3 opacity-0">Thu</span>
+                  <span className="h-3 leading-3">Fri</span>
+                  <span className="h-3 leading-3 opacity-0">Sat</span>
+                  <span className="h-3 leading-3 opacity-0">Sun</span>
+                  </div>
+                  <div className="inline-flex gap-1">
+                    {columns.map((column, columnIndex) => (
+                      <div key={`col:${columnIndex}`} className="grid grid-rows-7 gap-1">
+                        {column.map((cell, rowIndex) => {
+                          if (!cell) {
+                            return <span key={`empty:${columnIndex}:${rowIndex}`} className="h-3 w-3 rounded-[2px] bg-transparent" />;
+                          }
+                          const level = resolveActivityLevel(cell.count, data.maxDailyCount);
+                          return (
+                            <button
+                              key={`day:${cell.date}`}
+                              type="button"
+                              className="h-3 w-3 rounded-[2px] border border-black/10 transition-transform hover:scale-[1.12] focus:scale-[1.12]"
+                              style={{ backgroundColor: ACTIVITY_LEVEL_COLORS[level] }}
+                              onMouseEnter={() => setHoveredDate(cell)}
+                              onMouseLeave={() => setHoveredDate((prev) => (prev?.date === cell.date ? null : prev))}
+                              onFocus={() => setHoveredDate(cell)}
+                              onBlur={() => setHoveredDate((prev) => (prev?.date === cell.date ? null : prev))}
+                              aria-label={`${cell.date} 新增 ${cell.count}`}
+                            />
+                          );
+                        })}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <SourceActivityPieChart data={data} />
+            </div>
+          </div>
+
+          <div className="mt-1.5 flex items-center gap-1 text-xs mp-muted">
+            <span>少</span>
+            {ACTIVITY_LEVEL_COLORS.map((color) => (
+              <span key={color} className="h-3 w-3 rounded-[2px] border border-black/10" style={{ backgroundColor: color }} />
+            ))}
+            <span>多</span>
+          </div>
+        </div>
+
+        <div className="self-start w-full rounded-xl border border-[var(--ark-line)] bg-[var(--ark-surface)] p-1.5">
+          <div className="max-h-[160px] space-y-1 overflow-auto pr-1">
+            {[...new Set([data.year, ...data.years])].sort((a, b) => b - a).slice(0, 12).map((year) => (
+              <button
+                key={`year:${year}`}
+                type="button"
+                className={`w-full rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors ${
+                  year === selectedYear
+                    ? "bg-blue-600 text-white"
+                    : "text-[var(--ark-ink-soft)] hover:bg-[var(--ark-surface-soft)] hover:text-[var(--ark-ink)]"
+                }`}
+                onClick={() => onSelectYear(year)}
+                disabled={loading && year === selectedYear}
+              >
+                {year}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function DashboardPage() {
   const navigate = useNavigate();
   const [capacities, setCapacities] = useState<StorageCapacityItem[]>([]);
   const [storageMediaSummary, setStorageMediaSummary] = useState<StorageMediaSummaryItem[]>([]);
+  const [sourceActivity, setSourceActivity] = useState<SourceMediaActivity | null>(null);
+  const [selectedActivityYear, setSelectedActivityYear] = useState(new Date().getFullYear());
+  const [loadingActivity, setLoadingActivity] = useState(false);
   const [relationNodes, setRelationNodes] = useState<StorageRelationNodeItem[]>([]);
   const [relationEdges, setRelationEdges] = useState<StorageRelationEdgeItem[]>([]);
   const [jobs, setJobs] = useState<BackupJob[]>([]);
@@ -482,13 +685,8 @@ export function DashboardPage() {
   const [startingSync, setStartingSync] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
-  const [isRelationGraphDragging, setIsRelationGraphDragging] = useState(false);
-  const [isRelationGraphPannable, setIsRelationGraphPannable] = useState(false);
 
   const hadActiveExecutionRef = useRef(false);
-  const relationGraphViewportRef = useRef<HTMLDivElement | null>(null);
-  const relationGraphDragRef = useRef<RelationGraphDragState | null>(null);
-  const suppressRelationGraphClickRef = useRef(false);
 
   async function refreshRelationGraph() {
     const relationRes = await getStorageRelations();
@@ -519,6 +717,32 @@ export function DashboardPage() {
   useEffect(() => {
     void loadAll();
   }, []);
+
+  useEffect(() => {
+    let canceled = false;
+    async function loadSourceActivity() {
+      setLoadingActivity(true);
+      try {
+        const res = await getSourceMediaActivity(selectedActivityYear);
+        if (canceled) return;
+        setSourceActivity(res);
+        if (res.year !== selectedActivityYear) {
+          setSelectedActivityYear(res.year);
+        }
+      } catch (err) {
+        if (canceled) return;
+        setError((err as Error).message);
+      } finally {
+        if (!canceled) {
+          setLoadingActivity(false);
+        }
+      }
+    }
+    void loadSourceActivity();
+    return () => {
+      canceled = true;
+    };
+  }, [selectedActivityYear]);
 
   useEffect(() => {
     let disposed = false;
@@ -757,103 +981,7 @@ export function DashboardPage() {
 
   const summaryTone = getCapacityTone(capacitySummary.freePercent);
 
-  useEffect(() => {
-    const viewport = relationGraphViewportRef.current;
-    if (!viewport) {
-      setIsRelationGraphPannable(false);
-      return;
-    }
-
-    const updatePannable = () => {
-      const canPanX = viewport.scrollWidth - viewport.clientWidth > 2;
-      const canPanY = viewport.scrollHeight - viewport.clientHeight > 2;
-      const shouldCenter = viewport.scrollLeft <= 1 && viewport.scrollTop <= 1;
-      setIsRelationGraphPannable(canPanX || canPanY);
-      if (!canPanX) viewport.scrollLeft = 0;
-      if (!canPanY) viewport.scrollTop = 0;
-      if (shouldCenter && (canPanX || canPanY)) {
-        viewport.scrollLeft = Math.max(0, Math.round((viewport.scrollWidth - viewport.clientWidth) / 2));
-        viewport.scrollTop = Math.max(0, Math.round((viewport.scrollHeight - viewport.clientHeight) / 2));
-      }
-    };
-
-    updatePannable();
-    const rafId = window.requestAnimationFrame(updatePannable);
-    window.addEventListener("resize", updatePannable);
-    return () => {
-      window.cancelAnimationFrame(rafId);
-      window.removeEventListener("resize", updatePannable);
-    };
-  }, [relationNodes.length, relationGraphHeight]);
-
-  function finishRelationGraphDrag(event?: ReactPointerEvent<HTMLDivElement>) {
-    const viewport = relationGraphViewportRef.current;
-    const drag = relationGraphDragRef.current;
-    if (!drag) return;
-    if (event && drag.pointerId !== event.pointerId) return;
-
-    if (viewport && viewport.hasPointerCapture(drag.pointerId)) {
-      viewport.releasePointerCapture(drag.pointerId);
-    }
-    relationGraphDragRef.current = null;
-    setIsRelationGraphDragging(false);
-
-    if (suppressRelationGraphClickRef.current) {
-      window.setTimeout(() => {
-        suppressRelationGraphClickRef.current = false;
-      }, 0);
-    }
-  }
-
-  function resetRelationGraphViewport() {
-    const viewport = relationGraphViewportRef.current;
-    if (!viewport) return;
-    viewport.scrollTo({
-      left: Math.max(0, Math.round((viewport.scrollWidth - viewport.clientWidth) / 2)),
-      top: Math.max(0, Math.round((viewport.scrollHeight - viewport.clientHeight) / 2)),
-      behavior: "smooth"
-    });
-  }
-
-  function handleRelationGraphPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
-    const viewport = relationGraphViewportRef.current;
-    if (!viewport || !isRelationGraphPannable) return;
-    if (event.button !== 0 && event.pointerType !== "touch" && event.pointerType !== "pen") return;
-
-    relationGraphDragRef.current = {
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startY: event.clientY,
-      startLeft: viewport.scrollLeft,
-      startTop: viewport.scrollTop,
-      moved: false
-    };
-    suppressRelationGraphClickRef.current = false;
-    viewport.setPointerCapture(event.pointerId);
-    setIsRelationGraphDragging(true);
-  }
-
-  function handleRelationGraphPointerMove(event: ReactPointerEvent<HTMLDivElement>) {
-    const viewport = relationGraphViewportRef.current;
-    const drag = relationGraphDragRef.current;
-    if (!viewport || !drag || drag.pointerId !== event.pointerId) return;
-
-    const deltaX = event.clientX - drag.startX;
-    const deltaY = event.clientY - drag.startY;
-    if (!drag.moved && (Math.abs(deltaX) > 4 || Math.abs(deltaY) > 4)) {
-      drag.moved = true;
-      suppressRelationGraphClickRef.current = true;
-    }
-
-    viewport.scrollLeft = drag.startLeft - deltaX;
-    viewport.scrollTop = drag.startTop - deltaY;
-    if (drag.moved) {
-      event.preventDefault();
-    }
-  }
-
   function handleRelationEdgeClick(edgeId: string) {
-    if (suppressRelationGraphClickRef.current) return;
     const edge = edgeById.get(edgeId);
     if (!edge) return;
 
@@ -982,29 +1110,9 @@ export function DashboardPage() {
             孤立存储
           </span>
         </div>
-        {isRelationGraphPannable ? (
-          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
-            <span className="mp-chip border-sky-200 bg-sky-50 text-sky-700">可拖动画布查看遮挡区域</span>
-            <button type="button" className="mp-btn px-2 py-1 text-xs" onClick={resetRelationGraphViewport}>
-              回到中心
-            </button>
-          </div>
-        ) : null}
-
-        <div
-          ref={relationGraphViewportRef}
-          className={`mt-3 overflow-auto rounded-2xl border border-[var(--ark-line)] p-3 sm:p-4 mp-relation-graph-surface mp-relation-graph-viewport ${
-            isRelationGraphPannable ? (isRelationGraphDragging ? "cursor-grabbing select-none" : "cursor-grab") : ""
-          }`}
-          style={{ touchAction: isRelationGraphPannable ? "none" : "auto" }}
-          onPointerDown={handleRelationGraphPointerDown}
-          onPointerMove={handleRelationGraphPointerMove}
-          onPointerUp={finishRelationGraphDrag}
-          onPointerCancel={finishRelationGraphDrag}
-          onDoubleClick={resetRelationGraphViewport}
-        >
+        <div className="mt-3 overflow-hidden rounded-2xl border border-[var(--ark-line)] p-3 sm:p-4 mp-relation-graph-surface">
           {relationNodes.length ? (
-            <div className="mx-auto w-full min-w-[860px] max-w-[1320px]" style={{ aspectRatio: `${RELATION_GRAPH_WIDTH} / ${relationGraphHeight}` }}>
+            <div className="mx-auto w-full max-w-[1320px]" style={{ aspectRatio: `${RELATION_GRAPH_WIDTH} / ${relationGraphHeight}` }}>
               <svg viewBox={`0 0 ${RELATION_GRAPH_WIDTH} ${relationGraphHeight}`} className="h-full w-full" role="img" aria-label="存储同步关系图">
                 <defs>
                   <marker id="relation-arrow-synced" markerWidth="12" markerHeight="12" refX="8.8" refY="6" orient="auto">
@@ -1171,6 +1279,28 @@ export function DashboardPage() {
               暂无同步任务连线，当前均为孤立存储目录。
             </p>
           ) : null}
+        </div>
+      </motion.article>
+
+      <motion.article
+        className="mp-panel p-4"
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.06, duration: 0.2, ease: "easeOut" }}
+      >
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h3 className="text-base font-semibold">源目录新增热力图</h3>
+          </div>
+        </div>
+
+        <div className="mt-3">
+          <SourceActivityHeatmap
+            data={sourceActivity}
+            selectedYear={selectedActivityYear}
+            loading={loadingActivity}
+            onSelectYear={setSelectedActivityYear}
+          />
         </div>
       </motion.article>
 

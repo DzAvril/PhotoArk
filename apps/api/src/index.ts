@@ -1,7 +1,7 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { createReadStream } from "node:fs";
-import { copyFile, mkdir, readdir, readFile, stat, statfs, utimes } from "node:fs/promises";
+import { copyFile, mkdir, readdir, readFile, stat, statfs, unlink, utimes } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import Fastify, { type FastifyReply } from "fastify";
@@ -145,12 +145,23 @@ const mediaIndexRebuildSchema = z.object({
 });
 
 const jobDiffQuerySchema = z.object({
-  status: z.enum(["all", "source_only", "destination_only", "changed"]).optional(),
+  status: z.enum(["all", "source_only", "destination_only", "changed", "same"]).optional(),
   kind: z.enum(["all", "image", "video"]).optional(),
   keyword: z.string().optional(),
   page: z.coerce.number().int().min(1).optional(),
   pageSize: z.coerce.number().int().min(1).max(200).optional(),
   refresh: z.union([z.string(), z.boolean()]).optional()
+});
+
+const jobSyncFileSchema = z.object({
+  relativePath: z.string().min(1)
+});
+const jobDeleteFileSchema = z.object({
+  relativePath: z.string().min(1),
+  side: z.enum(["source", "destination"])
+});
+const sourceActivityQuerySchema = z.object({
+  year: z.coerce.number().int().min(2000).max(2100).optional()
 });
 
 const settingsSchema = z.object({
@@ -624,6 +635,138 @@ async function buildStorageMediaSummary(state: BackupState): Promise<StorageMedi
   return items.sort((a, b) => a.storageName.localeCompare(b.storageName, "zh-CN"));
 }
 
+function formatLocalDateKeyFromMs(ms: number): string {
+  const date = new Date(ms);
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+async function buildSourceMediaActivity(state: BackupState, dayCount: number): Promise<{
+  year: number;
+  years: number[];
+  days: Array<{
+    date: string;
+    count: number;
+    imageCount: number;
+    videoCount: number;
+    livePhotoCount: number;
+  }>;
+  sourceRootCount: number;
+  totalAddedCount: number;
+  imageAddedCount: number;
+  videoAddedCount: number;
+  livePhotoAddedCount: number;
+  maxDailyCount: number;
+  startDate: string;
+  endDate: string;
+}> {
+  const requestedYear = Number.isFinite(dayCount) ? Math.round(dayCount) : NaN;
+  const currentYear = new Date().getFullYear();
+  const selectedYear = Number.isFinite(requestedYear) && requestedYear >= 2000 && requestedYear <= 2100 ? requestedYear : currentYear;
+  const storageById = new Map(state.storages.map((storage) => [storage.id, storage]));
+  const sourceRoots = new Set<string>();
+
+  for (const job of state.jobs) {
+    const storage = storageById.get(job.sourceTargetId);
+    if (!storage || !isLocalStorage(storage.type)) continue;
+    try {
+      const rootPath = resolvePathInStorage(storage, job.sourcePath);
+      sourceRoots.add(rootPath);
+    } catch {
+      // Ignore invalid source path for this job.
+    }
+  }
+
+  const startDate = new Date(selectedYear, 0, 1);
+  const endDate = new Date(selectedYear, 11, 31);
+  const daysInYear = Math.round((new Date(selectedYear + 1, 0, 1).getTime() - startDate.getTime()) / (24 * 60 * 60 * 1000));
+  const startMs = startDate.getTime();
+  const endExclusiveMs = new Date(selectedYear + 1, 0, 1).getTime();
+  const counts = new Map<string, { count: number; imageCount: number; videoCount: number; livePhotoCount: number }>();
+  for (let i = 0; i < daysInYear; i += 1) {
+    const date = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate() + i);
+    counts.set(formatLocalDateKeyFromMs(date.getTime()), { count: 0, imageCount: 0, videoCount: 0, livePhotoCount: 0 });
+  }
+
+  const dedupAbsolutePath = new Set<string>();
+  const yearsWithData = new Set<number>([selectedYear]);
+  let imageAddedCount = 0;
+  let videoAddedCount = 0;
+  let livePhotoAddedCount = 0;
+
+  for (const rootPath of sourceRoots) {
+    let rows: IndexedMediaFile[] = [];
+    try {
+      rows = await collectIndexedMediaFiles(rootPath);
+    } catch (error) {
+      app.log.warn({ rootPath, err: (error as Error).message }, "Failed to scan source root for media activity");
+      continue;
+    }
+    const livePhotoIdByRelativePath = buildLivePhotoIdByRelativePath(rows.map((row) => row.relativePath));
+    const countedLivePhotoByDate = new Set<string>();
+
+    for (const row of rows) {
+      if (dedupAbsolutePath.has(row.fullPath)) continue;
+      dedupAbsolutePath.add(row.fullPath);
+      const mtimeMs = row.mtimeMs;
+      if (!Number.isFinite(mtimeMs)) continue;
+      yearsWithData.add(new Date(mtimeMs).getFullYear());
+      if (mtimeMs < startMs || mtimeMs >= endExclusiveMs) continue;
+      const dayKey = formatLocalDateKeyFromMs(mtimeMs);
+      const dayRow = counts.get(dayKey);
+      if (!dayRow) continue;
+
+      dayRow.count += 1;
+
+      const livePhotoAssetId = livePhotoIdByRelativePath.get(row.relativePath);
+      if (livePhotoAssetId) {
+        const livePhotoDayKey = `${dayKey}::${livePhotoAssetId}`;
+        if (!countedLivePhotoByDate.has(livePhotoDayKey)) {
+          countedLivePhotoByDate.add(livePhotoDayKey);
+          dayRow.livePhotoCount += 1;
+          livePhotoAddedCount += 1;
+        }
+      } else {
+        const ext = path.extname(row.relativePath).toLowerCase();
+        if (VIDEO_EXTENSIONS.has(ext)) {
+          dayRow.videoCount += 1;
+          videoAddedCount += 1;
+        } else {
+          dayRow.imageCount += 1;
+          imageAddedCount += 1;
+        }
+      }
+    }
+  }
+
+  const days = [...counts.entries()].map(([date, value]) => ({
+    date,
+    count: value.count,
+    imageCount: value.imageCount,
+    videoCount: value.videoCount,
+    livePhotoCount: value.livePhotoCount
+  }));
+  const totalAddedCount = days.reduce((sum, item) => sum + item.count, 0);
+  const maxDailyCount = days.reduce((max, item) => (item.count > max ? item.count : max), 0);
+  const years = [...yearsWithData].filter((year) => year >= 2000 && year <= 2100).sort((a, b) => b - a);
+
+  return {
+    year: selectedYear,
+    years,
+    days,
+    sourceRootCount: sourceRoots.size,
+    totalAddedCount,
+    imageAddedCount,
+    videoAddedCount,
+    livePhotoAddedCount,
+    maxDailyCount,
+    startDate: formatLocalDateKeyFromMs(startMs),
+    endDate: formatLocalDateKeyFromMs(endDate.getTime())
+  };
+}
+
 type JobRelationCheckStatus = "synced" | "lagging" | "unknown";
 
 type MediaPathSnapshotResult =
@@ -792,7 +935,9 @@ async function buildStorageRelationGraph(state: BackupState): Promise<{ nodes: S
 
 function buildEmptyJobDiffSummary(): JobDiffSummary {
   return {
+    totalComparedCount: 0,
     totalDiffCount: 0,
+    sameCount: 0,
     sourceOnlyCount: 0,
     destinationOnlyCount: 0,
     changedCount: 0,
@@ -863,6 +1008,15 @@ async function buildJobDiff(
     collectIndexedMediaFiles(sourceRoot, options.forceRefresh),
     collectIndexedMediaFiles(destinationRoot, options.forceRefresh)
   ]);
+  const assetSizeByStorageAndPath = new Map<string, number>();
+  for (const asset of state.assets) {
+    assetSizeByStorageAndPath.set(`${asset.storageTargetId}::${asset.name}`, asset.sizeBytes);
+  }
+  const resolveComparableSize = (storage: StorageTarget, relativePath: string, physicalSize: number): number => {
+    if (!storage.encrypted) return physicalSize;
+    const logicalSize = assetSizeByStorageAndPath.get(`${storage.id}::${relativePath}`);
+    return typeof logicalSize === "number" && Number.isFinite(logicalSize) && logicalSize >= 0 ? logicalSize : physicalSize;
+  };
 
   const sourceByRelativePath = new Map(sourceRows.map((row) => [row.relativePath, row]));
   const destinationByRelativePath = new Map(destinationRows.map((row) => [row.relativePath, row]));
@@ -892,8 +1046,8 @@ async function buildJobDiff(
       summary.destinationOnlyCount += 1;
       summary.destinationOnlyBytes += destinationRow.sizeBytes;
     } else if (sourceRow && destinationRow) {
-      const sourceSize = sourceRow.sizeBytes;
-      const destinationSize = destinationRow.sizeBytes;
+      const sourceSize = resolveComparableSize(sourceStorage, relativePath, sourceRow.sizeBytes);
+      const destinationSize = resolveComparableSize(destinationStorage, relativePath, destinationRow.sizeBytes);
       const sizeChanged = sourceSize !== destinationSize;
       const rawMtimeDelta = sourceRow.mtimeMs - destinationRow.mtimeMs;
       const mtimeChanged = Math.abs(rawMtimeDelta) > JOB_DIFF_MTIME_TOLERANCE_MS;
@@ -906,6 +1060,9 @@ async function buildJobDiff(
         summary.changedCount += 1;
         summary.changedSourceBytes += sourceSize;
         summary.changedDestinationBytes += destinationSize;
+      } else {
+        status = "same";
+        summary.sameCount += 1;
       }
     }
 
@@ -931,11 +1088,13 @@ async function buildJobDiff(
     });
   }
 
-  summary.totalDiffCount = diffItems.length;
+  summary.totalComparedCount = diffItems.length;
+  summary.totalDiffCount = summary.sourceOnlyCount + summary.destinationOnlyCount + summary.changedCount;
   const statusOrder: Record<JobDiffStatus, number> = {
     source_only: 0,
     changed: 1,
-    destination_only: 2
+    destination_only: 2,
+    same: 3
   };
   diffItems.sort((a, b) => {
     const statusCompare = statusOrder[a.status] - statusOrder[b.status];
@@ -1157,7 +1316,7 @@ type StorageRelationEdgeItem = {
   summary: string;
 };
 
-type JobDiffStatus = "source_only" | "destination_only" | "changed";
+type JobDiffStatus = "source_only" | "destination_only" | "changed" | "same";
 type JobDiffKind = "image" | "video";
 type JobDiffChangeReason = "size" | "mtime" | "size_mtime" | null;
 
@@ -1180,7 +1339,9 @@ type JobDiffItem = {
 };
 
 type JobDiffSummary = {
+  totalComparedCount: number;
   totalDiffCount: number;
+  sameCount: number;
   sourceOnlyCount: number;
   destinationOnlyCount: number;
   changedCount: number;
@@ -1304,6 +1465,43 @@ function normalizeMediaIndexRootPath(dirPath: string): string {
 function toSystemPathFromPosixRelative(rootPath: string, relativePath: string): string {
   const normalizedRelative = relativePath.split(path.posix.sep).join(path.sep);
   return path.resolve(rootPath, normalizedRelative);
+}
+
+function normalizePosixRelativePath(input: string): string {
+  const normalized = path.posix.normalize(input.replace(/\\/g, "/").trim()).replace(/^(\.\/)+/, "");
+  const invalid = !normalized || normalized === "." || normalized.startsWith("../") || path.posix.isAbsolute(normalized);
+  if (invalid) {
+    throw new Error("Invalid relative path");
+  }
+  return normalized;
+}
+
+async function detectLivePhotoAssetIdForRelativePath(sourceRoot: string, relativePath: string): Promise<string | undefined> {
+  const ext = path.extname(relativePath).toLowerCase();
+  const basePath = relativePath.slice(0, relativePath.length - ext.length);
+  const imageExts = [".jpg", ".jpeg", ".heic"];
+  const videoExts = [".mov"];
+
+  if (imageExts.includes(ext)) {
+    for (const candidateExt of videoExts) {
+      const candidate = `${basePath}${candidateExt}`;
+      const candidatePath = toSystemPathFromPosixRelative(sourceRoot, candidate);
+      const exists = await stat(candidatePath).then((row) => row.isFile()).catch(() => false);
+      if (exists) return `lp_${basePath.toLowerCase()}`;
+    }
+    return undefined;
+  }
+
+  if (videoExts.includes(ext)) {
+    for (const candidateExt of imageExts) {
+      const candidate = `${basePath}${candidateExt}`;
+      const candidatePath = toSystemPathFromPosixRelative(sourceRoot, candidate);
+      const exists = await stat(candidatePath).then((row) => row.isFile()).catch(() => false);
+      if (exists) return `lp_${basePath.toLowerCase()}`;
+    }
+  }
+
+  return undefined;
 }
 
 async function ensureMediaIndexLoaded() {
@@ -1892,6 +2090,147 @@ async function executeJob(
   return run;
 }
 
+async function syncSingleFileForJob(
+  state: BackupState,
+  jobId: string,
+  relativePathInput: string
+): Promise<{
+  relativePath: string;
+  kind: BackupAsset["kind"];
+  sizeBytes: number;
+  capturedAt: string;
+  destinationPath: string;
+}> {
+  const job = state.jobs.find((item) => item.id === jobId);
+  if (!job) {
+    throw new Error("Job not found");
+  }
+
+  const sourceStorage = state.storages.find((item) => item.id === job.sourceTargetId);
+  const destinationStorage = state.storages.find((item) => item.id === job.destinationTargetId);
+  if (!sourceStorage || !destinationStorage) {
+    throw new Error("Storage target for this job is missing");
+  }
+  if (!isLocalStorage(sourceStorage.type) || !isLocalStorage(destinationStorage.type)) {
+    throw new Error("Only local-to-local sync is supported in current version");
+  }
+
+  const sourceRoot = resolvePathInStorage(sourceStorage, job.sourcePath);
+  const destinationRoot = resolvePathInStorage(destinationStorage, job.destinationPath);
+  if (hasOverlappingPaths(sourceRoot, destinationRoot)) {
+    throw new Error("Source path and destination path cannot overlap");
+  }
+
+  const relativePath = normalizePosixRelativePath(relativePathInput);
+  if (!isMediaFile(relativePath)) {
+    throw new Error("Only media files can be synced");
+  }
+
+  const sourceFile = toSystemPathFromPosixRelative(sourceRoot, relativePath);
+  const destinationFile = path.join(destinationRoot, relativePath.split(path.posix.sep).join(path.sep));
+  const sourceStat = await stat(sourceFile).catch(() => null);
+  if (!sourceStat?.isFile()) {
+    throw new Error("Source file not found");
+  }
+
+  await mkdir(path.dirname(destinationFile), { recursive: true });
+  if (!sourceStorage.encrypted && !destinationStorage.encrypted) {
+    await copyFile(sourceFile, destinationFile);
+  } else if (!sourceStorage.encrypted && destinationStorage.encrypted) {
+    await encryption.encryptFile(sourceFile, destinationFile);
+  } else if (sourceStorage.encrypted && !destinationStorage.encrypted) {
+    await encryption.decryptFile(sourceFile, destinationFile);
+  } else {
+    await encryption.reencryptFile(sourceFile, destinationFile);
+  }
+  await utimes(destinationFile, sourceStat.atime, sourceStat.mtime).catch(() => undefined);
+
+  const sourceCapturedAt = sourceStat.mtime.toISOString();
+  const livePhotoAssetId = await detectLivePhotoAssetIdForRelativePath(sourceRoot, relativePath);
+  const kind = detectAssetKind(relativePath, livePhotoAssetId);
+  const existingIdx = state.assets.findIndex(
+    (asset) => asset.storageTargetId === destinationStorage.id && asset.name === relativePath
+  );
+  const nextAsset: BackupAsset = {
+    id: existingIdx >= 0 ? state.assets[existingIdx].id : `asset_${randomUUID()}`,
+    name: relativePath,
+    kind,
+    storageTargetId: destinationStorage.id,
+    encrypted: destinationStorage.encrypted,
+    sizeBytes: sourceStat.size,
+    capturedAt: sourceCapturedAt,
+    livePhotoAssetId
+  };
+  if (existingIdx >= 0) {
+    state.assets[existingIdx] = nextAsset;
+  } else {
+    state.assets.push(nextAsset);
+  }
+
+  await Promise.all([invalidateMediaIndexPath(sourceRoot), invalidateMediaIndexPath(destinationRoot)]).catch((error) => {
+    app.log.warn({ err: (error as Error).message, jobId }, "Failed to invalidate media index cache after single-file sync");
+  });
+
+  return {
+    relativePath,
+    kind,
+    sizeBytes: sourceStat.size,
+    capturedAt: sourceCapturedAt,
+    destinationPath: destinationFile
+  };
+}
+
+async function deleteSingleFileForJob(
+  state: BackupState,
+  jobId: string,
+  relativePathInput: string,
+  side: "source" | "destination"
+): Promise<{ deleted: true; relativePath: string; side: "source" | "destination"; deletedPath: string }> {
+  const job = state.jobs.find((item) => item.id === jobId);
+  if (!job) {
+    throw new Error("Job not found");
+  }
+
+  const sourceStorage = state.storages.find((item) => item.id === job.sourceTargetId);
+  const destinationStorage = state.storages.find((item) => item.id === job.destinationTargetId);
+  if (!sourceStorage || !destinationStorage) {
+    throw new Error("Storage target for this job is missing");
+  }
+  if (!isLocalStorage(sourceStorage.type) || !isLocalStorage(destinationStorage.type)) {
+    throw new Error("Only local-to-local operations are supported in current version");
+  }
+
+  const sourceRoot = resolvePathInStorage(sourceStorage, job.sourcePath);
+  const destinationRoot = resolvePathInStorage(destinationStorage, job.destinationPath);
+  if (hasOverlappingPaths(sourceRoot, destinationRoot)) {
+    throw new Error("Source path and destination path cannot overlap");
+  }
+
+  const relativePath = normalizePosixRelativePath(relativePathInput);
+  if (!isMediaFile(relativePath)) {
+    throw new Error("Only media files can be deleted");
+  }
+
+  const targetStorage = side === "source" ? sourceStorage : destinationStorage;
+  const targetRoot = side === "source" ? sourceRoot : destinationRoot;
+  const targetFile = toSystemPathFromPosixRelative(targetRoot, relativePath);
+  const targetStat = await stat(targetFile).catch(() => null);
+  if (!targetStat?.isFile()) {
+    throw new Error("File not found");
+  }
+
+  await unlink(targetFile);
+  state.assets = state.assets.filter((asset) => !(asset.storageTargetId === targetStorage.id && asset.name === relativePath));
+  await invalidateMediaIndexPath(targetRoot).catch(() => undefined);
+
+  return {
+    deleted: true as const,
+    relativePath,
+    side,
+    deletedPath: targetFile
+  };
+}
+
 function enqueueRunExecution<T>(task: () => Promise<T>): Promise<T> {
   const next = runExecutionQueue.then(task, task);
   runExecutionQueue = next.then(
@@ -2348,6 +2687,12 @@ app.get("/healthz", async () => ({ ok: true }));
 app.get("/api/metrics", async () => {
   const state = await stateRepo.loadState();
   return metricSummary(state);
+});
+
+app.get<{ Querystring: { year?: string } }>("/api/dashboard/source-activity", async (req) => {
+  const query = sourceActivityQuerySchema.parse(req.query ?? {});
+  const state = await stateRepo.loadState();
+  return buildSourceMediaActivity(state, query.year ?? new Date().getFullYear());
 });
 
 app.get("/api/version", async () => {
@@ -2828,7 +3173,7 @@ app.get("/api/jobs", async () => {
 app.get<{
   Params: { jobId: string };
   Querystring: {
-    status?: "all" | "source_only" | "destination_only" | "changed";
+    status?: "all" | "source_only" | "destination_only" | "changed" | "same";
     kind?: "all" | "image" | "video";
     keyword?: string;
     page?: string;
@@ -2959,6 +3304,47 @@ app.post<{ Params: { jobId: string } }>("/api/jobs/:jobId/run", async (req, repl
     return reply.code(400).send({ message: (error as Error).message });
   }
 });
+
+app.post<{ Params: { jobId: string }; Body: { relativePath: string } }>(
+  "/api/jobs/:jobId/sync-file",
+  async (req, reply) => {
+    const body = jobSyncFileSchema.parse(req.body ?? {});
+    try {
+      const state = await stateRepo.loadState();
+      const result = await syncSingleFileForJob(state, req.params.jobId, body.relativePath);
+      await stateRepo.saveState(state);
+      return { synced: true as const, ...result };
+    } catch (error) {
+      const message = (error as Error).message;
+      if (message === "Job not found") {
+        return reply.code(404).send({ message });
+      }
+      if (message === "Source file not found") {
+        return reply.code(404).send({ message });
+      }
+      return reply.code(400).send({ message });
+    }
+  }
+);
+
+app.post<{ Params: { jobId: string }; Body: { relativePath: string; side: "source" | "destination" } }>(
+  "/api/jobs/:jobId/delete-file",
+  async (req, reply) => {
+    const body = jobDeleteFileSchema.parse(req.body ?? {});
+    try {
+      const state = await stateRepo.loadState();
+      const result = await deleteSingleFileForJob(state, req.params.jobId, body.relativePath, body.side);
+      await stateRepo.saveState(state);
+      return result;
+    } catch (error) {
+      const message = (error as Error).message;
+      if (message === "Job not found" || message === "File not found") {
+        return reply.code(404).send({ message });
+      }
+      return reply.code(400).send({ message });
+    }
+  }
+);
 
 app.get("/api/backups", async () => {
   const state = await stateRepo.loadState();

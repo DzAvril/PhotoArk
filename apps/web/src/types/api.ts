@@ -86,6 +86,28 @@ export interface StorageMediaSummaryItem {
   totalBytes: number;
 }
 
+export interface SourceActivityDayItem {
+  date: string;
+  count: number;
+  imageCount: number;
+  videoCount: number;
+  livePhotoCount: number;
+}
+
+export interface SourceMediaActivity {
+  year: number;
+  years: number[];
+  days: SourceActivityDayItem[];
+  sourceRootCount: number;
+  totalAddedCount: number;
+  imageAddedCount: number;
+  videoAddedCount: number;
+  livePhotoAddedCount: number;
+  maxDailyCount: number;
+  startDate: string;
+  endDate: string;
+}
+
 export interface StorageRelationNodeItem {
   storageId: string;
   storageName: string;
@@ -139,7 +161,7 @@ export interface BackupJob {
   enabled: boolean;
 }
 
-export type JobDiffStatus = "source_only" | "destination_only" | "changed";
+export type JobDiffStatus = "source_only" | "destination_only" | "changed" | "same";
 export type JobDiffKind = "image" | "video";
 
 export interface JobDiffFile {
@@ -161,7 +183,9 @@ export interface JobDiffItem {
 }
 
 export interface JobDiffSummary {
+  totalComparedCount: number;
   totalDiffCount: number;
+  sameCount: number;
   sourceOnlyCount: number;
   destinationOnlyCount: number;
   changedCount: number;
