@@ -162,7 +162,7 @@ function getRelationGraphHeight(nodeCount: number): number {
 function getStorageTypeLabel(type: StorageRelationNodeItem["type"]): string {
   if (type === "local_fs") return "NAS";
   if (type === "external_ssd") return "SSD";
-  return "Cloud";
+  return "云端";
 }
 
 function isExecutionActive(execution: JobExecution): boolean {
@@ -461,7 +461,7 @@ function PieStatCard({
 }
 
 const ACTIVITY_LEVEL_COLORS = ["#cbd5e1", "#b7e4c7", "#95d5b2", "#74c69d", "#52b788"] as const;
-const MONTH_LABELS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"] as const;
+const MONTH_LABELS = ["1月", "2月", "3月", "4月", "5月", "6月", "7月", "8月", "9月", "10月", "11月", "12月"] as const;
 
 function resolveActivityLevel(count: number, maxCount: number): number {
   if (count <= 0 || maxCount <= 0) return 0;
@@ -539,11 +539,13 @@ function SourceActivityHeatmap({
   data,
   selectedYear,
   loading,
+  years,
   onSelectYear
 }: {
   data: SourceMediaActivity | null;
   selectedYear: number;
   loading: boolean;
+  years: number[];
   onSelectYear: (year: number) => void;
 }) {
   const [hoveredDate, setHoveredDate] = useState<SourceMediaActivity["days"][number] | null>(null);
@@ -592,13 +594,13 @@ function SourceActivityHeatmap({
                 </div>
                 <div className="inline-flex gap-1.5">
                   <div className="grid grid-rows-7 gap-1 text-[11px] mp-muted">
-                  <span className="h-3 leading-3">Mon</span>
-                  <span className="h-3 leading-3 opacity-0">Tue</span>
-                  <span className="h-3 leading-3">Wed</span>
-                  <span className="h-3 leading-3 opacity-0">Thu</span>
-                  <span className="h-3 leading-3">Fri</span>
-                  <span className="h-3 leading-3 opacity-0">Sat</span>
-                  <span className="h-3 leading-3 opacity-0">Sun</span>
+                    <span className="h-3 leading-3">一</span>
+                    <span className="h-3 leading-3 opacity-0">二</span>
+                    <span className="h-3 leading-3">三</span>
+                    <span className="h-3 leading-3 opacity-0">四</span>
+                    <span className="h-3 leading-3">五</span>
+                    <span className="h-3 leading-3 opacity-0">六</span>
+                    <span className="h-3 leading-3 opacity-0">日</span>
                   </div>
                   <div className="inline-flex gap-1">
                     {columns.map((column, columnIndex) => (
@@ -645,7 +647,7 @@ function SourceActivityHeatmap({
 
         <div className="self-start w-full rounded-xl border border-[var(--ark-line)] bg-[var(--ark-surface)] p-1.5">
           <div className="max-h-[160px] space-y-1 overflow-auto pr-1">
-            {[...new Set([data.year, ...data.years])].sort((a, b) => b - a).slice(0, 12).map((year) => (
+            {years.map((year) => (
               <button
                 key={`year:${year}`}
                 type="button"
@@ -687,6 +689,7 @@ export function DashboardPage() {
   const [message, setMessage] = useState("");
 
   const hadActiveExecutionRef = useRef(false);
+  const executionPollTimerRef = useRef<number | null>(null);
 
   async function refreshRelationGraph() {
     const relationRes = await getStorageRelations();
@@ -744,38 +747,6 @@ export function DashboardPage() {
     };
   }, [selectedActivityYear]);
 
-  useEffect(() => {
-    let disposed = false;
-    let timer: number | null = null;
-
-    const poll = async () => {
-      try {
-        const executionsRes = await getJobExecutions();
-        if (disposed) return;
-        setExecutions(executionsRes.items);
-      } catch {
-        // Keep the last known execution state.
-      } finally {
-        if (!disposed) {
-          timer = window.setTimeout(() => {
-            void poll();
-          }, 1200);
-        }
-      }
-    };
-
-    timer = window.setTimeout(() => {
-      void poll();
-    }, 1200);
-
-    return () => {
-      disposed = true;
-      if (timer !== null) {
-        window.clearTimeout(timer);
-      }
-    };
-  }, []);
-
   const jobById = useMemo(() => new Map(jobs.map((job) => [job.id, job])), [jobs]);
   const edgeById = useMemo(() => new Map(relationEdges.map((edge) => [edge.id, edge])), [relationEdges]);
 
@@ -803,6 +774,42 @@ export function DashboardPage() {
   }, [executions]);
 
   const hasAnyActiveExecution = activeExecutionByJobId.size > 0;
+
+  useEffect(() => {
+    let disposed = false;
+
+    const scheduleNextPoll = (delay: number) => {
+      if (executionPollTimerRef.current !== null) {
+        window.clearTimeout(executionPollTimerRef.current);
+      }
+      executionPollTimerRef.current = window.setTimeout(() => {
+        void pollExecutions();
+      }, delay);
+    };
+
+    const pollExecutions = async () => {
+      try {
+        const executionsRes = await getJobExecutions();
+        if (disposed) return;
+        setExecutions(executionsRes.items);
+        const hasActive = executionsRes.items.some((execution) => isExecutionActive(execution));
+        scheduleNextPoll(hasActive ? 1200 : 8000);
+      } catch {
+        if (!disposed) {
+          scheduleNextPoll(hasAnyActiveExecution ? 1800 : 10000);
+        }
+      }
+    };
+
+    scheduleNextPoll(hasAnyActiveExecution ? 1200 : 8000);
+
+    return () => {
+      disposed = true;
+      if (executionPollTimerRef.current !== null) {
+        window.clearTimeout(executionPollTimerRef.current);
+      }
+    };
+  }, [hasAnyActiveExecution]);
 
   useEffect(() => {
     if (hasAnyActiveExecution) {
@@ -898,6 +905,10 @@ export function DashboardPage() {
   }, [relationEdges, relationNodes]);
 
   const relationGraphHeight = useMemo(() => getRelationGraphHeight(relationNodes.length), [relationNodes.length]);
+  const activityYears = useMemo(
+    () => [...new Set(sourceActivity ? [sourceActivity.year, ...sourceActivity.years] : [])].sort((a, b) => b - a).slice(0, 12),
+    [sourceActivity]
+  );
   const nodePositions = useMemo(
     () => buildNodePositions(relationNodes, RELATION_GRAPH_WIDTH, relationGraphHeight, RELATION_NODE_RADIUS),
     [relationNodes, relationGraphHeight]
@@ -1007,7 +1018,7 @@ export function DashboardPage() {
       return;
     }
     setEdgeActionEdgeId(null);
-    navigate(`/jobs?editJobId=${encodeURIComponent(targetJobId)}`);
+    navigate(`/settings/jobs?editJobId=${encodeURIComponent(targetJobId)}`);
   }
 
   async function startManualSyncForPendingEdge() {
@@ -1295,6 +1306,7 @@ export function DashboardPage() {
             data={sourceActivity}
             selectedYear={selectedActivityYear}
             loading={loadingActivity}
+            years={activityYears}
             onSelectYear={setSelectedActivityYear}
           />
         </div>

@@ -66,6 +66,7 @@ export function AdvancedSettingsPage() {
     <div className="mp-panel mp-panel-soft p-4 md:flex md:h-full md:flex-col">
       <div>
         <h3 className="text-base font-semibold">媒体索引缓存</h3>
+        <p className="mt-1 text-sm mp-muted">用于排查媒体统计、热力图和预览索引问题。非异常情况下不建议频繁重建。</p>
       </div>
 
       {error ? (
@@ -78,6 +79,10 @@ export function AdvancedSettingsPage() {
           {message}
         </InlineAlert>
       ) : null}
+
+      <div className="mt-3 rounded-xl border border-[var(--ark-warning-line)] bg-[var(--ark-warning-bg)] p-3">
+        <p className="text-sm font-medium text-[var(--ark-warning)]">此页面面向排障和维护操作，重建索引可能持续较长时间。</p>
+      </div>
 
       <div className="mt-3 rounded-xl border border-[var(--ark-line)] bg-[var(--ark-surface)] p-3">
         <div className="flex flex-wrap items-center gap-2 text-xs">

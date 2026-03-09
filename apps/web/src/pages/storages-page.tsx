@@ -27,6 +27,12 @@ function getAriaSort(active: boolean, asc: boolean): "ascending" | "descending" 
   return asc ? "ascending" : "descending";
 }
 
+function getStorageTypeLabel(type: StorageTarget["type"]): string {
+  if (type === "local_fs") return "NAS";
+  if (type === "external_ssd") return "SSD";
+  return "115 云盘";
+}
+
 export function StoragesPage() {
   const [items, setItems] = useState<StorageTarget[]>([]);
   const [lastStorageType, setLastStorageType] = useLocalStorageState<StorageTarget["type"]>(
@@ -138,6 +144,8 @@ export function StoragesPage() {
   );
 
   const allCurrentPageSelected = table.paged.length > 0 && table.paged.every((s) => selected.has(s.id));
+  const encryptedCount = items.filter((item) => item.encrypted).length;
+  const localCount = items.filter((item) => item.type !== "cloud_115").length;
 
   return (
     <section className="space-y-3 md:flex md:h-full md:flex-col">
@@ -145,6 +153,7 @@ export function StoragesPage() {
         <div className="flex items-center justify-between">
           <div>
             <h3 className="text-base font-semibold">目标存储</h3>
+            <p className="mt-1 text-sm mp-muted">管理本地 NAS、外接 SSD 和 115 云盘等备份目标。</p>
           </div>
           <Collapsible.Trigger className="mp-btn">{formOpen ? "收起" : "新增存储"}</Collapsible.Trigger>
         </div>
@@ -160,7 +169,7 @@ export function StoragesPage() {
         ) : null}
 
         <Collapsible.Content>
-          <form onSubmit={(e) => void onSubmit(e)} className="mt-3 grid gap-2 sm:grid-cols-2">
+          <form onSubmit={(e) => void onSubmit(e)} className="mt-4 grid gap-3 sm:grid-cols-2">
             <div className="space-y-1">
               <label htmlFor="storage-name" className="text-sm font-medium">
                 名称
@@ -173,6 +182,7 @@ export function StoragesPage() {
                 onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
                 required
               />
+              <p className="text-xs mp-muted">建议带上设备角色，例如“NAS-照片库”或“移动 SSD”。</p>
             </div>
             <div className="space-y-1">
               <label htmlFor="storage-type" className="text-sm font-medium">
@@ -188,9 +198,9 @@ export function StoragesPage() {
                   setLastStorageType(nextType);
                 }}
               >
-                <option value="local_fs">local_fs</option>
-                <option value="external_ssd">external_ssd</option>
-                <option value="cloud_115">cloud_115</option>
+                <option value="local_fs">NAS</option>
+                <option value="external_ssd">SSD</option>
+                <option value="cloud_115">115 云盘</option>
               </select>
             </div>
             <div className="sm:col-span-2">
@@ -212,9 +222,12 @@ export function StoragesPage() {
                   required
                 />
               )}
+              <p className="mt-1 text-xs mp-muted">
+                {isLocalType ? "本地存储请选择实际挂载目录；建议为单一根目录，避免和其他存储重叠。" : "云存储请填写标准 URI，例如 115://photoark。"}
+              </p>
             </div>
 
-            <label className="flex items-center gap-2 text-sm">
+            <label className="mp-subtle-card flex items-center gap-2 p-3 text-sm sm:col-span-2">
               <input
                 type="checkbox"
                 checked={form.encrypted}
@@ -236,6 +249,11 @@ export function StoragesPage() {
           onPageSizeChange={table.setPageSize}
           totalItems={table.totalItems}
         />
+        <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
+          <span className="mp-chip">总存储 {items.length}</span>
+          <span className="mp-chip">本地存储 {localCount}</span>
+          <span className="mp-chip mp-chip-success">加密存储 {encryptedCount}</span>
+        </div>
         <div className="mb-2 flex justify-end">
           <button
             className="mp-btn"
@@ -266,7 +284,7 @@ export function StoragesPage() {
                     <h4 className="truncate text-sm font-semibold">{s.name}</h4>
                     <span className={s.encrypted ? "text-sm mp-status-success" : "text-sm mp-muted"}>{s.encrypted ? "加密" : "未加密"}</span>
                   </div>
-                  <p className="mt-0.5 text-sm mp-muted">{s.type}</p>
+                  <p className="mt-0.5 text-sm mp-muted">{getStorageTypeLabel(s.type)}</p>
                 </div>
               </div>
 
@@ -335,9 +353,11 @@ export function StoragesPage() {
                     />
                   </td>
                   <td className="px-2 py-2 font-medium">{s.name}</td>
-                  <td className="px-2 py-2">{s.type}</td>
+                  <td className="px-2 py-2">{getStorageTypeLabel(s.type)}</td>
                   <td className="break-all px-2 py-2 text-sm mp-muted">{s.basePath}</td>
-                  <td className="px-2 py-2">{s.encrypted ? "是" : "否"}</td>
+                  <td className="px-2 py-2">
+                    <span className={s.encrypted ? "mp-status-success" : "mp-muted"}>{s.encrypted ? "是" : "否"}</span>
+                  </td>
                 </tr>
               ))}
               {!table.paged.length ? (
@@ -364,6 +384,7 @@ export function StoragesPage() {
         title="删除存储"
         description={`将删除 ${pendingDeleteStorageIds?.length ?? 0} 个存储，删除后不可恢复。`}
         confirmText="确认删除"
+        destructive
         busy={deletingSelected}
         onCancel={() => setPendingDeleteStorageIds(null)}
         onConfirm={() => void handleDeleteSelected()}

@@ -9,7 +9,7 @@ const tabs = [
   { to: "/media", label: "媒体" },
   { to: "/diff", label: "差异" },
   { to: "/records", label: "记录" },
-  { to: "/settings", label: "配置" }
+  { to: "/settings", label: "设置" }
 ] as const;
 
 type TabPath = (typeof tabs)[number]["to"];
@@ -75,16 +75,16 @@ function normalizePathname(pathname: string) {
 }
 
 function getPageMeta(pathname: string) {
-  if (pathname === "/") return { title: "总览", subtitle: "多存储目标备份、浏览与任务调度" };
-  if (pathname === "/media") return { title: "媒体预览", subtitle: "按存储浏览图片和视频" };
+  if (pathname === "/") return { title: "总览", subtitle: "备份状态、存储分布与任务执行概览" };
+  if (pathname === "/media") return { title: "媒体浏览", subtitle: "按存储查看图片、视频与 Live Photo" };
   if (pathname === "/diff") return { title: "差异浏览", subtitle: "查看源目录与目标目录的媒体差异并预览" };
   if (pathname === "/records") return { title: "执行记录", subtitle: "查看任务历史执行结果" };
   if (pathname.startsWith("/settings/jobs")) return { title: "任务配置", subtitle: "管理备份任务与执行策略" };
   if (pathname.startsWith("/settings/advanced")) return { title: "高级配置", subtitle: "索引与诊断工具，仅在排障时使用" };
   if (pathname.startsWith("/settings/storages")) return { title: "存储配置", subtitle: "管理源存储和目标存储" };
   if (pathname.startsWith("/settings/notifications")) return { title: "通知配置", subtitle: "配置 Telegram 通知" };
-  if (pathname.startsWith("/settings")) return { title: "配置中心", subtitle: "通知、存储、任务统一管理" };
-  return { title: "PhotoArk", subtitle: "管理照片备份与多目标同步" };
+  if (pathname.startsWith("/settings")) return { title: "设置中心", subtitle: "通知、存储、任务统一管理" };
+  return { title: "PhotoArk", subtitle: "照片备份与多目标同步控制台" };
 }
 
 type AppShellProps = {
@@ -177,7 +177,7 @@ export function AppShell({ authUser, onLogout }: AppShellProps) {
                 />
                 <div>
                   <h1 className="text-lg font-bold">PhotoArk</h1>
-                  <p className="mt-0.5 text-[11px] uppercase tracking-[0.06em] mp-muted">Backup Control Center</p>
+                  <p className="mt-0.5 text-[11px] tracking-[0.04em] mp-muted">照片备份控制台</p>
                 </div>
               </div>
             </div>
@@ -223,7 +223,7 @@ export function AppShell({ authUser, onLogout }: AppShellProps) {
                   <div className="min-w-0">
                     {isDashboard ? <p className="text-xs uppercase tracking-[0.14em] text-[var(--ark-primary)]">PhotoArk</p> : null}
                     <h2 className={`break-keep font-bold tracking-tight ${isDashboard ? "mt-1 text-base sm:text-lg" : "text-base sm:text-lg"}`}>
-                      {isDashboard ? "NAS 多目标照片备份平台" : pageMeta.title}
+                      {isDashboard ? "照片备份与同步中心" : pageMeta.title}
                     </h2>
                     <p className={`break-keep text-sm mp-muted ${isDashboard ? "mt-1.5" : "mt-1"}`}>{pageMeta.subtitle}</p>
                   </div>
@@ -232,7 +232,7 @@ export function AppShell({ authUser, onLogout }: AppShellProps) {
                   <span className="mp-chip">{authUser.username}</span>
                   {renderCompactVersionBadge()}
                   <button type="button" onClick={toggleTheme} className="mp-btn">
-                    {theme === "light" ? "暗色" : "亮色"}
+                    {theme === "light" ? "深色模式" : "浅色模式"}
                   </button>
                   <button type="button" onClick={handleLogoutClick} className="mp-btn" disabled={loggingOut}>
                     {loggingOut ? "退出中..." : "退出"}

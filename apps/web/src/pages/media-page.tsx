@@ -63,6 +63,12 @@ function formatDuration(seconds: number | undefined) {
     : `${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")}`;
 }
 
+function getStorageTypeLabel(type: StorageTarget["type"]) {
+  if (type === "local_fs") return "NAS";
+  if (type === "external_ssd") return "SSD";
+  return "115 云盘";
+}
+
 function detectLivePhotoPairs(media: MediaBrowseResult | null) {
   const files = media?.files ?? [];
   const groups = new Map<string, { image: MediaFileItem | null; video: MediaFileItem | null }>();
@@ -350,7 +356,7 @@ function MediaPane({ storages }: MediaPaneProps) {
           <span className="mp-chip">总计 {mediaSummary.total}</span>
           <span className="mp-chip">图片 {mediaSummary.imageCount}</span>
           <span className="mp-chip">视频 {mediaSummary.videoCount}</span>
-          <span className="mp-chip mp-chip-success">Live {mediaSummary.liveCount}</span>
+          <span className="mp-chip mp-chip-success">Live Photo {mediaSummary.liveCount}</span>
         </div>
       </div>
       {error ? <p className="mp-error mt-3">{error}</p> : null}
@@ -374,7 +380,7 @@ function MediaPane({ storages }: MediaPaneProps) {
               }}
             >
               <option value="">选择存储</option>
-              {storages.map((s) => <option key={s.id} value={s.id}>{s.name} ({s.type})</option>)}
+              {storages.map((s) => <option key={s.id} value={s.id}>{s.name} ({getStorageTypeLabel(s.type)})</option>)}
             </select>
             <button type="button" className="mp-btn shrink-0" onClick={() => void previewMedia()} disabled={!selectedStorage || loadingMedia}>
               刷新
@@ -383,6 +389,13 @@ function MediaPane({ storages }: MediaPaneProps) {
           <p className="mt-2 text-[11px] mp-muted break-all">
             {selectedStorage ? `${selectedStorage.name} · ${selectedStorage.basePath}` : "选择存储后可浏览媒体内容"}
           </p>
+          <div className="mp-subtle-card mt-3 p-3">
+            <p className="text-xs font-semibold uppercase tracking-[0.08em] mp-muted">当前视图</p>
+            <p className="mt-1 text-sm font-medium">{selectedStorage ? `${selectedStorage.name} · ${getStorageTypeLabel(selectedStorage.type)}` : "未选择存储"}</p>
+            <p className="mt-1 text-xs mp-muted">
+              {selectedStorage ? `当前筛选结果 ${displayItems.length} 项，可点击缩略图打开大图预览。` : "选择本地存储后可浏览媒体；115 云盘当前不支持直接预览。"}
+            </p>
+          </div>
 
           <div className="mt-4">
             <p className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] mp-muted">筛选类型</p>
@@ -397,7 +410,7 @@ function MediaPane({ storages }: MediaPaneProps) {
                 视频
               </button>
               <button type="button" className="mp-segment-item" aria-pressed={kindFilter === "live"} onClick={() => setKindFilter("live")}>
-                Live
+                Live Photo
               </button>
             </div>
           </div>
@@ -544,9 +557,9 @@ function MediaPane({ storages }: MediaPaneProps) {
                           )}
                           <div className="absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-black/65 to-transparent" />
                           <div className="absolute left-2 top-2 flex items-center gap-1.5">
-                            {isLivePhoto ? <span className="rounded bg-emerald-500/85 px-1.5 py-0.5 text-[11px] font-semibold text-white">Live</span> : null}
+                            {isLivePhoto ? <span className="rounded bg-emerald-500/85 px-1.5 py-0.5 text-[11px] font-semibold text-white">Live Photo</span> : null}
                             {item.file.kind === "video" && !isLivePhoto ? (
-                              <span className="rounded bg-black/70 px-1.5 py-0.5 text-[11px] font-semibold text-white">Video</span>
+                              <span className="rounded bg-black/70 px-1.5 py-0.5 text-[11px] font-semibold text-white">视频</span>
                             ) : null}
                           </div>
                           <div className="absolute inset-x-0 bottom-0 px-2.5 pb-2 text-white">
@@ -557,7 +570,7 @@ function MediaPane({ storages }: MediaPaneProps) {
                         <div className="flex items-center justify-between gap-2 px-2.5 py-2">
                           <span className="truncate text-sm mp-muted">{formatDateTime(item.file.capturedAt ?? item.file.modifiedAt)}</span>
                           <span className="shrink-0 rounded-md border border-[var(--ark-line)] px-1.5 py-0.5 text-[11px] uppercase mp-muted">
-                            {isLivePhoto ? "live" : item.file.kind}
+                            {isLivePhoto ? "Live Photo" : item.file.kind === "video" ? "视频" : "图片"}
                           </span>
                         </div>
                       </button>

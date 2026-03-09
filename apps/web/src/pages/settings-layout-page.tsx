@@ -1,10 +1,10 @@
 import { NavLink, Outlet } from "react-router-dom";
 
 const tabs = [
-  { to: "/settings", label: "通知", icon: "bell" },
-  { to: "/settings/storages", label: "存储", icon: "storage" },
-  { to: "/settings/jobs", label: "任务", icon: "job" },
-  { to: "/settings/advanced", label: "高级", icon: "advanced" }
+  { to: "/settings", label: "通知", description: "Telegram 消息与连接参数", icon: "bell" },
+  { to: "/settings/storages", label: "存储", description: "源目录、目标目录与挂载配置", icon: "storage" },
+  { to: "/settings/jobs", label: "任务", description: "备份计划、监听模式与执行策略", icon: "job" },
+  { to: "/settings/advanced", label: "高级", description: "诊断、索引与排障工具", icon: "advanced" }
 ];
 
 function TabIcon({ kind }: { kind: (typeof tabs)[number]["icon"] }) {
@@ -59,25 +59,36 @@ function TabIcon({ kind }: { kind: (typeof tabs)[number]["icon"] }) {
 export function SettingsLayoutPage() {
   return (
     <section className="space-y-4 md:flex md:h-full md:flex-col">
-      <div className="mp-panel mp-panel-soft p-3">
-        <nav className="grid grid-cols-2 gap-2 md:grid-cols-4">
+      <div className="mp-panel mp-panel-soft p-3.5">
+        <div className="mb-3">
+          <h3 className="text-base font-semibold">设置导航</h3>
+          <p className="mt-1 text-sm mp-muted">统一管理通知、存储、任务与诊断配置。</p>
+        </div>
+        <nav className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
           {tabs.map((tab) => (
             <NavLink
               key={tab.to}
               to={tab.to}
               end={tab.to === "/settings"}
               className={({ isActive }) =>
-                `rounded-xl border px-3 py-2 text-center text-sm font-medium transition-all ${
+                `rounded-2xl border px-3 py-3 text-left transition-all ${
                   isActive
-                    ? "border-[var(--ark-primary)] bg-[var(--ark-primary)] text-white shadow-[0_8px_20px_color-mix(in_oklab,var(--ark-primary)_28%,transparent)]"
+                    ? "border-[var(--ark-primary)] bg-[var(--ark-primary)] text-white shadow-[0_10px_24px_color-mix(in_oklab,var(--ark-primary)_28%,transparent)]"
                     : "border-[var(--ark-line)] bg-[var(--ark-surface)] text-[var(--ark-ink)] hover:border-[var(--ark-line-strong)] hover:bg-[var(--ark-surface-soft)]"
                 }`
               }
             >
-              <span className="inline-flex items-center gap-1.5">
-                <TabIcon kind={tab.icon} />
-                <span>{tab.label}</span>
-              </span>
+              {({ isActive }) => (
+                <span className="flex items-start gap-3">
+                  <span className="mt-0.5 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-current/10 bg-white/10">
+                    <TabIcon kind={tab.icon} />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block text-sm font-semibold">{tab.label}</span>
+                    <span className={`mt-1 block text-xs leading-5 ${isActive ? "text-white/80" : "mp-muted"}`}>{tab.description}</span>
+                  </span>
+                </span>
+              )}
             </NavLink>
           ))}
         </nav>

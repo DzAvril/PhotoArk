@@ -48,7 +48,7 @@ export function TableToolbar({ title, search, onSearchChange, pageSize, onPageSi
         <h3 className="text-base font-semibold">{title}</h3>
         <p className="text-sm mp-muted">{search.trim() ? `筛选结果 ${totalItems} 条` : `共 ${totalItems} 条`}</p>
       </div>
-      <div className="flex w-full flex-col gap-2 sm:w-auto sm:min-w-[280px] sm:flex-row">
+      <div className="flex w-full flex-col gap-2 sm:w-auto sm:min-w-[320px] sm:flex-row sm:items-center">
         <label className="relative block w-full sm:min-w-[220px]">
           <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--ark-ink-soft)]">
             <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4" aria-hidden="true">
@@ -77,16 +77,19 @@ export function TableToolbar({ title, search, onSearchChange, pageSize, onPageSi
             </button>
           ) : null}
         </label>
-        <select
-          className="mp-select w-full sm:w-[96px]"
-          aria-label="每页条数"
-          value={pageSize}
-          onChange={(e) => onPageSizeChange(Number(e.target.value))}
-        >
-          <option value={5}>5</option>
-          <option value={10}>10</option>
-          <option value={20}>20</option>
-        </select>
+        <label className="flex items-center gap-2 text-sm mp-muted">
+          <span className="shrink-0">每页</span>
+          <select
+            className="mp-select w-full sm:w-[96px]"
+            aria-label="每页条数"
+            value={pageSize}
+            onChange={(e) => onPageSizeChange(Number(e.target.value))}
+          >
+            <option value={5}>5</option>
+            <option value={10}>10</option>
+            <option value={20}>20</option>
+          </select>
+        </label>
       </div>
       <p className="text-xs mp-muted sm:hidden">快捷键: `/` 聚焦搜索，`Esc` 清空</p>
     </div>

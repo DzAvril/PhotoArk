@@ -51,6 +51,12 @@ function getKindLabel(kind: JobDiffKind): string {
   return kind === "video" ? "视频" : "图片";
 }
 
+function getStorageTypeLabel(type: StorageTarget["type"]): string {
+  if (type === "local_fs") return "NAS";
+  if (type === "external_ssd") return "SSD";
+  return "115 云盘";
+}
+
 function describeChangeReason(item: JobDiffItem): string {
   if (item.status !== "changed") return "-";
   if (item.changeReason === "size_mtime") return "大小 + 修改时间";
@@ -403,6 +409,7 @@ export function JobDiffPage() {
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h3 className="text-base font-semibold">目录差异</h3>
+            <p className="mt-1 text-sm mp-muted">按任务对比源目录和目标目录，支持单文件同步、预览与删除。</p>
           </div>
         </div>
 
@@ -448,6 +455,16 @@ export function JobDiffPage() {
           <span className="inline-flex items-center gap-1"><span className="h-3 w-3 rounded-sm bg-rose-500" /> 独有</span>
           <span className="inline-flex items-center gap-1"><span className="h-3 w-3 rounded-sm bg-slate-300" /> 缺失</span>
         </div>
+        {result ? (
+          <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
+            <span className="mp-chip">总对比 {result.summary.totalComparedCount}</span>
+            <span className="mp-chip mp-chip-warning">差异 {result.summary.totalDiffCount}</span>
+            <span className="mp-chip mp-chip-success">一致 {result.summary.sameCount}</span>
+            <span className="mp-chip">仅源目录 {result.summary.sourceOnlyCount}</span>
+            <span className="mp-chip">仅目标目录 {result.summary.destinationOnlyCount}</span>
+            <span className="mp-chip">内容变更 {result.summary.changedCount}</span>
+          </div>
+        ) : null}
       </div>
 
       <div className="grid gap-3 md:min-h-0 md:flex-1 xl:grid-cols-[minmax(0,1fr)_390px]">
@@ -480,6 +497,11 @@ export function JobDiffPage() {
             >
               {hideSame ? "显示相同项" : "隐藏相同项"}
             </button>
+            {result ? (
+              <span className="inline-flex items-center rounded-full border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] px-3 py-2 text-sm mp-muted">
+                当前显示 {displayItems.length} 项
+              </span>
+            ) : null}
           </div>
 
           <div className="mt-3 grid gap-2 md:min-h-0 md:flex-1 md:grid-cols-2">
@@ -553,6 +575,11 @@ export function JobDiffPage() {
                   <span className={getStatusChipClass(detailItem.status)}>{getStatusLabel(detailItem.status)}</span>
                   <span className="mp-chip">{getKindLabel(detailItem.kind)}</span>
                   <span className="mp-chip">时间差 {formatSignedMs(detailItem.mtimeDeltaMs)}</span>
+                  <span className="mp-chip">
+                    {getStorageTypeLabel(storageById.get(result.job.sourceStorageId)?.type ?? "local_fs")}
+                    {" -> "}
+                    {getStorageTypeLabel(storageById.get(result.job.destinationStorageId)?.type ?? "local_fs")}
+                  </span>
                 </div>
                 {detailItem.status !== "same" ? (
                   <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs text-amber-800">

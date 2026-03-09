@@ -10,6 +10,18 @@ export default defineConfig({
       "/healthz": "http://localhost:8080"
     }
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes("node_modules")) return;
+          if (id.includes("react-router-dom")) return "vendor-router";
+          if (id.includes("framer-motion")) return "vendor-motion";
+          if (id.includes("/react-dom/") || id.includes("/react/")) return "vendor-react";
+        }
+      }
+    }
+  },
   plugins: [
     react(),
     tailwindcss(),

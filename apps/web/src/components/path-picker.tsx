@@ -58,9 +58,9 @@ export function PathPicker({ value, onChange, placeholder, browse, disabled, req
       {open ? (
         <div className="rounded-xl border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-2.5">
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-sm">
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
               <div className="mp-muted">当前目录</div>
-              <div className="truncate font-medium">{(browser?.currentPath ?? value) || "-"}</div>
+              <div className="break-all font-medium">{(browser?.currentPath ?? value) || "-"}</div>
             </div>
             <div className="flex gap-1">
               <button

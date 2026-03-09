@@ -64,6 +64,12 @@ function getExecutionStatusLabel(execution: JobExecution): string {
   return "执行失败";
 }
 
+function getStorageTypeLabel(type: StorageTarget["type"]): string {
+  if (type === "local_fs") return "NAS";
+  if (type === "external_ssd") return "SSD";
+  return "115 云盘";
+}
+
 export function JobsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [items, setItems] = useState<BackupJob[]>([]);
@@ -114,43 +120,6 @@ export function JobsPage() {
 
   useEffect(() => {
     void load();
-  }, []);
-
-  useEffect(() => {
-    let disposed = false;
-    let timer: number | null = null;
-
-    const poll = async () => {
-      try {
-        const executionsRes = await getJobExecutions();
-        if (disposed) return;
-        setExecutions(executionsRes.items);
-        if (executionsRes.items.some(isExecutionActive)) {
-          const runsRes = await getRuns();
-          if (disposed) return;
-          setRuns(runsRes.items);
-        }
-      } catch {
-        // Ignore polling errors and keep the last known state.
-      } finally {
-        if (!disposed) {
-          timer = window.setTimeout(() => {
-            void poll();
-          }, 1200);
-        }
-      }
-    };
-
-    timer = window.setTimeout(() => {
-      void poll();
-    }, 1200);
-
-    return () => {
-      disposed = true;
-      if (timer !== null) {
-        window.clearTimeout(timer);
-      }
-    };
   }, []);
 
   function resetForm() {
@@ -365,6 +334,52 @@ export function JobsPage() {
     return out;
   }, [executions]);
 
+  const hasActiveExecution = Object.values(activeExecutionByJobId).some(Boolean);
+
+  useEffect(() => {
+    let disposed = false;
+    let timer: number | null = null;
+
+    const scheduleNextPoll = (delay: number) => {
+      if (timer !== null) {
+        window.clearTimeout(timer);
+      }
+      timer = window.setTimeout(() => {
+        void poll();
+      }, delay);
+    };
+
+    const poll = async () => {
+      try {
+        const executionsRes = await getJobExecutions();
+        if (disposed) return;
+        setExecutions(executionsRes.items);
+
+        const shouldRefreshRuns = executionsRes.items.some(isExecutionActive);
+        if (shouldRefreshRuns) {
+          const runsRes = await getRuns();
+          if (disposed) return;
+          setRuns(runsRes.items);
+        }
+
+        scheduleNextPoll(shouldRefreshRuns ? 1200 : 8000);
+      } catch {
+        if (!disposed) {
+          scheduleNextPoll(hasActiveExecution ? 1800 : 10000);
+        }
+      }
+    };
+
+    scheduleNextPoll(hasActiveExecution ? 1200 : 8000);
+
+    return () => {
+      disposed = true;
+      if (timer !== null) {
+        window.clearTimeout(timer);
+      }
+    };
+  }, [hasActiveExecution]);
+
   const executionById = useMemo(() => Object.fromEntries(executions.map((item) => [item.id, item])), [executions]);
   const progressExecution = progressDialogExecutionId ? executionById[progressDialogExecutionId] : undefined;
   const progressJob = progressExecution ? items.find((item) => item.id === progressExecution.jobId) : undefined;
@@ -377,6 +392,8 @@ export function JobsPage() {
         ? "mp-status-success"
         : "mp-status-warning";
   const progressCanBackground = Boolean(progressExecution && isExecutionActive(progressExecution));
+  const enabledCount = items.filter((item) => item.enabled).length;
+  const watchModeCount = items.filter((item) => item.watchMode).length;
 
   const allCurrentPageSelected = table.paged.length > 0 && table.paged.every((j) => selected.has(j.id));
 
@@ -397,12 +414,13 @@ export function JobsPage() {
         <div className="flex items-center justify-between">
           <div>
             <h3 className="text-base font-semibold">备份任务</h3>
+            <p className="mt-1 text-sm mp-muted">配置源存储、目标存储、计划时间和监听模式。</p>
           </div>
           <Collapsible.Trigger className="mp-btn">{formOpen ? "收起" : "新增任务"}</Collapsible.Trigger>
         </div>
 
         <Collapsible.Content>
-          <form onSubmit={(e) => void onSubmit(e)} className="mt-3 grid gap-2 sm:grid-cols-2">
+          <form onSubmit={(e) => void onSubmit(e)} className="mt-4 grid gap-3 sm:grid-cols-2">
             <div className="space-y-1 sm:col-span-2">
               <label htmlFor="job-name" className="text-sm font-medium">
                 任务名称
@@ -415,6 +433,7 @@ export function JobsPage() {
                 onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
                 required
               />
+              <p className="text-xs mp-muted">建议按“来源 + 目标 + 频率”命名，后续筛选更清晰。</p>
             </div>
 
             <div className="space-y-1">
@@ -437,7 +456,7 @@ export function JobsPage() {
                 <option value="">选择备份源存储</option>
                 {storages.map((s) => (
                   <option key={s.id} value={s.id}>
-                    {s.name} ({s.type})
+                    {s.name} ({getStorageTypeLabel(s.type)})
                   </option>
                 ))}
               </select>
@@ -463,7 +482,7 @@ export function JobsPage() {
                 <option value="">选择备份目标存储</option>
                 {storages.map((s) => (
                   <option key={s.id} value={s.id}>
-                    {s.name} ({s.type})
+                    {s.name} ({getStorageTypeLabel(s.type)})
                   </option>
                 ))}
               </select>
@@ -480,8 +499,9 @@ export function JobsPage() {
                 value={form.schedule ?? ""}
                 onChange={(e) => setForm((p) => ({ ...p, schedule: e.target.value }))}
               />
+              <p className="text-xs mp-muted">留空表示仅依赖实时监听；填写后会按 cron 周期执行。</p>
             </div>
-            <div className="flex items-center gap-4 text-sm">
+            <div className="mp-subtle-card flex flex-wrap items-center gap-4 p-3 text-sm">
               <label className="flex items-center gap-2">
                 <input
                   type="checkbox"
@@ -498,6 +518,19 @@ export function JobsPage() {
                 />
                 启用
               </label>
+            </div>
+
+            <div className="mp-subtle-card grid gap-3 p-3 sm:col-span-2 sm:grid-cols-2">
+              <div className="min-w-0">
+                <p className="text-xs font-semibold uppercase tracking-[0.08em] mp-muted">源存储预览</p>
+                <p className="mt-1 text-sm font-medium">{sourceStorage?.name ?? "未选择"}</p>
+                <p className="mt-1 break-all text-xs mp-muted">{sourceStorage?.basePath ?? "请选择源存储"}</p>
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs font-semibold uppercase tracking-[0.08em] mp-muted">目标存储预览</p>
+                <p className="mt-1 text-sm font-medium">{destinationStorage?.name ?? "未选择"}</p>
+                <p className="mt-1 break-all text-xs mp-muted">{destinationStorage?.basePath ?? "请选择目标存储"}</p>
+              </div>
             </div>
 
             <div className="flex gap-2 sm:col-span-2">
@@ -521,6 +554,12 @@ export function JobsPage() {
           onPageSizeChange={table.setPageSize}
           totalItems={table.totalItems}
         />
+        <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
+          <span className="mp-chip">总任务 {items.length}</span>
+          <span className="mp-chip mp-chip-success">已启用 {enabledCount}</span>
+          <span className="mp-chip">实时监听 {watchModeCount}</span>
+          {hasActiveExecution ? <span className="mp-chip mp-chip-warning">执行中 {Object.values(activeExecutionByJobId).filter(Boolean).length}</span> : null}
+        </div>
         <div className="mb-2 flex justify-end">
           <button
             className="mp-btn"
@@ -730,7 +769,9 @@ export function JobsPage() {
                       <div>{dst?.name ?? j.destinationTargetId}</div>
                       <div className="break-all mp-muted">{dst?.basePath ?? j.destinationPath}</div>
                     </td>
-                    <td className="px-2 py-2">{j.enabled ? "启用" : "停用"}</td>
+                    <td className="px-2 py-2">
+                      <span className={j.enabled ? "mp-status-success" : "mp-status-danger"}>{j.enabled ? "启用" : "停用"}</span>
+                    </td>
                     <td className="px-2 py-2">{j.watchMode ? "实时监听" : "关闭"}</td>
                     <td className="px-2 py-2 text-sm">
                       {activeExecution ? (
@@ -911,6 +952,7 @@ export function JobsPage() {
             : `将删除 ${pendingDeleteAction?.ids.length ?? 0} 个任务，删除后不可恢复。`
         }
         confirmText="确认删除"
+        destructive
         busy={
           pendingDeleteAction?.mode === "single"
             ? Boolean(pendingDeleteAction.ids[0] && deletingJobIds.has(pendingDeleteAction.ids[0]))

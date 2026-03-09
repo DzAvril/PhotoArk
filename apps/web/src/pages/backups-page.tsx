@@ -151,6 +151,8 @@ export function BackupsPage() {
     { pageSizeStorageKey: "ark-runs-page-size" }
   );
   const allCurrentPageSelected = table.paged.length > 0 && table.paged.every((run) => selected.has(run.id));
+  const successCount = runs.filter((run) => run.status === "success").length;
+  const failedCount = runs.length - successCount;
 
   return (
     <section className="space-y-3 md:flex md:h-full md:flex-col">
@@ -173,6 +175,11 @@ export function BackupsPage() {
           onPageSizeChange={table.setPageSize}
           totalItems={table.totalItems}
         />
+        <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
+          <span className="mp-chip">总记录 {runs.length}</span>
+          <span className="mp-chip mp-chip-success">成功 {successCount}</span>
+          {failedCount > 0 ? <span className="mp-chip mp-chip-warning">失败 {failedCount}</span> : null}
+        </div>
         <div className="mb-2 flex justify-end">
           <button
             className="mp-btn"
@@ -230,7 +237,7 @@ export function BackupsPage() {
                   <dd>{getSummary(run)}</dd>
                 </dl>
 
-                {run.errors[0] ? <p className="mt-2 text-sm mp-status-danger">首个错误：{run.errors[0].path} - {run.errors[0].error}</p> : null}
+                {run.errors[0] ? <p className="mt-2 break-all text-sm mp-status-danger">首个错误：{run.errors[0].path} - {run.errors[0].error}</p> : null}
 
                 <div className="mt-3 flex justify-end">
                   <button
@@ -334,7 +341,7 @@ export function BackupsPage() {
                     </td>
                     <td className="px-2 py-2 text-sm">
                       <div>{getSummary(run)}</div>
-                      {run.errors[0] ? <div className="mt-1 mp-status-danger">首个错误：{run.errors[0].path} - {run.errors[0].error}</div> : null}
+                      {run.errors[0] ? <div className="mt-1 break-all mp-status-danger">首个错误：{run.errors[0].path} - {run.errors[0].error}</div> : null}
                     </td>
                     <td className="px-2 py-2">
                       <button
@@ -383,6 +390,7 @@ export function BackupsPage() {
             : `将删除 ${pendingDeleteAction?.ids.length ?? 0} 条记录，该操作不可恢复。`
         }
         confirmText="确认删除"
+        destructive
         busy={
           pendingDeleteAction?.mode === "single"
             ? Boolean(pendingDeleteAction.ids[0] && deletingRunIds.has(pendingDeleteAction.ids[0]))

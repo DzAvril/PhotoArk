@@ -122,6 +122,16 @@ textarea:focus-visible {
   box-shadow: none;
 }
 
+.mp-subtle-card {
+  border: 1px solid color-mix(in oklab, var(--ark-line) 88%, var(--ark-surface));
+  border-radius: 16px;
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklab, var(--ark-surface) 96%, var(--ark-surface-soft)) 0%,
+    color-mix(in oklab, var(--ark-surface-soft) 88%, var(--ark-surface-deep)) 100%
+  );
+}
+
 .mp-input,
 .mp-select {
   width: 100%;

@@ -39,6 +39,10 @@ export function LoginPage({ onAuthenticated }: LoginPageProps) {
       setError("请输入密码");
       return;
     }
+    if (!hasUsers && password.length < 8) {
+      setError("管理员密码至少需要 8 位");
+      return;
+    }
     if (!hasUsers && password !== confirmPassword) {
       setError("两次密码输入不一致");
       return;
@@ -104,6 +108,11 @@ export function LoginPage({ onAuthenticated }: LoginPageProps) {
             <p className="mt-2 text-[15px] leading-7 text-slate-600">
               {hasUsers ? "输入账号与密码以继续。" : "首次使用请先创建管理员账号，创建后将自动登录。"}
             </p>
+            {!checking && !hasUsers ? (
+              <div className="mt-4 rounded-2xl border border-[var(--ark-line)]/80 bg-[var(--ark-surface-soft)] px-4 py-3 text-sm text-slate-700">
+                建议使用仅管理员知晓的高强度密码，长度至少 8 位。
+              </div>
+            ) : null}
 
             {error ? (
               <p className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p>
@@ -129,16 +138,16 @@ export function LoginPage({ onAuthenticated }: LoginPageProps) {
                 <label htmlFor="auth-password" className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-700/90">
                   密码
                 </label>
-              <input
-                id="auth-password"
-                className="mp-input mt-1.5 h-12 rounded-xl border-[var(--ark-line)]/80 bg-white px-4 text-[16px]"
-                type="password"
-                placeholder="至少 8 位"
-                value={password}
-                autoComplete={hasUsers ? "current-password" : "new-password"}
-                onChange={(e) => setPassword(e.target.value)}
-                disabled={checking || loading}
-              />
+                <input
+                  id="auth-password"
+                  className="mp-input mt-1.5 h-12 rounded-xl border-[var(--ark-line)]/80 bg-white px-4 text-[16px]"
+                  type="password"
+                  placeholder="至少 8 位"
+                  value={password}
+                  autoComplete={hasUsers ? "current-password" : "new-password"}
+                  onChange={(e) => setPassword(e.target.value)}
+                  disabled={checking || loading}
+                />
               </div>
 
               {!hasUsers ? (

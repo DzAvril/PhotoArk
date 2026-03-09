@@ -7,6 +7,7 @@ interface ConfirmDialogProps {
   confirmText?: string;
   cancelText?: string;
   busy?: boolean;
+  destructive?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -26,6 +27,7 @@ export function ConfirmDialog({
   confirmText = "确认",
   cancelText = "取消",
   busy = false,
+  destructive = false,
   onConfirm,
   onCancel
 }: ConfirmDialogProps) {
@@ -105,7 +107,13 @@ export function ConfirmDialog({
           <button type="button" className="mp-btn" onClick={onCancel} disabled={busy}>
             {cancelText}
           </button>
-          <button ref={confirmButtonRef} type="button" className="mp-btn mp-btn-primary" onClick={onConfirm} disabled={busy}>
+          <button
+            ref={confirmButtonRef}
+            type="button"
+            className={destructive ? "mp-btn border-[var(--ark-danger-line)] bg-[var(--ark-danger-bg)] text-[var(--ark-danger-text)]" : "mp-btn mp-btn-primary"}
+            onClick={onConfirm}
+            disabled={busy}
+          >
             {busy ? "处理中..." : confirmText}
           </button>
         </div>

@@ -73,6 +73,7 @@ export function SettingsPage() {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h3 className="text-base font-semibold">Telegram 通知</h3>
+          <p className="mt-1 text-sm mp-muted">用于接收备份摘要、异常提醒与测试消息。</p>
         </div>
         <span className={`mp-chip ${form.telegram.enabled ? "mp-chip-success" : ""}`}>
           {form.telegram.enabled ? "已启用" : "未启用"}
@@ -91,8 +92,8 @@ export function SettingsPage() {
         </InlineAlert>
       ) : null}
 
-      <form onSubmit={(e) => void onSubmit(e)} className="mt-3 space-y-3 md:min-h-0 md:flex-1 md:overflow-auto">
-        <fieldset className="rounded-xl border border-[var(--ark-line)] bg-[var(--ark-surface)] p-3">
+      <form onSubmit={(e) => void onSubmit(e)} className="mt-4 space-y-3 md:min-h-0 md:flex-1 md:overflow-auto">
+        <fieldset className="mp-subtle-card p-4">
           <label className="flex items-center gap-2 text-sm font-medium">
             <input
               type="checkbox"
@@ -106,11 +107,12 @@ export function SettingsPage() {
             />
             启用 Telegram 备份摘要通知
           </label>
+          <p className="mt-2 text-sm mp-muted">关闭后将不会发送成功摘要、失败告警和测试通知。</p>
         </fieldset>
 
-        <fieldset className="rounded-xl border border-[var(--ark-line)] bg-[var(--ark-surface)] p-3">
+        <fieldset className="mp-subtle-card p-4">
           <legend className="px-1 text-sm font-semibold">连接凭据</legend>
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="mt-2 grid gap-3 sm:grid-cols-2">
             <div className="space-y-1">
               <label htmlFor="telegram-bot-token" className="text-sm font-medium">
                 Bot Token
@@ -164,9 +166,9 @@ export function SettingsPage() {
           </div>
         </fieldset>
 
-        <fieldset className="rounded-xl border border-[var(--ark-line)] bg-[var(--ark-surface)] p-3">
+        <fieldset className="mp-subtle-card p-4">
           <legend className="px-1 text-sm font-semibold">网络设置</legend>
-          <div className="space-y-1">
+          <div className="mt-2 space-y-1">
             <label htmlFor="telegram-proxy-url" className="text-sm font-medium">
               代理地址（可选）
             </label>
@@ -190,11 +192,11 @@ export function SettingsPage() {
           </div>
         </fieldset>
 
-        <div className="flex flex-wrap gap-2">
-          <button type="submit" className="mp-btn mp-btn-primary" disabled={saving || loading}>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <button type="submit" className="mp-btn mp-btn-primary sm:min-w-[132px]" disabled={saving || loading}>
             {saving ? "保存中..." : "保存配置"}
           </button>
-          <button type="button" className="mp-btn" disabled={testing || loading} onClick={() => void handleTelegramTest()}>
+          <button type="button" className="mp-btn sm:min-w-[132px]" disabled={testing || loading} onClick={() => void handleTelegramTest()}>
             {testing ? "发送中..." : "发送测试通知"}
           </button>
         </div>

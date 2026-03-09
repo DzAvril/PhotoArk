@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { InlineAlert } from "../components/inline-alert";
 import { compareStorages, getStorages } from "../lib/api";
 import type { StorageTarget } from "../types/api";
 import type { DiffItem, DiffResult, DiffFilters, DiffFilterStatus, DiffFilterKind } from "../types/diff";
@@ -18,6 +19,12 @@ const kindLabels: Record<DiffFilterKind, string> = {
   video: "视频",
   other: "其他",
 };
+
+function getStorageTypeLabel(type: StorageTarget["type"]): string {
+  if (type === "local_fs") return "NAS";
+  if (type === "external_ssd") return "SSD";
+  return "115 云盘";
+}
 
 function formatBytes(bytes: number | null): string {
   if (bytes === null || !Number.isFinite(bytes)) return "-";
@@ -117,6 +124,10 @@ export function DiffPage() {
   return (
     <section className="space-y-3 md:flex md:h-full md:flex-col">
       <div className="mp-panel p-4">
+        <div className="mb-4">
+          <h3 className="text-base font-semibold">存储对比</h3>
+          <p className="mt-1 text-sm mp-muted">用于按目录比较两个存储的文件差异，适合人工核对，不会直接执行同步。</p>
+        </div>
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end">
           <div className="grid flex-1 gap-4 md:grid-cols-2">
             <div className="space-y-1">
@@ -129,7 +140,7 @@ export function DiffPage() {
                 <option value="">选择存储</option>
                 {storages.map((s) => (
                   <option key={s.id} value={s.id} disabled={s.id === rightStorageId}>
-                    {s.name} ({s.type})
+                    {s.name} ({getStorageTypeLabel(s.type)})
                   </option>
                 ))}
               </select>
@@ -144,7 +155,7 @@ export function DiffPage() {
                 <option value="">选择存储</option>
                 {storages.map((s) => (
                   <option key={s.id} value={s.id} disabled={s.id === leftStorageId}>
-                    {s.name} ({s.type})
+                    {s.name} ({getStorageTypeLabel(s.type)})
                   </option>
                 ))}
               </select>
@@ -163,9 +174,9 @@ export function DiffPage() {
         </div>
 
         {error ? (
-          <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          <InlineAlert tone="error" className="mt-3" onClose={() => setError("")}>
             {error}
-          </div>
+          </InlineAlert>
         ) : null}
 
         {summary ? (
@@ -244,8 +255,10 @@ export function DiffPage() {
             </div>
           </div>
 
-          <div className="mb-2 text-xs text-[var(--ark-ink-soft)]">
-            显示 {filteredItems.length} / {result.items.length} 个项目
+          <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
+            <span className="mp-chip">显示 {filteredItems.length} / {result.items.length}</span>
+            <span className="mp-chip">{statusLabels[filters.status]}</span>
+            <span className="mp-chip">{kindLabels[filters.kind]}</span>
           </div>
 
           <div className="min-h-0 flex-1 overflow-auto">
@@ -289,8 +302,8 @@ export function DiffPage() {
                         </span>
                       </td>
                       <td className="px-2 py-2">
-                        <span className="rounded bg-[var(--ark-surface-soft)] px-1.5 py-0.5 text-xs capitalize">
-                          {item.kind}
+                        <span className="rounded bg-[var(--ark-surface-soft)] px-1.5 py-0.5 text-xs">
+                          {kindLabels[item.kind]}
                         </span>
                       </td>
                       <td className="px-2 py-2">
