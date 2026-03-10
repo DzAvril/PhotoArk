@@ -265,6 +265,7 @@ export interface JobExecutionProgress {
   currentPath: string | null;
   currentFileTotalBytes: number | null;
   currentFileCopiedBytes: number | null;
+  currentFileStage: "copying" | "post_processing" | null;
 }
 
 export interface JobExecution {

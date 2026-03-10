@@ -1,5 +1,5 @@
 import * as Collapsible from "@radix-ui/react-collapsible";
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useSearchParams } from "react-router-dom";
 import { ConfirmDialog } from "../components/confirm-dialog";
 import { InlineAlert } from "../components/inline-alert";
@@ -434,10 +434,13 @@ export function JobsPage() {
   const progressPercent = progressExecution?.progress.percent ?? 0;
   const progressFileTotalBytes = progressExecution?.progress.currentFileTotalBytes ?? null;
   const progressFileCopiedBytes = progressExecution?.progress.currentFileCopiedBytes ?? null;
+  const progressFileStage = progressExecution?.progress.currentFileStage ?? null;
   const progressFilePercent =
     progressFileTotalBytes && progressFileCopiedBytes !== null && progressFileTotalBytes > 0
       ? Math.min(100, Math.round((progressFileCopiedBytes / progressFileTotalBytes) * 100))
       : null;
+  const fileSpeedRef = useRef<{ executionId: string; path: string; bytes: number; timeMs: number } | null>(null);
+  const [fileWriteSpeed, setFileWriteSpeed] = useState<number | null>(null);
   const progressStatusLabel = progressExecution ? getExecutionStatusLabel(progressExecution) : "";
   const progressStatusClass =
     progressExecution?.status === "failed"
@@ -450,6 +453,32 @@ export function JobsPage() {
   const progressCanBackground = Boolean(progressExecution && isExecutionActive(progressExecution));
   const enabledCount = items.filter((item) => item.enabled).length;
   const watchModeCount = items.filter((item) => item.watchMode).length;
+
+  useEffect(() => {
+    if (!progressExecution || progressFileCopiedBytes === null) {
+      setFileWriteSpeed(null);
+      fileSpeedRef.current = null;
+      return;
+    }
+    const currentPath = progressExecution.progress.currentPath ?? "";
+    const now = Date.now();
+    const prev = fileSpeedRef.current;
+    if (prev && prev.executionId === progressExecution.id && prev.path === currentPath) {
+      const deltaBytes = progressFileCopiedBytes - prev.bytes;
+      const deltaMs = now - prev.timeMs;
+      if (deltaBytes >= 0 && deltaMs > 0) {
+        setFileWriteSpeed((deltaBytes * 1000) / deltaMs);
+      }
+    } else {
+      setFileWriteSpeed(null);
+    }
+    fileSpeedRef.current = {
+      executionId: progressExecution.id,
+      path: currentPath,
+      bytes: progressFileCopiedBytes,
+      timeMs: now
+    };
+  }, [progressExecution?.id, progressExecution?.progress.currentPath, progressFileCopiedBytes]);
 
   const allCurrentPageSelected = table.paged.length > 0 && table.paged.every((j) => selected.has(j.id));
 
@@ -995,24 +1024,18 @@ export function JobsPage() {
               </div>
             </div>
             {progressExecution.progress.currentPath ? (
-              <p className="mt-2 break-all text-xs mp-muted">当前文件: {progressExecution.progress.currentPath}</p>
-            ) : null}
-            {progressFileTotalBytes !== null && progressFileCopiedBytes !== null ? (
-              <div className="mt-2">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="mp-muted">当前文件进度</span>
-                  <span className="font-medium">
-                    {formatBytes(progressFileCopiedBytes)} / {formatBytes(progressFileTotalBytes)}
-                    {progressFilePercent !== null ? ` · ${progressFilePercent}%` : ""}
-                  </span>
-                </div>
-                <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-[var(--ark-line)]">
-                  <div
-                    className="h-full rounded-full bg-[var(--ark-primary)] transition-all duration-300"
-                    style={{ width: `${progressFilePercent ?? 0}%` }}
-                  />
-                </div>
-              </div>
+              <p className="mt-2 break-all text-xs mp-muted">
+                当前文件: {progressExecution.progress.currentPath}
+                {progressFileTotalBytes !== null && progressFileCopiedBytes !== null
+                  ? ` · ${formatBytes(progressFileCopiedBytes)} / ${formatBytes(progressFileTotalBytes)}`
+                  : ""}
+                {progressFileStage === "post_processing" ? " · 后处理" : progressFilePercent !== null ? ` · ${progressFilePercent}%` : ""}
+                {progressFileStage === "post_processing"
+                  ? " · 元数据写入中"
+                  : fileWriteSpeed !== null
+                    ? ` · ${formatBytes(fileWriteSpeed)} /s`
+                    : ""}
+              </p>
             ) : null}
             {progressExecution.error ? <p className="mp-error mt-3">{progressExecution.error}</p> : null}
 

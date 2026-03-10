@@ -1444,6 +1444,7 @@ type JobExecutionProgress = {
   currentPath: string | null;
   currentFileTotalBytes: number | null;
   currentFileCopiedBytes: number | null;
+  currentFileStage: "copying" | "post_processing" | null;
 };
 
 type JobExecution = {
@@ -1953,6 +1954,32 @@ function buildLivePhotoIdByRelativePath(relativePaths: string[]): Map<string, st
   return out;
 }
 
+function buildLivePhotoIdByFullPaths(sourceRoot: string, fullPaths: string[]): Map<string, string> {
+  const images = new Set([".jpg", ".jpeg", ".heic"]);
+  const videos = new Set([".mov"]);
+  const baseGroups = new Map<string, { image?: string; video?: string }>();
+
+  for (const fullPath of fullPaths) {
+    const relPath = toPosixPath(path.relative(sourceRoot, fullPath));
+    const ext = path.extname(relPath).toLowerCase();
+    const base = relPath.slice(0, relPath.length - ext.length).toLowerCase();
+    const row = baseGroups.get(base) ?? {};
+    if (images.has(ext)) row.image = relPath;
+    if (videos.has(ext)) row.video = relPath;
+    baseGroups.set(base, row);
+  }
+
+  const out = new Map<string, string>();
+  for (const [base, pair] of baseGroups.entries()) {
+    if (pair.image && pair.video) {
+      const id = `lp_${base}`;
+      out.set(pair.image, id);
+      out.set(pair.video, id);
+    }
+  }
+  return out;
+}
+
 type JobExecutionProgressUpdate = {
   phase: JobExecutionPhase;
   totalCount: number | null;
@@ -1968,6 +1995,7 @@ type JobExecutionProgressUpdate = {
   currentPath: string | null;
   currentFileTotalBytes: number | null;
   currentFileCopiedBytes: number | null;
+  currentFileStage: "copying" | "post_processing" | null;
 };
 
 type ExecuteJobProgressHandler = (progress: JobExecutionProgressUpdate) => void;
@@ -2073,7 +2101,8 @@ function createJobExecution(jobId: string, trigger: JobRunTrigger): JobExecution
       percent: 0,
       currentPath: null,
       currentFileTotalBytes: null,
-      currentFileCopiedBytes: null
+      currentFileCopiedBytes: null,
+      currentFileStage: null
     }
   };
   jobExecutions.set(execution.id, execution);
@@ -2104,6 +2133,7 @@ function requestCancelExecution(executionId: string): JobExecution | null {
       execution.progress.currentPath = null;
       execution.progress.currentFileTotalBytes = null;
       execution.progress.currentFileCopiedBytes = null;
+      execution.progress.currentFileStage = null;
     });
   }
   return jobExecutions.get(executionId) ?? null;
@@ -2161,6 +2191,7 @@ async function executeJob(
       currentPath: string | null;
       currentFileTotalBytes: number | null;
       currentFileCopiedBytes: number | null;
+      currentFileStage: "copying" | "post_processing" | null;
     }
   ) => {
     if (!onProgress) return;
@@ -2180,7 +2211,8 @@ async function executeJob(
       percent,
       currentPath: progress.currentPath,
       currentFileTotalBytes: progress.currentFileTotalBytes,
-      currentFileCopiedBytes: progress.currentFileCopiedBytes
+      currentFileCopiedBytes: progress.currentFileCopiedBytes,
+      currentFileStage: progress.currentFileStage
     });
   };
 
@@ -2207,7 +2239,8 @@ async function executeJob(
     livePhotoPairCount: 0,
     currentPath: null,
     currentFileTotalBytes: null,
-    currentFileCopiedBytes: null
+    currentFileCopiedBytes: null,
+    currentFileStage: null
   });
 
   app.log.info({ event: "job.exec.scan.start", jobId, trigger }, "Job scan started");
@@ -2255,22 +2288,7 @@ async function executeJob(
     })
   }).catch(() => {});
   // #endregion
-  const relativePaths = sourceFiles.map((fullPath) => toPosixPath(path.relative(sourceRoot, fullPath)));
-  // #region debug-point A:scan-after-relative-map
-  fetch("http://127.0.0.1:7777/event", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      sessionId: "backup-oom-001",
-      runId: "pre-fix",
-      hypothesisId: "A",
-      location: "apps/api/src/index.ts:2187",
-      msg: "[DEBUG] after relativePaths map",
-      data: { jobId, trigger, relativePathsCount: relativePaths.length, memory: process.memoryUsage() }
-    })
-  }).catch(() => {});
-  // #endregion
-  const livePhotoMap = buildLivePhotoIdByRelativePath(relativePaths);
+  const livePhotoMap = buildLivePhotoIdByFullPaths(sourceRoot, sourceFiles);
   // #region debug-point A:scan-after-livephoto-map
   fetch("http://127.0.0.1:7777/event", {
     method: "POST",
@@ -2350,7 +2368,8 @@ async function executeJob(
     livePhotoPairCount: copiedLivePhotoIds.size,
     currentPath: null,
     currentFileTotalBytes: null,
-    currentFileCopiedBytes: null
+    currentFileCopiedBytes: null,
+    currentFileStage: null
   });
 
   if (checkCancel()) {
@@ -2388,7 +2407,8 @@ async function executeJob(
         livePhotoPairCount: copiedLivePhotoIds.size,
         currentPath: relativePath,
         currentFileTotalBytes: totalBytes,
-        currentFileCopiedBytes: copiedBytes
+        currentFileCopiedBytes: copiedBytes,
+        currentFileStage: "copying"
       });
     };
     return {
@@ -2412,7 +2432,7 @@ async function executeJob(
         break;
       }
       const sourceFile = sourceFiles[i];
-      const relativePath = relativePaths[i];
+      const relativePath = toPosixPath(path.relative(sourceRoot, sourceFile));
       const destinationFile = path.join(destinationRoot, relativePath);
       let sourceStat: Awaited<ReturnType<typeof stat>> | null = null;
       let fileReporter: ReturnType<typeof createFileProgressReporter> | null = null;
@@ -2425,16 +2445,28 @@ async function executeJob(
       const existing = existingIdx === undefined ? undefined : state.assets[existingIdx];
       const destinationStat = await stat(destinationFile).catch(() => null);
       const destinationExists = Boolean(destinationStat?.isFile());
-      const shouldSkip =
-        existing &&
-        existingIdx !== undefined &&
+      const destinationMatchesSource =
         destinationExists &&
-        existing.sizeBytes === sourceStat.size &&
-        existing.capturedAt === sourceCapturedAt &&
-        existing.encrypted === destinationStorage.encrypted;
+        destinationStat &&
+        !sourceStorage.encrypted &&
+        !destinationStorage.encrypted &&
+        destinationStat.size === sourceStat.size &&
+        destinationStat.mtimeMs === sourceStat.mtimeMs;
+      const shouldSkip =
+        (existing &&
+          existingIdx !== undefined &&
+          destinationExists &&
+          existing.sizeBytes === sourceStat.size &&
+          existing.capturedAt === sourceCapturedAt &&
+          existing.encrypted === destinationStorage.encrypted) ||
+        (!existing && destinationMatchesSource);
       const decisionReasons: string[] = [];
       if (shouldSkip) {
-        decisionReasons.push("index_match", "destination_exists", "size_match", "mtime_match", "encryption_match");
+        if (existing) {
+          decisionReasons.push("index_match", "destination_exists", "size_match", "mtime_match", "encryption_match");
+        } else {
+          decisionReasons.push("destination_exists", "size_match", "mtime_match", "missing_index");
+        }
       } else {
         if (!existing || existingIdx === undefined) {
           decisionReasons.push("missing_index");
@@ -2467,7 +2499,7 @@ async function executeJob(
       if (shouldSkip) {
         fileReporter.finalize();
         const nextAsset: BackupAsset = {
-          id: existing.id,
+          id: existing?.id ?? `asset_${randomUUID()}`,
           name: relativePath,
           kind: nextKind,
           storageTargetId: destinationStorage.id,
@@ -2476,11 +2508,16 @@ async function executeJob(
           capturedAt: sourceCapturedAt,
           livePhotoAssetId
         };
-        if (
-          existing.kind !== nextAsset.kind ||
-          (existing.livePhotoAssetId ?? undefined) !== (nextAsset.livePhotoAssetId ?? undefined)
-        ) {
-          state.assets[existingIdx] = nextAsset;
+        if (existingIdx !== undefined && existing) {
+          if (
+            existing.kind !== nextAsset.kind ||
+            (existing.livePhotoAssetId ?? undefined) !== (nextAsset.livePhotoAssetId ?? undefined)
+          ) {
+            state.assets[existingIdx] = nextAsset;
+          }
+        } else {
+          state.assets.push(nextAsset);
+          destinationAssetIndexByName.set(relativePath, state.assets.length - 1);
         }
         skippedCount += 1;
         processedCount += 1;
@@ -2496,7 +2533,8 @@ async function executeJob(
           livePhotoPairCount: copiedLivePhotoIds.size,
           currentPath: relativePath,
           currentFileTotalBytes: sourceStat.size,
-          currentFileCopiedBytes: sourceStat.size
+          currentFileCopiedBytes: sourceStat.size,
+          currentFileStage: "post_processing"
         });
       const now = Date.now();
       if (now - lastHeartbeatAt >= 5000 || processedCount - lastHeartbeatProcessed >= 500) {
@@ -2568,6 +2606,21 @@ async function executeJob(
         await encryption.reencryptFile(sourceFile, destinationFile, (delta) => fileReporter?.reportDelta(delta));
       }
       fileReporter.finalize();
+      emitProgress("syncing", {
+        totalCount: scannedCount,
+        scannedCount,
+        processedCount,
+        copiedCount,
+        skippedCount,
+        failedCount,
+        photoCount,
+        videoCount,
+        livePhotoPairCount: copiedLivePhotoIds.size,
+        currentPath: relativePath,
+        currentFileTotalBytes: sourceStat.size,
+        currentFileCopiedBytes: sourceStat.size,
+        currentFileStage: "post_processing"
+      });
       await utimes(destinationFile, sourceStat.atime, sourceStat.mtime).catch(() => undefined);
       const nextAsset: BackupAsset = {
         id: existing?.id ?? `asset_${randomUUID()}`,
@@ -2610,7 +2663,8 @@ async function executeJob(
         livePhotoPairCount: copiedLivePhotoIds.size,
         currentPath: relativePath,
         currentFileTotalBytes: sourceStat.size,
-        currentFileCopiedBytes: sourceStat.size
+        currentFileCopiedBytes: sourceStat.size,
+        currentFileStage: "post_processing"
       });
       const now = Date.now();
       if (now - lastHeartbeatAt >= 5000 || processedCount - lastHeartbeatProcessed >= 500) {
@@ -2695,7 +2749,8 @@ async function executeJob(
         livePhotoPairCount: copiedLivePhotoIds.size,
         currentPath: relativePath,
         currentFileTotalBytes: failedTotalBytes,
-        currentFileCopiedBytes: failedCopiedBytes
+        currentFileCopiedBytes: failedCopiedBytes,
+        currentFileStage: null
       });
       }
     }
@@ -2739,7 +2794,8 @@ async function executeJob(
     livePhotoPairCount: copiedLivePhotoIds.size,
     currentPath: null,
     currentFileTotalBytes: null,
-    currentFileCopiedBytes: null
+    currentFileCopiedBytes: null,
+    currentFileStage: null
   });
   if (canceled) {
     app.log.warn(
@@ -2995,6 +3051,7 @@ function startJobExecution(jobId: string, trigger: JobRunTrigger): JobExecution 
       current.progress.currentPath = null;
       current.progress.currentFileTotalBytes = null;
       current.progress.currentFileCopiedBytes = null;
+      current.progress.currentFileStage = null;
       current.error = null;
       current.message = null;
     });

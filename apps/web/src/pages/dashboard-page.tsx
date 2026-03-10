@@ -1072,10 +1072,13 @@ export function DashboardPage() {
   const progressDialogPercent = progressDialogExecution?.progress.percent ?? 0;
   const progressDialogFileTotalBytes = progressDialogExecution?.progress.currentFileTotalBytes ?? null;
   const progressDialogFileCopiedBytes = progressDialogExecution?.progress.currentFileCopiedBytes ?? null;
+  const progressDialogFileStage = progressDialogExecution?.progress.currentFileStage ?? null;
   const progressDialogFilePercent =
     progressDialogFileTotalBytes && progressDialogFileCopiedBytes !== null && progressDialogFileTotalBytes > 0
       ? Math.min(100, Math.round((progressDialogFileCopiedBytes / progressDialogFileTotalBytes) * 100))
       : null;
+  const fileSpeedRef = useRef<{ executionId: string; path: string; bytes: number; timeMs: number } | null>(null);
+  const [fileWriteSpeed, setFileWriteSpeed] = useState<number | null>(null);
   const progressDialogStatusLabel = progressDialogExecution ? getExecutionStatusLabel(progressDialogExecution) : "";
   const progressDialogStatusClass =
     progressDialogExecution?.status === "failed"
@@ -1084,6 +1087,32 @@ export function DashboardPage() {
         ? "mp-status-success"
         : "mp-status-warning";
   const progressDialogCanBackground = Boolean(progressDialogExecution && isExecutionActive(progressDialogExecution));
+
+  useEffect(() => {
+    if (!progressDialogExecution || progressDialogFileCopiedBytes === null) {
+      setFileWriteSpeed(null);
+      fileSpeedRef.current = null;
+      return;
+    }
+    const currentPath = progressDialogExecution.progress.currentPath ?? "";
+    const now = Date.now();
+    const prev = fileSpeedRef.current;
+    if (prev && prev.executionId === progressDialogExecution.id && prev.path === currentPath) {
+      const deltaBytes = progressDialogFileCopiedBytes - prev.bytes;
+      const deltaMs = now - prev.timeMs;
+      if (deltaBytes >= 0 && deltaMs > 0) {
+        setFileWriteSpeed((deltaBytes * 1000) / deltaMs);
+      }
+    } else {
+      setFileWriteSpeed(null);
+    }
+    fileSpeedRef.current = {
+      executionId: progressDialogExecution.id,
+      path: currentPath,
+      bytes: progressDialogFileCopiedBytes,
+      timeMs: now
+    };
+  }, [progressDialogExecution?.id, progressDialogExecution?.progress.currentPath, progressDialogFileCopiedBytes]);
 
   const summaryTone = getCapacityTone(capacitySummary.freePercent);
 
@@ -1627,24 +1656,22 @@ export function DashboardPage() {
               </div>
             </div>
             {progressDialogExecution.progress.currentPath ? (
-              <p className="mt-2 break-all text-xs mp-muted">当前文件: {progressDialogExecution.progress.currentPath}</p>
-            ) : null}
-            {progressDialogFileTotalBytes !== null && progressDialogFileCopiedBytes !== null ? (
-              <div className="mt-2">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="mp-muted">当前文件进度</span>
-                  <span className="font-medium">
-                    {formatBytes(progressDialogFileCopiedBytes)} / {formatBytes(progressDialogFileTotalBytes)}
-                    {progressDialogFilePercent !== null ? ` · ${progressDialogFilePercent}%` : ""}
-                  </span>
-                </div>
-                <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-[var(--ark-line)]">
-                  <div
-                    className="h-full rounded-full bg-[var(--ark-primary)] transition-all duration-300"
-                    style={{ width: `${progressDialogFilePercent ?? 0}%` }}
-                  />
-                </div>
-              </div>
+              <p className="mt-2 break-all text-xs mp-muted">
+                当前文件: {progressDialogExecution.progress.currentPath}
+                {progressDialogFileTotalBytes !== null && progressDialogFileCopiedBytes !== null
+                  ? ` · ${formatBytes(progressDialogFileCopiedBytes)} / ${formatBytes(progressDialogFileTotalBytes)}`
+                  : ""}
+                {progressDialogFileStage === "post_processing"
+                  ? " · 后处理"
+                  : progressDialogFilePercent !== null
+                    ? ` · ${progressDialogFilePercent}%`
+                    : ""}
+                {progressDialogFileStage === "post_processing"
+                  ? " · 元数据写入中"
+                  : fileWriteSpeed !== null
+                    ? ` · ${formatBytes(fileWriteSpeed)} /s`
+                    : ""}
+              </p>
             ) : null}
             {progressDialogExecution.error ? <p className="mp-error mt-3">{progressDialogExecution.error}</p> : null}
 
