@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef } from "react";
+import { Button } from "./ui/button";
 
 interface ConfirmDialogProps {
   open: boolean;
@@ -83,7 +84,7 @@ export function ConfirmDialog({
 
   return (
     <div
-      className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-[2px]"
+      className="mp-overlay fixed inset-0 z-[70] flex items-center justify-center p-4 backdrop-blur-[2px]"
       onClick={() => {
         if (!busy) onCancel();
       }}
@@ -104,18 +105,17 @@ export function ConfirmDialog({
           {description}
         </p>
         <div className="mt-4 flex justify-end gap-2">
-          <button type="button" className="mp-btn" onClick={onCancel} disabled={busy}>
+          <Button onClick={onCancel} disabled={busy}>
             {cancelText}
-          </button>
-          <button
+          </Button>
+          <Button
             ref={confirmButtonRef}
-            type="button"
-            className={destructive ? "mp-btn border-[var(--ark-danger-line)] bg-[var(--ark-danger-bg)] text-[var(--ark-danger-text)]" : "mp-btn mp-btn-primary"}
+            variant={destructive ? "danger" : "primary"}
             onClick={onConfirm}
-            disabled={busy}
+            busy={busy}
           >
             {busy ? "处理中..." : confirmText}
-          </button>
+          </Button>
         </div>
       </div>
     </div>

@@ -52,7 +52,7 @@ export interface JobRun {
   id: string;
   jobId: string;
   trigger: JobRunTrigger;
-  status: "success" | "failed";
+  status: "success" | "failed" | "canceled";
   startedAt: string;
   finishedAt: string;
   scannedCount: number;

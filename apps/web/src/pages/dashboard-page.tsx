@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ConfirmDialog } from "../components/confirm-dialog";
 import { InlineAlert } from "../components/inline-alert";
+import { SectionCard } from "../components/ui/section-card";
 import {
   getJobExecutions,
   getJobs,
@@ -46,15 +47,48 @@ type RenderedRelationEdge = {
 };
 
 const mediaColors = {
-  video: "#f59e0b",
-  image: "#3b82f6",
-  livePhoto: "#10b981"
+  video: "var(--ark-chart-video)",
+  image: "var(--ark-chart-image)",
+  livePhoto: "var(--ark-chart-live)"
 } as const;
 
 const RELATION_GRAPH_WIDTH = 1240;
 const RELATION_NODE_RADIUS = 44;
 const RELATION_GRAPH_PADDING_X = 148;
 const RELATION_GRAPH_PADDING_Y = 114;
+const DASHBOARD_CACHE_TTL_MS = 60_000;
+const DASHBOARD_ACTIVITY_CACHE_TTL_MS = 120_000;
+
+type SourceActivityCacheEntry = {
+  data: SourceMediaActivity;
+  updatedAt: number;
+};
+
+type DashboardCache = {
+  primaryUpdatedAt: number;
+  relationUpdatedAt: number;
+  capacities: StorageCapacityItem[];
+  storageMediaSummary: StorageMediaSummaryItem[];
+  relationNodes: StorageRelationNodeItem[];
+  relationEdges: StorageRelationEdgeItem[];
+  jobs: BackupJob[];
+  executions: JobExecution[];
+  selectedActivityYear: number;
+  sourceActivityByYear: Map<number, SourceActivityCacheEntry>;
+};
+
+const dashboardCache: DashboardCache = {
+  primaryUpdatedAt: 0,
+  relationUpdatedAt: 0,
+  capacities: [],
+  storageMediaSummary: [],
+  relationNodes: [],
+  relationEdges: [],
+  jobs: [],
+  executions: [],
+  selectedActivityYear: new Date().getFullYear(),
+  sourceActivityByYear: new Map()
+};
 
 function toPercent(value: number): number {
   return Number(value.toFixed(1));
@@ -253,7 +287,7 @@ function buildRelationEdges(
     if (!source || !destination) return null;
 
     const isRunning = runningEdgeIds.has(edge.id);
-    const strokeColor = edge.status === "synced" ? "#22c55e" : "#f59e0b";
+    const strokeColor = edge.status === "synced" ? "var(--ark-success)" : "var(--ark-warning)";
     const markerId = edge.status === "synced" ? "relation-arrow-synced" : "relation-arrow-attention";
     const strokeDasharray = edge.unknownJobCount > 0 && !isRunning ? "8 6" : undefined;
 
@@ -460,7 +494,7 @@ function PieStatCard({
   );
 }
 
-const ACTIVITY_LEVEL_COLORS = ["#cbd5e1", "#b7e4c7", "#95d5b2", "#74c69d", "#52b788"] as const;
+const ACTIVITY_LEVEL_COLORS = ["var(--ark-heat-0)", "var(--ark-heat-1)", "var(--ark-heat-2)", "var(--ark-heat-3)", "var(--ark-heat-4)"] as const;
 const MONTH_LABELS = ["1月", "2月", "3月", "4月", "5月", "6月", "7月", "8月", "9月", "10月", "11月", "12月"] as const;
 
 function resolveActivityLevel(count: number, maxCount: number): number {
@@ -607,14 +641,14 @@ function SourceActivityHeatmap({
                       <div key={`col:${columnIndex}`} className="grid grid-rows-7 gap-1">
                         {column.map((cell, rowIndex) => {
                           if (!cell) {
-                            return <span key={`empty:${columnIndex}:${rowIndex}`} className="h-3 w-3 rounded-[2px] bg-transparent" />;
+                            return <span key={`empty:${columnIndex}:${rowIndex}`} className="h-3 w-3 rounded-sm bg-transparent" />;
                           }
                           const level = resolveActivityLevel(cell.count, data.maxDailyCount);
                           return (
                             <button
                               key={`day:${cell.date}`}
                               type="button"
-                              className="h-3 w-3 rounded-[2px] border border-black/10 transition-transform hover:scale-[1.12] focus:scale-[1.12]"
+                              className="h-3 w-3 rounded-sm border border-[color-mix(in_oklab,var(--ark-line)_70%,transparent)] transition-transform hover:scale-[1.12] focus:scale-[1.12]"
                               style={{ backgroundColor: ACTIVITY_LEVEL_COLORS[level] }}
                               onMouseEnter={() => setHoveredDate(cell)}
                               onMouseLeave={() => setHoveredDate((prev) => (prev?.date === cell.date ? null : prev))}
@@ -639,30 +673,30 @@ function SourceActivityHeatmap({
           <div className="mt-1.5 flex items-center gap-1 text-xs mp-muted">
             <span>少</span>
             {ACTIVITY_LEVEL_COLORS.map((color) => (
-              <span key={color} className="h-3 w-3 rounded-[2px] border border-black/10" style={{ backgroundColor: color }} />
+              <span
+                key={color}
+                className="h-3 w-3 rounded-sm border border-[color-mix(in_oklab,var(--ark-line)_70%,transparent)]"
+                style={{ backgroundColor: color }}
+              />
             ))}
             <span>多</span>
           </div>
         </div>
 
-        <div className="self-start w-full rounded-xl border border-[var(--ark-line)] bg-[var(--ark-surface)] p-1.5">
-          <div className="max-h-[160px] space-y-1 overflow-auto pr-1">
+        <div className="self-start w-full rounded-xl border border-[var(--ark-line)] bg-[var(--ark-surface)] p-3">
+          <label className="text-xs font-medium text-[var(--ark-ink-soft)]">年份</label>
+          <select
+            className="mp-select mt-2 w-full"
+            value={selectedYear}
+            onChange={(event) => onSelectYear(Number(event.target.value))}
+            disabled={loading}
+          >
             {years.map((year) => (
-              <button
-                key={`year:${year}`}
-                type="button"
-                className={`w-full rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors ${
-                  year === selectedYear
-                    ? "bg-blue-600 text-white"
-                    : "text-[var(--ark-ink-soft)] hover:bg-[var(--ark-surface-soft)] hover:text-[var(--ark-ink)]"
-                }`}
-                onClick={() => onSelectYear(year)}
-                disabled={loading && year === selectedYear}
-              >
+              <option key={`year:${year}`} value={year}>
                 {year}
-              </button>
+              </option>
             ))}
-          </div>
+          </select>
         </div>
       </div>
     </div>
@@ -671,15 +705,17 @@ function SourceActivityHeatmap({
 
 export function DashboardPage() {
   const navigate = useNavigate();
-  const [capacities, setCapacities] = useState<StorageCapacityItem[]>([]);
-  const [storageMediaSummary, setStorageMediaSummary] = useState<StorageMediaSummaryItem[]>([]);
-  const [sourceActivity, setSourceActivity] = useState<SourceMediaActivity | null>(null);
-  const [selectedActivityYear, setSelectedActivityYear] = useState(new Date().getFullYear());
+  const initialActivityYear = dashboardCache.selectedActivityYear ?? new Date().getFullYear();
+  const cachedActivity = dashboardCache.sourceActivityByYear.get(initialActivityYear)?.data ?? null;
+  const [capacities, setCapacities] = useState<StorageCapacityItem[]>(() => dashboardCache.capacities);
+  const [storageMediaSummary, setStorageMediaSummary] = useState<StorageMediaSummaryItem[]>(() => dashboardCache.storageMediaSummary);
+  const [sourceActivity, setSourceActivity] = useState<SourceMediaActivity | null>(cachedActivity);
+  const [selectedActivityYear, setSelectedActivityYear] = useState(initialActivityYear);
   const [loadingActivity, setLoadingActivity] = useState(false);
-  const [relationNodes, setRelationNodes] = useState<StorageRelationNodeItem[]>([]);
-  const [relationEdges, setRelationEdges] = useState<StorageRelationEdgeItem[]>([]);
-  const [jobs, setJobs] = useState<BackupJob[]>([]);
-  const [executions, setExecutions] = useState<JobExecution[]>([]);
+  const [relationNodes, setRelationNodes] = useState<StorageRelationNodeItem[]>(() => dashboardCache.relationNodes);
+  const [relationEdges, setRelationEdges] = useState<StorageRelationEdgeItem[]>(() => dashboardCache.relationEdges);
+  const [jobs, setJobs] = useState<BackupJob[]>(() => dashboardCache.jobs);
+  const [executions, setExecutions] = useState<JobExecution[]>(() => dashboardCache.executions);
   const [edgeActionEdgeId, setEdgeActionEdgeId] = useState<string | null>(null);
   const [edgeActionEditJobId, setEdgeActionEditJobId] = useState<string>("");
   const [pendingSyncEdgeId, setPendingSyncEdgeId] = useState<string | null>(null);
@@ -691,44 +727,110 @@ export function DashboardPage() {
   const hadActiveExecutionRef = useRef(false);
   const executionPollTimerRef = useRef<number | null>(null);
 
-  async function refreshRelationGraph() {
-    const relationRes = await getStorageRelations();
-    setRelationNodes(relationRes.nodes);
-    setRelationEdges(relationRes.edges);
+  function handleSelectActivityYear(year: number) {
+    dashboardCache.selectedActivityYear = year;
+    setSelectedActivityYear(year);
   }
 
-  async function loadAll() {
+  async function refreshRelationGraph(force = false) {
+    const now = Date.now();
+    if (!force && dashboardCache.relationUpdatedAt > 0 && now - dashboardCache.relationUpdatedAt < DASHBOARD_CACHE_TTL_MS) {
+      return;
+    }
     try {
-      const [capacityRes, mediaRes, relationRes, jobsRes, executionsRes] = await Promise.all([
-        getStorageCapacities(),
-        getStorageMediaSummary(),
-        getStorageRelations(),
-        getJobs(),
-        getJobExecutions()
-      ]);
-      setCapacities(capacityRes.items);
-      setStorageMediaSummary(mediaRes.items);
+      const relationRes = await getStorageRelations();
       setRelationNodes(relationRes.nodes);
       setRelationEdges(relationRes.edges);
-      setJobs(jobsRes.items);
-      setExecutions(executionsRes.items);
+      dashboardCache.relationNodes = relationRes.nodes;
+      dashboardCache.relationEdges = relationRes.edges;
+      dashboardCache.relationUpdatedAt = Date.now();
     } catch (err) {
       setError((err as Error).message);
     }
   }
 
+  async function refreshPrimaryData(force = false) {
+    const now = Date.now();
+    if (!force && dashboardCache.primaryUpdatedAt > 0 && now - dashboardCache.primaryUpdatedAt < DASHBOARD_CACHE_TTL_MS) {
+      return;
+    }
+    const results = await Promise.allSettled([
+      getStorageCapacities(),
+      getStorageMediaSummary(),
+      getJobs(),
+      getJobExecutions()
+    ]);
+    const failures: string[] = [];
+    let hasSuccess = false;
+
+    const [capacityRes, mediaRes, jobsRes, executionsRes] = results;
+    if (capacityRes.status === "fulfilled") {
+      setCapacities(capacityRes.value.items);
+      dashboardCache.capacities = capacityRes.value.items;
+      hasSuccess = true;
+    } else {
+      failures.push("存储容量");
+    }
+    if (mediaRes.status === "fulfilled") {
+      setStorageMediaSummary(mediaRes.value.items);
+      dashboardCache.storageMediaSummary = mediaRes.value.items;
+      hasSuccess = true;
+    } else {
+      failures.push("媒体分布");
+    }
+    if (jobsRes.status === "fulfilled") {
+      setJobs(jobsRes.value.items);
+      dashboardCache.jobs = jobsRes.value.items;
+      hasSuccess = true;
+    } else {
+      failures.push("任务列表");
+    }
+    if (executionsRes.status === "fulfilled") {
+      setExecutions(executionsRes.value.items);
+      dashboardCache.executions = executionsRes.value.items;
+      hasSuccess = true;
+    } else {
+      failures.push("任务进度");
+    }
+
+    if (hasSuccess) {
+      dashboardCache.primaryUpdatedAt = Date.now();
+    }
+
+    if (failures.length === results.length) {
+      setError(`首页数据加载失败：${failures.join("、")}`);
+    } else if (failures.length) {
+      setError(`部分数据加载失败：${failures.join("、")}`);
+    } else {
+      setError("");
+    }
+  }
+
   useEffect(() => {
-    void loadAll();
+    void refreshPrimaryData();
+    void refreshRelationGraph();
   }, []);
 
   useEffect(() => {
     let canceled = false;
+    const cached = dashboardCache.sourceActivityByYear.get(selectedActivityYear);
+    const now = Date.now();
+    if (cached && now - cached.updatedAt < DASHBOARD_ACTIVITY_CACHE_TTL_MS) {
+      setSourceActivity(cached.data);
+      setLoadingActivity(false);
+      return () => {
+        canceled = true;
+      };
+    }
+
     async function loadSourceActivity() {
       setLoadingActivity(true);
       try {
         const res = await getSourceMediaActivity(selectedActivityYear);
         if (canceled) return;
         setSourceActivity(res);
+        dashboardCache.sourceActivityByYear.set(res.year, { data: res, updatedAt: Date.now() });
+        dashboardCache.selectedActivityYear = res.year;
         if (res.year !== selectedActivityYear) {
           setSelectedActivityYear(res.year);
         }
@@ -792,6 +894,7 @@ export function DashboardPage() {
         const executionsRes = await getJobExecutions();
         if (disposed) return;
         setExecutions(executionsRes.items);
+        dashboardCache.executions = executionsRes.items;
         const hasActive = executionsRes.items.some((execution) => isExecutionActive(execution));
         scheduleNextPoll(hasActive ? 1200 : 8000);
       } catch {
@@ -818,7 +921,7 @@ export function DashboardPage() {
     }
     if (!hadActiveExecutionRef.current) return;
     hadActiveExecutionRef.current = false;
-    void refreshRelationGraph().catch(() => undefined);
+    void refreshRelationGraph(true);
   }, [hasAnyActiveExecution]);
 
   const runningEdgeIds = useMemo(() => {
@@ -951,44 +1054,30 @@ export function DashboardPage() {
   }, [pendingSyncRunnableJobIds, jobById]);
 
   const progressDialogEdge = progressDialogEdgeId ? edgeById.get(progressDialogEdgeId) : undefined;
-  const progressDialogRows = useMemo(() => {
-    if (!progressDialogEdge) return [] as Array<{ job: BackupJob | undefined; execution: JobExecution | undefined; active: boolean }>;
-    return progressDialogEdge.jobIds
-      .map((jobId) => ({
-        job: jobById.get(jobId),
-        execution: latestExecutionByJobId.get(jobId),
-        active: activeExecutionByJobId.has(jobId)
-      }))
-      .sort((a, b) => {
-        if (a.active !== b.active) return a.active ? -1 : 1;
-        return (a.job?.name ?? "").localeCompare(b.job?.name ?? "", "zh-CN");
-      });
-  }, [progressDialogEdge, jobById, latestExecutionByJobId, activeExecutionByJobId]);
-
-  const progressDialogActiveCount = progressDialogRows.filter((row) => row.active).length;
-  const progressDialogCanBackground = progressDialogActiveCount > 0;
-  const progressDialogPercent =
-    progressDialogRows.length > 0
-      ? toPercent(
-          progressDialogRows.reduce((sum, row) => sum + (row.execution?.progress.percent ?? 0), 0) / progressDialogRows.length
-        )
-      : 0;
-
-  const progressDialogStatus = useMemo(() => {
-    if (!progressDialogRows.length) {
-      return { text: "未执行", className: "mp-muted" };
+  const progressDialogExecution = useMemo(() => {
+    if (!progressDialogEdge) return undefined;
+    const activeExecutions = progressDialogEdge.jobIds
+      .map((jobId) => activeExecutionByJobId.get(jobId))
+      .filter((item): item is JobExecution => Boolean(item));
+    if (activeExecutions.length) {
+      return activeExecutions.reduce((latest, item) => (Date.parse(item.updatedAt) > Date.parse(latest.updatedAt) ? item : latest));
     }
-    if (progressDialogCanBackground) {
-      return { text: `执行中（${progressDialogActiveCount}/${progressDialogRows.length}）`, className: "mp-status-warning" };
-    }
-    if (progressDialogRows.some((row) => row.execution?.status === "failed")) {
-      return { text: "执行完成（含失败）", className: "mp-status-danger" };
-    }
-    if (progressDialogRows.every((row) => row.execution?.status === "success")) {
-      return { text: "执行完成", className: "mp-status-success" };
-    }
-    return { text: "等待执行", className: "mp-muted" };
-  }, [progressDialogRows, progressDialogCanBackground, progressDialogActiveCount]);
+    const latestExecutions = progressDialogEdge.jobIds
+      .map((jobId) => latestExecutionByJobId.get(jobId))
+      .filter((item): item is JobExecution => Boolean(item));
+    if (!latestExecutions.length) return undefined;
+    return latestExecutions.reduce((latest, item) => (Date.parse(item.updatedAt) > Date.parse(latest.updatedAt) ? item : latest));
+  }, [progressDialogEdge, activeExecutionByJobId, latestExecutionByJobId]);
+  const progressDialogJob = progressDialogExecution ? jobById.get(progressDialogExecution.jobId) : undefined;
+  const progressDialogPercent = progressDialogExecution?.progress.percent ?? 0;
+  const progressDialogStatusLabel = progressDialogExecution ? getExecutionStatusLabel(progressDialogExecution) : "";
+  const progressDialogStatusClass =
+    progressDialogExecution?.status === "failed"
+      ? "mp-status-danger"
+      : progressDialogExecution?.status === "success"
+        ? "mp-status-success"
+        : "mp-status-warning";
+  const progressDialogCanBackground = Boolean(progressDialogExecution && isExecutionActive(progressDialogExecution));
 
   const summaryTone = getCapacityTone(capacitySummary.freePercent);
 
@@ -1085,255 +1174,223 @@ export function DashboardPage() {
       ) : null}
 
       <motion.article
-        className="mp-panel p-4"
+        className=""
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.03, duration: 0.2, ease: "easeOut" }}
       >
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h3 className="text-base font-semibold">存储同步关系图</h3>
-          </div>
-          <div className="flex flex-wrap items-center gap-2 text-sm">
-            <span className="mp-chip">存储节点 {relationNodes.length}</span>
-            <span className="mp-chip">同步关系 {relationEdges.length}</span>
-            <span className="mp-chip mp-chip-success">已同步 {relationSummary.syncedEdgeCount}</span>
-            <span className="mp-chip mp-chip-warning">待处理 {relationSummary.attentionEdgeCount}</span>
-            <span className="mp-chip">孤立节点 {relationSummary.isolatedNodeCount}</span>
-          </div>
-        </div>
+        <SectionCard
+          title="存储同步关系图"
+          right={
+            <>
+              <span className="mp-chip">存储节点 {relationNodes.length}</span>
+              <span className="mp-chip">同步关系 {relationEdges.length}</span>
+              <span className="mp-chip mp-chip-success">已同步 {relationSummary.syncedEdgeCount}</span>
+              <span className="mp-chip mp-chip-warning">待处理 {relationSummary.attentionEdgeCount}</span>
+              <span className="mp-chip">孤立节点 {relationSummary.isolatedNodeCount}</span>
+            </>
+          }
+        >
+          <div className="relative overflow-hidden rounded-2xl border border-[var(--ark-line)] p-3 sm:p-4 mp-relation-graph-surface">
+            <div className="pointer-events-none absolute right-3 top-3 z-10 flex flex-wrap items-center gap-2 rounded-full bg-[color-mix(in_oklab,var(--ark-surface)_70%,transparent)] px-2.5 py-1 text-[11px] text-[var(--ark-ink-soft)] backdrop-blur">
+              <span className="inline-flex items-center gap-1">
+                <span className="h-2 w-2 rounded-full" style={{ backgroundColor: "var(--ark-success)" }} />
+                已同步
+              </span>
+              <span className="inline-flex items-center gap-1">
+                <span className="h-2 w-2 rounded-full" style={{ backgroundColor: "var(--ark-warning)" }} />
+                待同步
+              </span>
+              <span className="inline-flex items-center gap-1">
+                <span className="h-2 w-2 rounded-full" style={{ backgroundColor: "var(--ark-accent)" }} />
+                同步中
+              </span>
+              <span className="inline-flex items-center gap-1">
+                <span className="h-2 w-2 rounded-full" style={{ backgroundColor: "var(--ark-ink-soft)" }} />
+                孤立
+              </span>
+            </div>
+            {relationNodes.length ? (
+              <div className="mx-auto w-full max-w-[1320px]" style={{ aspectRatio: `${RELATION_GRAPH_WIDTH} / ${relationGraphHeight}` }}>
+                <svg viewBox={`0 0 ${RELATION_GRAPH_WIDTH} ${relationGraphHeight}`} className="h-full w-full" role="img" aria-label="存储同步关系图">
+                  <defs>
+                    <marker id="relation-arrow-synced" markerWidth="12" markerHeight="12" refX="8.8" refY="6" orient="auto">
+                      <path d="M0,0 L0,12 L9,6 z" fill="var(--ark-success)" />
+                    </marker>
+                    <marker id="relation-arrow-attention" markerWidth="12" markerHeight="12" refX="8.8" refY="6" orient="auto">
+                      <path d="M0,0 L0,12 L9,6 z" fill="var(--ark-warning)" />
+                    </marker>
+                    <linearGradient id="relation-node-connected" x1="0%" y1="0%" x2="100%" y2="100%">
+                      <stop offset="0%" stopColor="color-mix(in oklab, var(--ark-accent) 12%, var(--ark-surface))" />
+                      <stop offset="100%" stopColor="color-mix(in oklab, var(--ark-primary) 18%, var(--ark-surface))" />
+                    </linearGradient>
+                    <linearGradient id="relation-node-isolated" x1="0%" y1="0%" x2="100%" y2="100%">
+                      <stop offset="0%" stopColor="color-mix(in oklab, var(--ark-surface) 92%, var(--ark-surface-soft))" />
+                      <stop offset="100%" stopColor="color-mix(in oklab, var(--ark-surface-soft) 70%, var(--ark-surface-deep))" />
+                    </linearGradient>
+                    <pattern id="relation-grid" width="40" height="40" patternUnits="userSpaceOnUse">
+                      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="rgba(148,163,184,0.18)" strokeWidth="1" />
+                    </pattern>
+                    <filter id="relation-node-shadow" x="-30%" y="-30%" width="160%" height="180%">
+                      <feDropShadow dx="0" dy="9" stdDeviation="6.5" floodColor="#0f172a" floodOpacity="0.15" />
+                    </filter>
+                  </defs>
 
-        <div className="mt-3 flex flex-wrap gap-2 text-xs">
-          <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-emerald-700">
-            <span className="h-2 w-2 rounded-full bg-emerald-500" />
-            已同步链路
-          </span>
-          <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-amber-700">
-            <span className="h-2 w-2 rounded-full bg-amber-500" />
-            待同步链路
-          </span>
-          <span className="inline-flex items-center gap-1 rounded-full border border-cyan-200 bg-cyan-50 px-2 py-1 text-cyan-700">
-            <span className="h-2 w-2 rounded-full bg-cyan-500" />
-            后台同步中
-          </span>
-          <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-slate-600">
-            <span className="h-2 w-2 rounded-full bg-slate-400" />
-            孤立存储
-          </span>
-        </div>
-        <div className="mt-3 overflow-hidden rounded-2xl border border-[var(--ark-line)] p-3 sm:p-4 mp-relation-graph-surface">
-          {relationNodes.length ? (
-            <div className="mx-auto w-full max-w-[1320px]" style={{ aspectRatio: `${RELATION_GRAPH_WIDTH} / ${relationGraphHeight}` }}>
-              <svg viewBox={`0 0 ${RELATION_GRAPH_WIDTH} ${relationGraphHeight}`} className="h-full w-full" role="img" aria-label="存储同步关系图">
-                <defs>
-                  <marker id="relation-arrow-synced" markerWidth="12" markerHeight="12" refX="8.8" refY="6" orient="auto">
-                    <path d="M0,0 L0,12 L9,6 z" fill="#22c55e" />
-                  </marker>
-                  <marker id="relation-arrow-attention" markerWidth="12" markerHeight="12" refX="8.8" refY="6" orient="auto">
-                    <path d="M0,0 L0,12 L9,6 z" fill="#f59e0b" />
-                  </marker>
-                  <linearGradient id="relation-node-connected" x1="0%" y1="0%" x2="100%" y2="100%">
-                    <stop offset="0%" stopColor="#ecfeff" />
-                    <stop offset="100%" stopColor="#bfdbfe" />
-                  </linearGradient>
-                  <linearGradient id="relation-node-isolated" x1="0%" y1="0%" x2="100%" y2="100%">
-                    <stop offset="0%" stopColor="#f8fafc" />
-                    <stop offset="100%" stopColor="#e2e8f0" />
-                  </linearGradient>
-                  <pattern id="relation-grid" width="40" height="40" patternUnits="userSpaceOnUse">
-                    <path d="M 40 0 L 0 0 0 40" fill="none" stroke="rgba(148,163,184,0.18)" strokeWidth="1" />
-                  </pattern>
-                  <filter id="relation-node-shadow" x="-30%" y="-30%" width="160%" height="180%">
-                    <feDropShadow dx="0" dy="9" stdDeviation="6.5" floodColor="#0f172a" floodOpacity="0.15" />
-                  </filter>
-                </defs>
+                  <rect x={0} y={0} width={RELATION_GRAPH_WIDTH} height={relationGraphHeight} fill="url(#relation-grid)" opacity={0.68} />
+                  <ellipse cx={RELATION_GRAPH_WIDTH * 0.2} cy={relationGraphHeight * 0.16} rx={RELATION_GRAPH_WIDTH * 0.19} ry={relationGraphHeight * 0.32} fill="rgba(56,189,248,0.08)" />
+                  <ellipse cx={RELATION_GRAPH_WIDTH * 0.82} cy={relationGraphHeight * 0.84} rx={RELATION_GRAPH_WIDTH * 0.24} ry={relationGraphHeight * 0.34} fill="rgba(14,165,233,0.06)" />
 
-                <rect x={0} y={0} width={RELATION_GRAPH_WIDTH} height={relationGraphHeight} fill="url(#relation-grid)" opacity={0.68} />
-                <ellipse cx={RELATION_GRAPH_WIDTH * 0.2} cy={relationGraphHeight * 0.16} rx={RELATION_GRAPH_WIDTH * 0.19} ry={relationGraphHeight * 0.32} fill="rgba(56,189,248,0.08)" />
-                <ellipse cx={RELATION_GRAPH_WIDTH * 0.82} cy={relationGraphHeight * 0.84} rx={RELATION_GRAPH_WIDTH * 0.24} ry={relationGraphHeight * 0.34} fill="rgba(14,165,233,0.06)" />
-
-                {renderedRelationEdges.map((edge) => (
-                  <g key={`edge:${edge.id}`}>
-                    <path
-                      d={edge.d}
-                      fill="none"
-                      stroke={edge.strokeColor}
-                      strokeWidth={3.2}
-                      strokeLinecap="round"
-                      markerEnd={`url(#${edge.markerId})`}
-                      strokeDasharray={edge.strokeDasharray}
-                      opacity={0.96}
-                    >
-                      <title>{edge.description}</title>
-                    </path>
-
-                    {edge.isRunning ? (
-                      <>
-                        <path
-                          d={edge.d}
-                          fill="none"
-                          stroke="#22d3ee"
-                          strokeWidth={6.2}
-                          strokeLinecap="round"
-                          className="mp-relation-edge-flow"
-                          opacity={0.96}
-                        />
-                        <circle r={4.2} fill="#22d3ee" className="mp-relation-energy" opacity={0.95}>
-                          <animateMotion dur="1.4s" repeatCount="indefinite" path={edge.d} />
-                        </circle>
-                        <circle r={3.3} fill="#67e8f9" className="mp-relation-energy" opacity={0.85}>
-                          <animateMotion dur="1.8s" begin="-0.9s" repeatCount="indefinite" path={edge.d} />
-                        </circle>
-                      </>
-                    ) : null}
-
-                    {edge.isInteractive ? (
+                  {renderedRelationEdges.map((edge) => (
+                    <g key={`edge:${edge.id}`}>
                       <path
                         d={edge.d}
                         fill="none"
-                        stroke="transparent"
-                        strokeWidth={18}
-                        className="mp-relation-edge-hit"
-                        onClick={() => handleRelationEdgeClick(edge.id)}
-                      />
-                    ) : null}
-                  </g>
-                ))}
-
-                {relationNodes.map((node) => {
-                  const pos = nodePositions.get(node.storageId);
-                  if (!pos) return null;
-                  const connected = relationSummary.connectedNodeIds.has(node.storageId);
-                  const fill = connected ? "url(#relation-node-connected)" : "url(#relation-node-isolated)";
-                  const stroke = connected ? "#0284c7" : "#94a3b8";
-                  const halo = connected ? "rgba(56,189,248,0.2)" : "rgba(148,163,184,0.16)";
-                  const statusDot = connected ? "#10b981" : "#94a3b8";
-
-                  return (
-                    <g key={`node:${node.storageId}`} transform={`translate(${pos.x}, ${pos.y})`} className="mp-relation-node">
-                      <g filter="url(#relation-node-shadow)">
-                        <circle r={RELATION_NODE_RADIUS + 4} fill={halo} />
-                        <circle r={RELATION_NODE_RADIUS} fill={fill} stroke={stroke} strokeWidth={2.8} />
-                        <circle r={RELATION_NODE_RADIUS - 10} fill="rgba(255,255,255,0.86)" stroke="rgba(148,163,184,0.34)" strokeWidth={1.2} />
-                        <circle cx={RELATION_NODE_RADIUS - 8} cy={-RELATION_NODE_RADIUS + 8} r={4.4} fill={statusDot} stroke="#ffffff" strokeWidth={1.4} />
-                      </g>
-
-                      <text y={-6} textAnchor="middle" dominantBaseline="central" fontSize="10.5" fontWeight={600} fill="#475569" letterSpacing={0.2}>
-                        {getStorageTypeLabel(node.type)}
-                      </text>
-
-                      <text y={13} textAnchor="middle" fontSize="12" fontWeight={700} fill="#0f172a">
-                        {clipLabel(node.storageName, 12)}
-                      </text>
-
-                      <text
-                        y={RELATION_NODE_RADIUS + 22}
-                        textAnchor="middle"
-                        fontSize="10.5"
-                        fontWeight={600}
-                        fill="#334155"
-                        className="mp-relation-node-path"
-                        paintOrder="stroke"
-                        stroke="rgba(255,255,255,0.92)"
-                        strokeWidth={3.4}
+                        stroke={edge.strokeColor}
+                        strokeWidth={3.2}
                         strokeLinecap="round"
-                        strokeLinejoin="round"
+                        markerEnd={`url(#${edge.markerId})`}
+                        strokeDasharray={edge.strokeDasharray}
+                        opacity={0.96}
                       >
-                        {clipLabel(node.basePath, 22)}
-                      </text>
+                        <title>{edge.description}</title>
+                      </path>
 
-                      <title>{`${node.storageName}\n${node.basePath}`}</title>
+                      {edge.isRunning ? (
+                        <>
+                          <path
+                            d={edge.d}
+                            fill="none"
+                            stroke="var(--ark-accent)"
+                            strokeWidth={6.2}
+                            strokeLinecap="round"
+                            className="mp-relation-edge-flow"
+                            opacity={0.96}
+                          />
+                          <circle r={4.2} fill="var(--ark-accent)" className="mp-relation-energy" opacity={0.95}>
+                            <animateMotion dur="1.4s" repeatCount="indefinite" path={edge.d} />
+                          </circle>
+                          <circle r={3.3} fill="color-mix(in oklab, var(--ark-accent) 60%, white)" className="mp-relation-energy" opacity={0.85}>
+                            <animateMotion dur="1.8s" begin="-0.9s" repeatCount="indefinite" path={edge.d} />
+                          </circle>
+                        </>
+                      ) : null}
+
+                      {edge.isInteractive ? (
+                        <path
+                          d={edge.d}
+                          fill="none"
+                          stroke="transparent"
+                          strokeWidth={18}
+                          className="mp-relation-edge-hit"
+                          onClick={() => handleRelationEdgeClick(edge.id)}
+                        />
+                      ) : null}
                     </g>
-                  );
-                })}
-              </svg>
-            </div>
-          ) : (
-            <p className="px-3 py-12 text-center text-sm mp-muted">暂无存储配置</p>
-          )}
-        </div>
+                  ))}
 
-        <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-          {relationEdges.map((edge) => {
-            const runningCount = runningJobCountByEdgeId.get(edge.id) ?? 0;
-            const toneClass = runningCount
-              ? "border-cyan-200 bg-cyan-50/80 text-cyan-700"
-              : edge.status === "synced"
-                ? "border-emerald-200 bg-emerald-50/80 text-emerald-700"
-                : "border-amber-200 bg-amber-50/80 text-amber-700";
+                  {relationNodes.map((node) => {
+                    const pos = nodePositions.get(node.storageId);
+                    if (!pos) return null;
+                    const connected = relationSummary.connectedNodeIds.has(node.storageId);
+                    const fill = connected ? "url(#relation-node-connected)" : "url(#relation-node-isolated)";
+                    const stroke = connected ? "var(--ark-accent)" : "var(--ark-line-strong)";
+                    const halo = connected ? "color-mix(in oklab, var(--ark-accent) 22%, transparent)" : "color-mix(in oklab, var(--ark-line) 24%, transparent)";
+                    const statusDot = connected ? "var(--ark-success)" : "var(--ark-ink-soft)";
 
-            return (
-              <button
-                key={`summary:${edge.id}`}
-                type="button"
-                className={`rounded-lg border px-3 py-2 text-left text-sm ${toneClass} ${interactiveEdgeIds.has(edge.id) ? "cursor-pointer" : "cursor-default"}`}
-                onClick={() => handleRelationEdgeClick(edge.id)}
-                disabled={!interactiveEdgeIds.has(edge.id)}
-              >
-                <p className="font-semibold">
-                  {edge.sourceStorageName}
-                  {" -> "}
-                  {edge.destinationStorageName}
-                </p>
-                <p className="mt-1 text-xs opacity-90">
-                  {runningCount > 0 ? `后台同步中（${runningCount}/${edge.jobCount}）` : edge.summary}
-                </p>
-              </button>
-            );
-          })}
-          {!relationEdges.length && relationNodes.length ? (
-            <p className="rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface)] px-3 py-2 text-sm mp-muted">
-              暂无同步任务连线，当前均为孤立存储目录。
-            </p>
-          ) : null}
-        </div>
+                    return (
+                      <g key={`node:${node.storageId}`} transform={`translate(${pos.x}, ${pos.y})`} className="mp-relation-node">
+                        <g filter="url(#relation-node-shadow)">
+                          <circle r={RELATION_NODE_RADIUS + 4} fill={halo} />
+                          <circle r={RELATION_NODE_RADIUS} fill={fill} stroke={stroke} strokeWidth={2.8} />
+                          <circle
+                            r={RELATION_NODE_RADIUS - 10}
+                            fill="color-mix(in oklab, var(--ark-surface) 84%, white)"
+                            stroke="color-mix(in oklab, var(--ark-line-strong) 40%, transparent)"
+                            strokeWidth={1.2}
+                          />
+                          <circle
+                            cx={RELATION_NODE_RADIUS - 8}
+                            cy={-RELATION_NODE_RADIUS + 8}
+                            r={4.4}
+                            fill={statusDot}
+                            stroke="color-mix(in oklab, var(--ark-surface) 90%, white)"
+                            strokeWidth={1.4}
+                          />
+                        </g>
+
+                        <text y={-6} textAnchor="middle" dominantBaseline="central" fontSize="10.5" fontWeight={600} fill="var(--ark-ink-soft)" letterSpacing={0.2}>
+                          {getStorageTypeLabel(node.type)}
+                        </text>
+
+                        <text y={13} textAnchor="middle" fontSize="12" fontWeight={700} fill="var(--ark-ink)">
+                          {clipLabel(node.storageName, 12)}
+                        </text>
+
+                        <text
+                          y={RELATION_NODE_RADIUS + 22}
+                          textAnchor="middle"
+                          fontSize="10.5"
+                          fontWeight={600}
+                          fill="var(--ark-ink)"
+                          className="mp-relation-node-path"
+                          paintOrder="stroke"
+                          stroke="color-mix(in oklab, var(--ark-surface) 88%, white)"
+                          strokeWidth={3.4}
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        >
+                          {clipLabel(node.basePath, 22)}
+                        </text>
+
+                        <title>{`${node.storageName}\n${node.basePath}`}</title>
+                      </g>
+                    );
+                  })}
+                </svg>
+              </div>
+            ) : (
+              <p className="px-3 py-12 text-center text-sm mp-muted">暂无存储配置</p>
+            )}
+          </div>
+        </SectionCard>
+
       </motion.article>
 
       <motion.article
-        className="mp-panel p-4"
+        className=""
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.06, duration: 0.2, ease: "easeOut" }}
       >
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h3 className="text-base font-semibold">媒体日期分布热力图</h3>
-          </div>
-        </div>
-
-        <div className="mt-3">
+        <SectionCard title="媒体日期分布热力图">
           <SourceActivityHeatmap
             data={sourceActivity}
             selectedYear={selectedActivityYear}
             loading={loadingActivity}
             years={activityYears}
-            onSelectYear={setSelectedActivityYear}
+            onSelectYear={handleSelectActivityYear}
           />
-        </div>
+        </SectionCard>
       </motion.article>
 
       <motion.article
-        className="mp-panel p-4"
+        className=""
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.05, duration: 0.2, ease: "easeOut" }}
       >
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h3 className="text-base font-semibold">存储盘容量</h3>
-            <p className="mt-1 text-sm mp-muted">
-              已读取 {capacitySummary.readable}/{capacitySummary.groups} 组
-              {capacitySummary.unreadable ? `，${capacitySummary.unreadable} 组不可读取` : ""}
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2 text-sm">
-            <span className="mp-chip">总容量 {formatBytes(capacitySummary.totalBytes)}</span>
-            <span className="mp-chip">已用 {formatBytes(capacitySummary.usedBytes)}</span>
-            <span className={summaryTone.chipClass}>整体剩余 {capacitySummary.freePercent}%</span>
-          </div>
-        </div>
-
-        <div className="mt-3 grid gap-3 lg:grid-cols-2">
+        <SectionCard
+          title="存储盘容量"
+          description={`已读取 ${capacitySummary.readable}/${capacitySummary.groups} 组${capacitySummary.unreadable ? `，${capacitySummary.unreadable} 组不可读取` : ""}`}
+          right={
+            <>
+              <span className="mp-chip">总容量 {formatBytes(capacitySummary.totalBytes)}</span>
+              <span className="mp-chip">已用 {formatBytes(capacitySummary.usedBytes)}</span>
+              <span className={summaryTone.chipClass}>整体剩余 {capacitySummary.freePercent}%</span>
+            </>
+          }
+        >
+          <div className="grid gap-3 lg:grid-cols-2">
           {capacities.map((item) => {
             const remainingPercent = getRemainingPercent(item.totalBytes, item.freeBytes);
             const tone = getCapacityTone(remainingPercent);
@@ -1375,29 +1432,29 @@ export function DashboardPage() {
             );
           })}
           {!capacities.length ? <p className="text-sm mp-muted">暂无存储容量数据</p> : null}
-        </div>
+          </div>
+        </SectionCard>
       </motion.article>
 
       <motion.article
-        className="mp-panel p-4"
+        className=""
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.08, duration: 0.2, ease: "easeOut" }}
       >
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h3 className="text-base font-semibold">媒体分布（按存储目录）</h3>
-          </div>
-          <div className="flex flex-wrap items-center gap-2 text-sm">
-            <span className="mp-chip">
-              有媒体的存储 {mediaSummary.storagesWithMedia}/{mediaSummary.totalStorages}
-            </span>
-            <span className="mp-chip">总数量 {mediaSummary.totalCount}</span>
-            <span className="mp-chip">总体积 {formatBytes(mediaSummary.totalBytes)}</span>
-          </div>
-        </div>
-
-        <div className="mt-3 grid gap-3 xl:grid-cols-2">
+        <SectionCard
+          title="媒体分布（按存储目录）"
+          right={
+            <>
+              <span className="mp-chip">
+                有媒体的存储 {mediaSummary.storagesWithMedia}/{mediaSummary.totalStorages}
+              </span>
+              <span className="mp-chip">总数量 {mediaSummary.totalCount}</span>
+              <span className="mp-chip">总体积 {formatBytes(mediaSummary.totalBytes)}</span>
+            </>
+          }
+        >
+          <div className="grid gap-3 xl:grid-cols-2">
           {storageMediaSummary.map((item) => {
             const countSlices: PieSlice[] = [
               { label: "视频", value: item.counts.video, color: mediaColors.video, formattedValue: String(item.counts.video) },
@@ -1441,12 +1498,13 @@ export function DashboardPage() {
             );
           })}
           {!storageMediaSummary.length ? <p className="text-sm mp-muted">暂无媒体统计数据</p> : null}
-        </div>
+          </div>
+        </SectionCard>
       </motion.article>
 
       {edgeActionEdge ? (
         <div
-          className="fixed inset-0 z-[58] flex items-center justify-center bg-black/45 p-4"
+          className="mp-overlay fixed inset-0 z-[58] flex items-center justify-center p-4"
           onClick={() => setEdgeActionEdgeId(null)}
         >
           <div className="mp-panel w-full max-w-lg p-4" onClick={(event) => event.stopPropagation()}>
@@ -1514,72 +1572,58 @@ export function DashboardPage() {
         </div>
       ) : null}
 
-      {progressDialogEdge ? (
+      {progressDialogExecution ? (
         <div
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/45 p-4"
+          className="mp-overlay fixed inset-0 z-[60] flex items-center justify-center p-4"
           onClick={() => {
             if (progressDialogCanBackground) {
               setProgressDialogEdgeId(null);
-              setMessage("任务已切到后台执行，可点击连线随时查看进度。");
-            } else {
-              setProgressDialogEdgeId(null);
+              setMessage("任务已切到后台执行，可在任务列表查看实时进度。");
             }
           }}
         >
-          <div className="mp-panel w-full max-w-2xl p-4" onClick={(event) => event.stopPropagation()}>
+          <div className="mp-panel w-full max-w-lg p-4" onClick={(event) => event.stopPropagation()}>
             <div className="flex items-start justify-between gap-3">
               <div>
-                <h3 className="text-base font-semibold">同步进度</h3>
-                <p className="mt-1 text-sm mp-muted">
-                  {progressDialogEdge.sourceStorageName}
-                  {" -> "}
-                  {progressDialogEdge.destinationStorageName}
-                </p>
+                <h3 className="text-base font-semibold">任务执行进度</h3>
+                <p className="mt-1 text-sm mp-muted">{progressDialogJob?.name ?? progressDialogExecution.jobId}</p>
               </div>
-              <span className={`text-sm font-medium ${progressDialogStatus.className}`}>{progressDialogStatus.text}</span>
+              <span className={`text-sm font-medium ${progressDialogStatusClass}`}>{progressDialogStatusLabel}</span>
             </div>
 
             <div className="mt-3 flex items-center justify-between text-sm">
-              <span className="mp-muted">总体进度</span>
+              <span className="mp-muted">进度</span>
               <span className="font-semibold">{progressDialogPercent}%</span>
             </div>
             <div className="mt-1 h-2 overflow-hidden rounded-full bg-[var(--ark-line)]">
-              <div className="h-full rounded-full bg-[var(--ark-primary)] transition-all duration-300" style={{ width: `${progressDialogPercent}%` }} />
+              <div
+                className="h-full rounded-full bg-[var(--ark-primary)] transition-all duration-300"
+                style={{ width: `${progressDialogPercent}%` }}
+              />
             </div>
 
-            <div className="mt-3 max-h-[48vh] space-y-2 overflow-auto pr-1">
-              {progressDialogRows.map((row) => {
-                const execution = row.execution;
-                const statusText = execution ? getExecutionStatusLabel(execution) : "未执行";
-                const statusClass =
-                  execution?.status === "failed"
-                    ? "mp-status-danger"
-                    : execution?.status === "success"
-                      ? "mp-status-success"
-                      : row.active
-                        ? "mp-status-warning"
-                        : "mp-muted";
-                const percent = execution?.progress.percent ?? 0;
-                return (
-                  <div key={row.job?.id ?? `missing:${statusText}`} className="rounded-md border border-[var(--ark-line)] p-3">
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="text-sm font-semibold break-all">{row.job?.name ?? row.job?.id ?? "未知任务"}</p>
-                      <span className={`text-xs font-medium ${statusClass}`}>
-                        {statusText}
-                        {execution ? ` ${percent}%` : ""}
-                      </span>
-                    </div>
-                    <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--ark-line)]">
-                      <div className="h-full rounded-full bg-[var(--ark-primary)] transition-all" style={{ width: `${percent}%` }} />
-                    </div>
-                    {execution?.progress.currentPath ? (
-                      <p className="mt-1 break-all text-xs mp-muted">当前文件: {execution.progress.currentPath}</p>
-                    ) : null}
-                  </div>
-                );
-              })}
-              {!progressDialogRows.length ? <p className="text-sm mp-muted">暂无可展示的任务进度</p> : null}
+            <div className="mt-3 grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
+              <div className="rounded-md border border-[var(--ark-line)] p-2">
+                <p className="text-xs mp-muted">已扫描</p>
+                <p className="font-semibold">{progressDialogExecution.progress.scannedCount}</p>
+              </div>
+              <div className="rounded-md border border-[var(--ark-line)] p-2">
+                <p className="text-xs mp-muted">已同步</p>
+                <p className="font-semibold">{progressDialogExecution.progress.copiedCount}</p>
+              </div>
+              <div className="rounded-md border border-[var(--ark-line)] p-2">
+                <p className="text-xs mp-muted">已跳过</p>
+                <p className="font-semibold">{progressDialogExecution.progress.skippedCount}</p>
+              </div>
+              <div className="rounded-md border border-[var(--ark-line)] p-2">
+                <p className="text-xs mp-muted">失败</p>
+                <p className="font-semibold text-[var(--ark-danger-text)]">{progressDialogExecution.progress.failedCount}</p>
+              </div>
             </div>
+            {progressDialogExecution.progress.currentPath ? (
+              <p className="mt-2 break-all text-xs mp-muted">当前文件: {progressDialogExecution.progress.currentPath}</p>
+            ) : null}
+            {progressDialogExecution.error ? <p className="mp-error mt-3">{progressDialogExecution.error}</p> : null}
 
             <div className="mt-4 flex justify-end gap-2">
               {progressDialogCanBackground ? (
@@ -1588,15 +1632,16 @@ export function DashboardPage() {
                   className="mp-btn"
                   onClick={() => {
                     setProgressDialogEdgeId(null);
-                    setMessage("任务已切到后台执行，可点击连线随时查看进度。");
+                    setMessage("任务已切到后台执行，可在任务列表查看实时进度。");
                   }}
                 >
                   后台执行
                 </button>
-              ) : null}
-              <button type="button" className="mp-btn mp-btn-primary" onClick={() => setProgressDialogEdgeId(null)}>
-                {progressDialogCanBackground ? "关闭弹窗" : "关闭"}
-              </button>
+              ) : (
+                <button type="button" className="mp-btn mp-btn-primary" onClick={() => setProgressDialogEdgeId(null)}>
+                  关闭
+                </button>
+              )}
             </div>
           </div>
         </div>

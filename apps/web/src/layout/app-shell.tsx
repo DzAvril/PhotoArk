@@ -1,6 +1,8 @@
 import { AnimatePresence, motion } from "framer-motion";
-import { useEffect, useState } from "react";
+import type { ComponentType } from "react";
+import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { GitCompareArrows, Images, LayoutDashboard, ListChecks, Settings, UserRound } from "lucide-react";
 import { getVersionInfo } from "../lib/api";
 import type { AuthUser, VersionInfo } from "../types/api";
 
@@ -14,51 +16,17 @@ const tabs = [
 
 type TabPath = (typeof tabs)[number]["to"];
 
+const tabIconByPath: Record<TabPath, ComponentType<{ className?: string; "aria-hidden"?: boolean }>> = {
+  "/": LayoutDashboard,
+  "/media": Images,
+  "/diff": GitCompareArrows,
+  "/records": ListChecks,
+  "/settings": Settings
+};
+
 function NavTabIcon({ to, className }: { to: TabPath; className?: string }) {
-  if (to === "/") {
-    return (
-      <svg viewBox="0 0 20 20" fill="none" className={className} aria-hidden="true">
-        <path d="M3.5 10.2 10 4.5l6.5 5.7v5.3a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1v-5.3Z" stroke="currentColor" strokeWidth="1.7" />
-        <path d="M8.2 16.5V11h3.6v5.5" stroke="currentColor" strokeWidth="1.7" />
-      </svg>
-    );
-  }
-  if (to === "/media") {
-    return (
-      <svg viewBox="0 0 20 20" fill="none" className={className} aria-hidden="true">
-        <rect x="2.8" y="3.2" width="14.4" height="13.6" rx="2.2" stroke="currentColor" strokeWidth="1.7" />
-        <circle cx="7" cy="7" r="1.4" fill="currentColor" />
-        <path d="M4.8 14.6 8.1 11.3 10.6 13.8 13.1 11.2 15.2 13.3" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
-      </svg>
-    );
-  }
-  if (to === "/diff") {
-    return (
-      <svg viewBox="0 0 20 20" fill="none" className={className} aria-hidden="true">
-        <path d="M3.5 5h5.8M10.7 15h5.8M3.5 10h13" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
-        <circle cx="11" cy="5" r="1.5" fill="currentColor" />
-        <circle cx="8.7" cy="15" r="1.5" fill="currentColor" />
-      </svg>
-    );
-  }
-  if (to === "/records") {
-    return (
-      <svg viewBox="0 0 20 20" fill="none" className={className} aria-hidden="true">
-        <rect x="3.2" y="2.8" width="13.6" height="14.4" rx="2.2" stroke="currentColor" strokeWidth="1.7" />
-        <path d="M6.5 7h7M6.5 10h7M6.5 13h5.1" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
-      </svg>
-    );
-  }
-  return (
-    <svg viewBox="0 0 20 20" fill="none" className={className} aria-hidden="true">
-      <path
-        d="M10 4.4a1.2 1.2 0 0 1 2.1-.8l.4.7c.2.3.6.5 1 .5l.8-.1a1.2 1.2 0 0 1 1.3 1.8l-.4.7c-.2.3-.2.7 0 1l.4.7a1.2 1.2 0 0 1-1.3 1.8l-.8-.1a1 1 0 0 0-1 .5l-.4.7a1.2 1.2 0 0 1-2.1 0l-.4-.7a1 1 0 0 0-1-.5l-.8.1a1.2 1.2 0 0 1-1.3-1.8l.4-.7a1 1 0 0 0 0-1l-.4-.7a1.2 1.2 0 0 1 1.3-1.8l.8.1c.4.1.8-.1 1-.5l.4-.7A1.2 1.2 0 0 1 10 4.4Z"
-        stroke="currentColor"
-        strokeWidth="1.7"
-      />
-      <circle cx="10" cy="10" r="1.8" stroke="currentColor" strokeWidth="1.7" />
-    </svg>
-  );
+  const Icon = tabIconByPath[to];
+  return <Icon className={className} aria-hidden={true} />;
 }
 
 type ThemeMode = "light" | "dark";
@@ -96,6 +64,8 @@ export function AppShell({ authUser, onLogout }: AppShellProps) {
   const [theme, setTheme] = useState<ThemeMode>("light");
   const [version, setVersion] = useState<VersionInfo | null>(null);
   const [loggingOut, setLoggingOut] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
   const location = useLocation();
   const pathname = normalizePathname(location.pathname);
   const pageMeta = getPageMeta(pathname);
@@ -118,6 +88,25 @@ export function AppShell({ authUser, onLogout }: AppShellProps) {
   useEffect(() => {
     void getVersionInfo().then(setVersion).catch(() => undefined);
   }, []);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    function handleClick(event: MouseEvent) {
+      if (!menuRef.current || menuRef.current.contains(event.target as Node)) return;
+      setMenuOpen(false);
+    }
+    function handleKeydown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setMenuOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    document.addEventListener("keydown", handleKeydown);
+    return () => {
+      document.removeEventListener("mousedown", handleClick);
+      document.removeEventListener("keydown", handleKeydown);
+    };
+  }, [menuOpen]);
 
   function toggleTheme() {
     const next: ThemeMode = theme === "light" ? "dark" : "light";
@@ -229,14 +218,47 @@ export function AppShell({ authUser, onLogout }: AppShellProps) {
                   </div>
                 </div>
                 <div className="flex w-full flex-wrap items-center gap-2 md:w-auto md:shrink-0 md:justify-end">
-                  <span className="mp-chip">{authUser.username}</span>
-                  {renderCompactVersionBadge()}
-                  <button type="button" onClick={toggleTheme} className="mp-btn">
-                    {theme === "light" ? "深色模式" : "浅色模式"}
-                  </button>
-                  <button type="button" onClick={handleLogoutClick} className="mp-btn" disabled={loggingOut}>
-                    {loggingOut ? "退出中..." : "退出"}
-                  </button>
+                  <div className="relative" ref={menuRef}>
+                    <button
+                      type="button"
+                      className="mp-btn"
+                      aria-haspopup="menu"
+                      aria-expanded={menuOpen}
+                      onClick={() => setMenuOpen((prev) => !prev)}
+                    >
+                      <UserRound className="h-4 w-4" aria-hidden="true" />
+                      <span className="text-sm">账户</span>
+                    </button>
+                    {menuOpen ? (
+                      <div className="absolute right-0 z-20 mt-2 w-60 overflow-hidden rounded-xl border border-[var(--ark-line)] bg-[var(--ark-surface)] shadow-lg">
+                        <div className="px-3 pt-3">
+                          <p className="text-sm font-semibold">{authUser.username}</p>
+                          <p className="mt-0.5 text-xs mp-muted">已登录</p>
+                        </div>
+                        <div className="px-3 py-2">{renderCompactVersionBadge()}</div>
+                        <div className="px-3 pb-2">
+                          <button type="button" className="mp-btn w-full justify-between" onClick={toggleTheme}>
+                            <span>模式</span>
+                            <span>{theme === "light" ? "深色" : "浅色"}</span>
+                          </button>
+                        </div>
+                        <div className="border-t border-[var(--ark-line)]" />
+                        <div className="p-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setMenuOpen(false);
+                              void handleLogoutClick();
+                            }}
+                            className="mp-btn mp-btn-primary w-full"
+                            disabled={loggingOut}
+                          >
+                            {loggingOut ? "退出中..." : "退出"}
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
                 </div>
               </div>
 

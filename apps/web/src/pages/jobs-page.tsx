@@ -7,8 +7,11 @@ import { TablePagination } from "../components/table/table-pagination";
 import { SortableHeader } from "../components/table/sortable-header";
 import { TableToolbar } from "../components/table/table-toolbar";
 import { useTablePagination } from "../components/table/use-table-pagination";
+import { Button } from "../components/ui/button";
+import { EmptyState } from "../components/ui/empty-state";
+import { SectionCard } from "../components/ui/section-card";
 import { useLocalStorageState } from "../hooks/use-local-storage-state";
-import { createJob, deleteJob, getJobExecutions, getJobs, getRuns, getStorages, runJob, updateJob } from "../lib/api";
+import { cancelJobExecution, createJob, deleteJob, getJobExecutions, getJobs, getRuns, getStorages, runJob, updateJob } from "../lib/api";
 import type { BackupJob, JobExecution, JobRun, StorageTarget } from "../types/api";
 
 type SortKey = "name" | "sourceTargetId" | "destinationTargetId" | "enabled";
@@ -60,8 +63,21 @@ function getExecutionStatusLabel(execution: JobExecution): string {
     if (execution.progress.phase === "scanning") return "扫描中";
     return "执行中";
   }
+  if (execution.status === "canceled") return "已取消";
   if (execution.status === "success") return "执行完成";
   return "执行失败";
+}
+
+function getRunStatusLabel(status: JobRun["status"]): string {
+  if (status === "success") return "成功";
+  if (status === "canceled") return "已取消";
+  return "失败";
+}
+
+function getRunStatusClass(status: JobRun["status"]): string {
+  if (status === "success") return "mp-status-success";
+  if (status === "canceled") return "mp-status-warning";
+  return "mp-status-danger";
 }
 
 function getStorageTypeLabel(type: StorageTarget["type"]): string {
@@ -94,6 +110,7 @@ export function JobsPage() {
   const [deletingSelected, setDeletingSelected] = useState(false);
   const [pendingDeleteAction, setPendingDeleteAction] = useState<PendingDeleteAction | null>(null);
   const [progressDialogExecutionId, setProgressDialogExecutionId] = useState<string | null>(null);
+  const [cancelingExecutionIds, setCancelingExecutionIds] = useState<Set<string>>(new Set());
   const editJobIdFromQuery = searchParams.get("editJobId");
 
   const storageById = useMemo(() => Object.fromEntries(storages.map((s) => [s.id, s])), [storages]);
@@ -267,6 +284,25 @@ export function JobsPage() {
     }
   }
 
+  async function handleCancelExecution(execution: JobExecution) {
+    setError("");
+    setMessage("");
+    setCancelingExecutionIds((prev) => new Set(prev).add(execution.id));
+    try {
+      const result = await cancelJobExecution(execution.id);
+      setExecutions((prev) => upsertExecution(prev, result.execution));
+      setMessage(`任务“${items.find((item) => item.id === execution.jobId)?.name ?? execution.jobId}”已请求停止。`);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setCancelingExecutionIds((prev) => {
+        const next = new Set(prev);
+        next.delete(execution.id);
+        return next;
+      });
+    }
+  }
+
   function toggleSort(nextKey: SortKey) {
     if (nextKey === sortKey) setSortAsc((v) => !v);
     else {
@@ -388,6 +424,8 @@ export function JobsPage() {
   const progressStatusClass =
     progressExecution?.status === "failed"
       ? "mp-status-danger"
+      : progressExecution?.status === "canceled"
+        ? "mp-status-warning"
       : progressExecution?.status === "success"
         ? "mp-status-success"
         : "mp-status-warning";
@@ -416,7 +454,9 @@ export function JobsPage() {
             <h3 className="text-base font-semibold">备份任务</h3>
             <p className="mt-1 text-sm mp-muted">配置源存储、目标存储、计划时间和监听模式。</p>
           </div>
-          <Collapsible.Trigger className="mp-btn">{formOpen ? "收起" : "新增任务"}</Collapsible.Trigger>
+          <Collapsible.Trigger className={formOpen ? "mp-btn" : "mp-btn mp-btn-primary"}>
+            {formOpen ? "收起" : "新增任务"}
+          </Collapsible.Trigger>
         </div>
 
         <Collapsible.Content>
@@ -534,37 +574,47 @@ export function JobsPage() {
             </div>
 
             <div className="flex gap-2 sm:col-span-2">
-              <button type="submit" className="mp-btn mp-btn-primary flex-1">{editingJobId ? "保存修改" : "新增任务"}</button>
+              <Button type="submit" variant="primary" className="flex-1">
+                {editingJobId ? "保存修改" : "新增任务"}
+              </Button>
               {editingJobId ? (
-                <button type="button" className="mp-btn" onClick={resetForm}>
+                <Button type="button" onClick={resetForm}>
                   取消编辑
-                </button>
+                </Button>
               ) : null}
             </div>
           </form>
         </Collapsible.Content>
       </Collapsible.Root>
 
-      <div className="mp-panel p-4 md:flex md:min-h-0 md:flex-1 md:flex-col">
+      <SectionCard
+        title="任务列表"
+        description="支持 / 快捷键聚焦搜索，Esc 清空搜索"
+        right={
+          <>
+            <span className="mp-chip">总任务 {items.length}</span>
+            <span className="mp-chip mp-chip-success">已启用 {enabledCount}</span>
+            <span className="mp-chip">实时监听 {watchModeCount}</span>
+            {hasActiveExecution ? (
+              <span className="mp-chip mp-chip-warning">执行中 {Object.values(activeExecutionByJobId).filter(Boolean).length}</span>
+            ) : null}
+          </>
+        }
+        className="md:min-h-0 md:flex-1 md:flex md:flex-col"
+      >
         <TableToolbar
-          title="任务列表"
           search={search}
           onSearchChange={setSearch}
           pageSize={table.pageSize}
           onPageSizeChange={table.setPageSize}
           totalItems={table.totalItems}
         />
-        <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
-          <span className="mp-chip">总任务 {items.length}</span>
-          <span className="mp-chip mp-chip-success">已启用 {enabledCount}</span>
-          <span className="mp-chip">实时监听 {watchModeCount}</span>
-          {hasActiveExecution ? <span className="mp-chip mp-chip-warning">执行中 {Object.values(activeExecutionByJobId).filter(Boolean).length}</span> : null}
-        </div>
+
         <div className="mb-2 flex justify-end">
-          <button
-            className="mp-btn"
-            type="button"
-            disabled={!selected.size || deletingSelected}
+          <Button
+            variant="danger"
+            disabled={!selected.size}
+            busy={deletingSelected}
             onClick={() =>
               setPendingDeleteAction({
                 mode: "batch",
@@ -574,10 +624,22 @@ export function JobsPage() {
             }
           >
             {deletingSelected ? "删除中..." : `批量删除 (${selected.size})`}
-          </button>
+          </Button>
         </div>
 
-        <div className="space-y-2 md:hidden">
+        {!table.totalItems ? (
+          <EmptyState
+            title="暂无任务"
+            description="先创建一个备份任务（定时或实时监听），然后可在这里查看状态与历史。"
+            action={
+              <Button variant="primary" onClick={() => setFormOpen(true)}>
+                去新增任务
+              </Button>
+            }
+          />
+        ) : (
+          <>
+            <div className="space-y-2 md:hidden">
           {table.paged.map((j) => {
             const latest = latestRunByJobId[j.id];
             const activeExecution = activeExecutionByJobId[j.id];
@@ -632,9 +694,7 @@ export function JobsPage() {
                       </>
                     ) : latest ? (
                       <>
-                        <span className={latest.status === "success" ? "mp-status-success" : "mp-status-danger"}>
-                          {latest.status === "success" ? "成功" : "失败"}
-                        </span>
+                        <span className={getRunStatusClass(latest.status)}>{getRunStatusLabel(latest.status)}</span>
                         <span className="ml-2 mp-muted">{new Date(latest.finishedAt).toLocaleString()}</span>
                       </>
                     ) : (
@@ -650,11 +710,7 @@ export function JobsPage() {
                     disabled={!j.enabled || running}
                     onClick={() => void handleRunJob(j)}
                   >
-                    {running
-                      ? activeExecution?.status === "queued"
-                        ? "排队中"
-                        : `执行中 ${activeExecution?.progress.percent ?? 0}%`
-                      : "立即执行"}
+                    {running ? (activeExecution?.status === "queued" ? "排队中" : "执行中") : "立即执行"}
                   </button>
                   {activeExecution ? (
                     <button
@@ -665,6 +721,16 @@ export function JobsPage() {
                       }}
                     >
                       查看进度
+                    </button>
+                  ) : null}
+                  {activeExecution ? (
+                    <button
+                      type="button"
+                      className="mp-btn"
+                      disabled={cancelingExecutionIds.has(activeExecution.id)}
+                      onClick={() => void handleCancelExecution(activeExecution)}
+                    >
+                      {cancelingExecutionIds.has(activeExecution.id) ? "停止中" : "停止"}
                     </button>
                   ) : null}
                   <button type="button" className="mp-btn" onClick={() => startEdit(j)}>
@@ -788,9 +854,7 @@ export function JobsPage() {
                         </div>
                       ) : latest ? (
                         <div>
-                          <div className={latest.status === "success" ? "mp-status-success" : "mp-status-danger"}>
-                            {latest.status === "success" ? "成功" : "失败"}
-                          </div>
+                          <div className={getRunStatusClass(latest.status)}>{getRunStatusLabel(latest.status)}</div>
                           <div className="mp-muted">{new Date(latest.finishedAt).toLocaleString()}</div>
                         </div>
                       ) : (
@@ -805,11 +869,7 @@ export function JobsPage() {
                           disabled={!j.enabled || running}
                           onClick={() => void handleRunJob(j)}
                         >
-                          {running
-                            ? activeExecution?.status === "queued"
-                              ? "排队中"
-                              : `执行中 ${activeExecution?.progress.percent ?? 0}%`
-                            : "立即执行"}
+                          {running ? (activeExecution?.status === "queued" ? "排队中" : "执行中") : "立即执行"}
                         </button>
                         {activeExecution ? (
                           <button
@@ -820,6 +880,16 @@ export function JobsPage() {
                             }}
                           >
                             查看进度
+                          </button>
+                        ) : null}
+                        {activeExecution ? (
+                          <button
+                            type="button"
+                            className="mp-btn"
+                            disabled={cancelingExecutionIds.has(activeExecution.id)}
+                            onClick={() => void handleCancelExecution(activeExecution)}
+                          >
+                            {cancelingExecutionIds.has(activeExecution.id) ? "停止中" : "停止"}
                           </button>
                         ) : null}
                         <button type="button" className="mp-btn" onClick={() => startEdit(j)}>
@@ -853,19 +923,14 @@ export function JobsPage() {
           </table>
         </div>
 
-        <TablePagination page={table.page} totalPages={table.totalPages} onChange={table.setPage} />
-        {!table.totalItems ? (
-          <div className="mt-3 flex justify-center md:justify-end">
-            <button type="button" className="mp-btn" onClick={() => setFormOpen(true)}>
-              去新增任务
-            </button>
-          </div>
-        ) : null}
-      </div>
+            <TablePagination page={table.page} totalPages={table.totalPages} onChange={table.setPage} />
+          </>
+        )}
+      </SectionCard>
 
       {progressExecution ? (
         <div
-          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/45 p-4"
+          className="mp-overlay fixed inset-0 z-[60] flex items-center justify-center p-4"
           onClick={() => {
             if (progressCanBackground) {
               setProgressDialogExecutionId(null);
@@ -917,6 +982,16 @@ export function JobsPage() {
             {progressExecution.error ? <p className="mp-error mt-3">{progressExecution.error}</p> : null}
 
             <div className="mt-4 flex justify-end gap-2">
+              {progressExecution && isExecutionActive(progressExecution) ? (
+                <button
+                  type="button"
+                  className="mp-btn"
+                  disabled={cancelingExecutionIds.has(progressExecution.id)}
+                  onClick={() => void handleCancelExecution(progressExecution)}
+                >
+                  {cancelingExecutionIds.has(progressExecution.id) ? "停止中" : "停止任务"}
+                </button>
+              ) : null}
               {progressCanBackground ? (
                 <button
                   type="button"
@@ -928,16 +1003,17 @@ export function JobsPage() {
                 >
                   后台执行
                 </button>
-              ) : null}
-              <button
-                type="button"
-                className="mp-btn mp-btn-primary"
-                onClick={() => {
-                  setProgressDialogExecutionId(null);
-                }}
-              >
-                {progressCanBackground ? "关闭弹窗" : "关闭"}
-              </button>
+              ) : (
+                <button
+                  type="button"
+                  className="mp-btn mp-btn-primary"
+                  onClick={() => {
+                    setProgressDialogExecutionId(null);
+                  }}
+                >
+                  关闭
+                </button>
+              )}
             </div>
           </div>
         </div>

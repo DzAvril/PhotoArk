@@ -6,6 +6,9 @@ import { TablePagination } from "../components/table/table-pagination";
 import { SortableHeader } from "../components/table/sortable-header";
 import { TableToolbar } from "../components/table/table-toolbar";
 import { useTablePagination } from "../components/table/use-table-pagination";
+import { Button } from "../components/ui/button";
+import { EmptyState } from "../components/ui/empty-state";
+import { SectionCard } from "../components/ui/section-card";
 import { deleteRun, getJobs, getRuns } from "../lib/api";
 import type { BackupJob, JobRun } from "../types/api";
 
@@ -21,6 +24,18 @@ function getTriggerLabel(trigger: JobRun["trigger"]) {
   if (trigger === "watch") return "实时监听";
   if (trigger === "schedule") return "定时任务";
   return "未知";
+}
+
+function getRunStatusLabel(status: JobRun["status"]): string {
+  if (status === "success") return "成功";
+  if (status === "canceled") return "已取消";
+  return "失败";
+}
+
+function getRunStatusClass(status: JobRun["status"]): string {
+  if (status === "success") return "mp-status-success";
+  if (status === "canceled") return "mp-status-warning";
+  return "mp-status-danger";
 }
 
 function getSummary(run: JobRun) {
@@ -152,39 +167,53 @@ export function BackupsPage() {
   );
   const allCurrentPageSelected = table.paged.length > 0 && table.paged.every((run) => selected.has(run.id));
   const successCount = runs.filter((run) => run.status === "success").length;
-  const failedCount = runs.length - successCount;
+  const canceledCount = runs.filter((run) => run.status === "canceled").length;
+  const failedCount = runs.length - successCount - canceledCount;
 
   return (
     <section className="space-y-3 md:flex md:h-full md:flex-col">
-      <div className="mp-panel p-4 md:flex md:min-h-0 md:flex-1 md:flex-col">
+      <SectionCard
+        title="执行记录"
+        description="可通过 / 快捷键聚焦搜索，Esc 清空搜索"
+        right={
+          <>
+            <span className="mp-chip">总记录 {runs.length}</span>
+            <span className="mp-chip mp-chip-success">成功 {successCount}</span>
+            {failedCount > 0 ? <span className="mp-chip mp-chip-warning">失败 {failedCount}</span> : null}
+            {canceledCount > 0 ? <span className="mp-chip mp-chip-warning">已取消 {canceledCount}</span> : null}
+          </>
+        }
+        className="md:min-h-0 md:flex-1 md:flex md:flex-col"
+      >
         {message ? (
-          <InlineAlert tone="success" className="mb-3" autoCloseMs={5200} onClose={() => setMessage("")}>
+          <InlineAlert tone="success" onClose={() => setMessage("")} autoCloseMs={5000}>
             {message}
           </InlineAlert>
         ) : null}
         {error ? (
-          <InlineAlert tone="error" className="mb-3" onClose={() => setError("")}>
-            {error}
-          </InlineAlert>
+          <div className={message ? "mt-2" : ""}>
+            <InlineAlert tone="error" onClose={() => setError("")} autoCloseMs={8000}>
+              {error}
+            </InlineAlert>
+          </div>
         ) : null}
-        <TableToolbar
-          title="执行记录"
-          search={search}
-          onSearchChange={setSearch}
-          pageSize={table.pageSize}
-          onPageSizeChange={table.setPageSize}
-          totalItems={table.totalItems}
-        />
-        <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
-          <span className="mp-chip">总记录 {runs.length}</span>
-          <span className="mp-chip mp-chip-success">成功 {successCount}</span>
-          {failedCount > 0 ? <span className="mp-chip mp-chip-warning">失败 {failedCount}</span> : null}
+
+        <div className={message || error ? "mt-3" : ""}>
+          <TableToolbar
+            title=""
+            search={search}
+            onSearchChange={setSearch}
+            pageSize={table.pageSize}
+            onPageSizeChange={table.setPageSize}
+            totalItems={table.totalItems}
+          />
         </div>
+
         <div className="mb-2 flex justify-end">
-          <button
-            className="mp-btn"
-            type="button"
-            disabled={!selected.size || deletingSelected}
+          <Button
+            variant="danger"
+            disabled={!selected.size}
+            busy={deletingSelected}
             onClick={() =>
               setPendingDeleteAction({
                 mode: "batch",
@@ -194,70 +223,84 @@ export function BackupsPage() {
             }
           >
             {deletingSelected ? "删除中..." : `批量删除 (${selected.size})`}
-          </button>
+          </Button>
         </div>
 
-        <div className="space-y-2 md:hidden">
-          {table.paged.map((run) => {
-            const job = jobById[run.jobId];
-            const deleting = deletingRunIds.has(run.id);
-            return (
-              <article key={run.id} className="mp-mobile-card">
-                <div className="flex items-start gap-2">
-                  <input
-                    type="checkbox"
-                    checked={selected.has(run.id)}
-                    onChange={(e) => {
-                      const next = new Set(selected);
-                      if (e.target.checked) next.add(run.id);
-                      else next.delete(run.id);
-                      setSelected(next);
-                    }}
-                  />
-                  <div className="min-w-0 flex-1">
-                    <h4 className="truncate text-sm font-semibold">{job?.name ?? run.jobId}</h4>
-                  </div>
-                  <span className={run.status === "success" ? "text-sm mp-status-success" : "text-sm mp-status-danger"}>
-                    {run.status === "success" ? "成功" : "失败"}
-                  </span>
-                </div>
+        {!table.totalItems ? (
+          <EmptyState
+            title="暂无执行记录"
+            description="先创建备份任务并执行一次，这里会展示执行状态与错误信息。"
+            action={
+              <Button variant="primary" onClick={() => navigate("/settings/jobs")}>
+                去创建备份任务
+              </Button>
+            }
+          />
+        ) : (
+          <>
+            <div className="space-y-2 md:hidden">
+              {table.paged.map((run) => {
+                const job = jobById[run.jobId];
+                const deleting = deletingRunIds.has(run.id);
+                return (
+                  <article key={run.id} className="mp-mobile-card">
+                    <div className="flex items-start gap-2">
+                      <input
+                        type="checkbox"
+                        checked={selected.has(run.id)}
+                        onChange={(e) => {
+                          const next = new Set(selected);
+                          if (e.target.checked) next.add(run.id);
+                          else next.delete(run.id);
+                          setSelected(next);
+                        }}
+                      />
+                      <div className="min-w-0 flex-1">
+                        <h4 className="truncate text-sm font-semibold">{job?.name ?? run.jobId}</h4>
+                      </div>
+                      <span className={`text-sm ${getRunStatusClass(run.status)}`}>{getRunStatusLabel(run.status)}</span>
+                    </div>
 
-                <dl className="mp-kv mt-3">
-                  <dt>结束时间</dt>
-                  <dd>{new Date(run.finishedAt).toLocaleString()}</dd>
-                  <dt>触发方式</dt>
-                  <dd>{getTriggerLabel(run.trigger)}</dd>
-                  <dt>成功/失败</dt>
-                  <dd>
-                    <span className="mp-status-success">{run.copiedCount}</span>
-                    <span className="mp-muted">/</span>
-                    <span className="mp-status-danger">{run.failedCount}</span>
-                  </dd>
-                  <dt>摘要</dt>
-                  <dd>{getSummary(run)}</dd>
-                </dl>
+                    <dl className="mp-kv mt-3">
+                      <dt>结束时间</dt>
+                      <dd>{new Date(run.finishedAt).toLocaleString()}</dd>
+                      <dt>触发方式</dt>
+                      <dd>{getTriggerLabel(run.trigger)}</dd>
+                      <dt>成功/失败</dt>
+                      <dd>
+                        <span className="mp-status-success">{run.copiedCount}</span>
+                        <span className="mp-muted">/</span>
+                        <span className="mp-status-danger">{run.failedCount}</span>
+                      </dd>
+                      <dt>摘要</dt>
+                      <dd>{getSummary(run)}</dd>
+                    </dl>
 
-                {run.errors[0] ? <p className="mt-2 break-all text-sm mp-status-danger">首个错误：{run.errors[0].path} - {run.errors[0].error}</p> : null}
+                    {run.errors[0] ? (
+                      <p className="mt-2 break-all text-sm mp-status-danger">
+                        首个错误：{run.errors[0].path} - {run.errors[0].error}
+                      </p>
+                    ) : null}
 
-                <div className="mt-3 flex justify-end">
-                  <button
-                    type="button"
-                    className="mp-btn"
-                    disabled={deleting}
-                    onClick={() =>
-                      setPendingDeleteAction({
-                        mode: "single",
-                        ids: [run.id],
-                        label: "执行记录"
-                      })
-                    }
-                  >
-                    {deleting ? "删除中" : "删除"}
-                  </button>
-                </div>
-              </article>
-            );
-          })}
+                    <div className="mt-3 flex justify-end">
+                      <button
+                        type="button"
+                        className="mp-btn"
+                        disabled={deleting}
+                        onClick={() =>
+                          setPendingDeleteAction({
+                            mode: "single",
+                            ids: [run.id],
+                            label: "执行记录"
+                          })
+                        }
+                      >
+                        {deleting ? "删除中" : "删除"}
+                      </button>
+                    </div>
+                  </article>
+                );
+              })}
           {!table.paged.length ? <p className="py-4 text-center text-sm mp-muted">暂无记录</p> : null}
         </div>
 
@@ -330,9 +373,7 @@ export function BackupsPage() {
                     <td className="px-2 py-2 text-sm">{new Date(run.finishedAt).toLocaleString()}</td>
                     <td className="px-2 py-2 text-sm">{getTriggerLabel(run.trigger)}</td>
                     <td className="px-2 py-2">
-                      <span className={run.status === "success" ? "mp-status-success" : "mp-status-danger"}>
-                        {run.status === "success" ? "成功" : "失败"}
-                      </span>
+                      <span className={getRunStatusClass(run.status)}>{getRunStatusLabel(run.status)}</span>
                     </td>
                     <td className="px-2 py-2">
                       <span className="mp-status-success">{run.copiedCount}</span>
@@ -372,14 +413,9 @@ export function BackupsPage() {
         </div>
 
         <TablePagination page={table.page} totalPages={table.totalPages} onChange={table.setPage} />
-        {!table.totalItems ? (
-          <div className="mt-3 flex justify-center md:justify-end">
-            <button type="button" className="mp-btn" onClick={() => navigate("/settings/jobs")}>
-              去创建备份任务
-            </button>
-          </div>
-        ) : null}
-      </div>
+          </>
+        )}
+      </SectionCard>
 
       <ConfirmDialog
         open={Boolean(pendingDeleteAction)}

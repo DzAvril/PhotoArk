@@ -107,6 +107,20 @@ async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
         message = text;
       }
     }
+    // #region debug-point A:fetch-json-error
+    fetch("http://127.0.0.1:7777/event", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionId: "backup-500",
+        runId: "post-fix",
+        hypothesisId: "A",
+        location: "apps/web/src/lib/api.ts:82",
+        msg: "[DEBUG] fetchJson error",
+        data: { path, url: `${API_BASE}${path}`, apiBase: API_BASE, status: res.status, code, message }
+      })
+    }).catch(() => {});
+    // #endregion
     const error = new ApiRequestError(message, res.status, code);
     if (res.status === 401 || code === "AUTH_REQUIRED" || code === "AUTH_INVALID_TOKEN") {
       setStoredAuthToken(null);
@@ -304,6 +318,10 @@ export function deleteJob(jobId: string) {
 
 export function runJob(jobId: string) {
   return fetchJson<{ execution: JobExecution }>(`/api/jobs/${jobId}/run`, { method: "POST" });
+}
+
+export function cancelJobExecution(executionId: string) {
+  return fetchJson<{ execution: JobExecution }>(`/api/job-executions/${executionId}/cancel`, { method: "POST" });
 }
 
 export function syncJobFile(jobId: string, relativePath: string) {

@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { InlineAlert } from "../components/inline-alert";
+import { Button } from "../components/ui/button";
+import { EmptyState } from "../components/ui/empty-state";
+import { SectionCard } from "../components/ui/section-card";
 import { deleteJobFile, getJobDiff, getJobs, getStorageMediaStreamUrl, getStorages, runJob, syncJobFile } from "../lib/api";
 import type { BackupJob, JobDiffFile, JobDiffItem, JobDiffKind, JobDiffResult, JobDiffStatus, StorageTarget } from "../types/api";
 
@@ -41,9 +44,9 @@ function getStatusLabel(status: JobDiffStatus): string {
 }
 
 function getStatusChipClass(status: JobDiffStatus): string {
-  if (status === "source_only") return "mp-chip border-rose-200 bg-rose-50 text-rose-700";
-  if (status === "destination_only") return "mp-chip border-violet-200 bg-violet-50 text-violet-700";
   if (status === "changed") return "mp-chip mp-chip-warning";
+  if (status === "source_only") return "mp-chip mp-chip-danger";
+  if (status === "destination_only") return "mp-chip mp-chip-danger";
   return "mp-chip mp-chip-success";
 }
 
@@ -66,16 +69,20 @@ function describeChangeReason(item: JobDiffItem): string {
 }
 
 function getCellColorClass(item: JobDiffItem, side: "source" | "destination"): string {
-  if (item.status === "same") return "bg-emerald-500 shadow-[0_0_0_1px_rgba(22,163,74,0.28)_inset]";
-  if (item.status === "changed") return "bg-amber-400 shadow-[0_0_0_1px_rgba(217,119,6,0.28)_inset]";
+  if (item.status === "same") {
+    return "bg-[var(--ark-success)] ring-1 ring-inset ring-[color-mix(in_oklab,var(--ark-success)_28%,transparent)]";
+  }
+  if (item.status === "changed") {
+    return "bg-[var(--ark-warning)] ring-1 ring-inset ring-[color-mix(in_oklab,var(--ark-warning)_28%,transparent)]";
+  }
   if (item.status === "source_only") {
     return side === "source"
-      ? "bg-rose-500 shadow-[0_0_0_1px_rgba(190,18,60,0.28)_inset]"
-      : "bg-slate-300 shadow-[0_0_0_1px_rgba(100,116,139,0.22)_inset]";
+      ? "bg-[var(--ark-danger-text)] ring-1 ring-inset ring-[color-mix(in_oklab,var(--ark-danger-text)_26%,transparent)]"
+      : "bg-[color-mix(in_oklab,var(--ark-line-strong)_60%,var(--ark-surface))] ring-1 ring-inset ring-[color-mix(in_oklab,var(--ark-line-strong)_55%,transparent)]";
   }
   return side === "destination"
-    ? "bg-rose-500 shadow-[0_0_0_1px_rgba(190,18,60,0.28)_inset]"
-    : "bg-slate-300 shadow-[0_0_0_1px_rgba(100,116,139,0.22)_inset]";
+    ? "bg-[var(--ark-danger-text)] ring-1 ring-inset ring-[color-mix(in_oklab,var(--ark-danger-text)_26%,transparent)]"
+    : "bg-[color-mix(in_oklab,var(--ark-line-strong)_60%,var(--ark-surface))] ring-1 ring-inset ring-[color-mix(in_oklab,var(--ark-line-strong)_55%,transparent)]";
 }
 
 function getSquareSizePx(itemCount: number): number {
@@ -405,15 +412,12 @@ export function JobDiffPage() {
         </InlineAlert>
       ) : null}
 
-      <div className="mp-panel mp-panel-soft p-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h3 className="text-base font-semibold">目录差异</h3>
-            <p className="mt-1 text-sm mp-muted">按任务对比源目录和目标目录，支持单文件同步、预览与删除。</p>
-          </div>
-        </div>
-
-        <div className="mt-3 grid gap-2 md:grid-cols-[minmax(0,1fr)_auto_auto_auto]">
+      <SectionCard
+        variant="panelSoft"
+        title="目录差异"
+        description="按任务对比源目录和目标目录，支持单文件同步、预览与删除。"
+      >
+        <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto_auto_auto]">
           <select
             className="mp-select"
             value={selectedJobId}
@@ -433,27 +437,34 @@ export function JobDiffPage() {
               );
             })}
           </select>
-          <button type="button" className="mp-btn" disabled={refreshingDiff || !selectedJobId} onClick={() => void loadDiff(true)}>
+          <Button busy={refreshingDiff} disabled={!selectedJobId} onClick={() => void loadDiff(true)}>
             {refreshingDiff ? "刷新中..." : "刷新差异"}
-          </button>
-          <button
-            type="button"
-            className="mp-btn"
-            disabled={!selectedJobId}
-            onClick={() => navigate(`/settings/jobs?editJobId=${selectedJobId}`)}
-          >
+          </Button>
+          <Button disabled={!selectedJobId} onClick={() => navigate(`/settings/jobs?editJobId=${selectedJobId}`)}>
             编辑任务
-          </button>
-          <button type="button" className="mp-btn mp-btn-primary" disabled={!selectedJobId || runningSync} onClick={() => void handleRunSync()}>
+          </Button>
+          <Button variant="primary" busy={runningSync} disabled={!selectedJobId} onClick={() => void handleRunSync()}>
             {runningSync ? "启动中..." : "立即同步"}
-          </button>
+          </Button>
         </div>
 
         <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
-          <span className="inline-flex items-center gap-1"><span className="h-3 w-3 rounded-sm bg-emerald-500" /> 相同</span>
-          <span className="inline-flex items-center gap-1"><span className="h-3 w-3 rounded-sm bg-amber-400" /> 差异</span>
-          <span className="inline-flex items-center gap-1"><span className="h-3 w-3 rounded-sm bg-rose-500" /> 独有</span>
-          <span className="inline-flex items-center gap-1"><span className="h-3 w-3 rounded-sm bg-slate-300" /> 缺失</span>
+          <span className="inline-flex items-center gap-1">
+            <span className="h-3 w-3 rounded-sm" style={{ backgroundColor: "var(--ark-success)" }} /> 相同
+          </span>
+          <span className="inline-flex items-center gap-1">
+            <span className="h-3 w-3 rounded-sm" style={{ backgroundColor: "var(--ark-warning)" }} /> 差异
+          </span>
+          <span className="inline-flex items-center gap-1">
+            <span className="h-3 w-3 rounded-sm" style={{ backgroundColor: "var(--ark-danger-text)" }} /> 独有
+          </span>
+          <span className="inline-flex items-center gap-1">
+            <span
+              className="h-3 w-3 rounded-sm"
+              style={{ backgroundColor: "color-mix(in oklab, var(--ark-line-strong) 60%, var(--ark-surface))" }}
+            />
+            缺失
+          </span>
         </div>
         {result ? (
           <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
@@ -465,9 +476,18 @@ export function JobDiffPage() {
             <span className="mp-chip">内容变更 {result.summary.changedCount}</span>
           </div>
         ) : null}
-      </div>
+      </SectionCard>
 
-      <div className="grid gap-3 md:min-h-0 md:flex-1 xl:grid-cols-[minmax(0,1fr)_390px]">
+      {!selectedJobId ? (
+        <EmptyState title="请选择一个任务开始比对" description="选择任务后可以查看差异方格视图与单文件操作。" />
+      ) : null}
+
+      {selectedJobId && !result && !loadingDiff ? (
+        <EmptyState title="暂无差异结果" description="点击“刷新差异”以重新计算源目录与目标目录的差异。" />
+      ) : null}
+
+      {result ? (
+        <div className="grid gap-3 md:min-h-0 md:flex-1 xl:grid-cols-[minmax(0,1fr)_390px]">
         <article className="mp-panel p-3 md:flex md:h-full md:min-h-0 md:flex-col">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="mp-segment">
@@ -522,7 +542,7 @@ export function JobDiffPage() {
                       <button
                         key={`left:${item.id}`}
                         type="button"
-                        className={`rounded-[3px] transition-transform ${getCellColorClass(item, "source")} ${active ? "ring-2 ring-[var(--ark-primary)]" : ""}`}
+                        className={`rounded-sm transition-transform ${getCellColorClass(item, "source")} ${active ? "ring-2 ring-[var(--ark-primary)]" : ""}`}
                         style={{ width: `${squareSizePx}px`, height: `${squareSizePx}px` }}
                         onClick={() => setSelectedItemId(item.id)}
                       />
@@ -549,7 +569,7 @@ export function JobDiffPage() {
                       <button
                         key={`right:${item.id}`}
                         type="button"
-                        className={`rounded-[3px] transition-transform ${getCellColorClass(item, "destination")} ${active ? "ring-2 ring-[var(--ark-primary)]" : ""}`}
+                        className={`rounded-sm transition-transform ${getCellColorClass(item, "destination")} ${active ? "ring-2 ring-[var(--ark-primary)]" : ""}`}
                         style={{ width: `${squareSizePx}px`, height: `${squareSizePx}px` }}
                         onClick={() => setSelectedItemId(item.id)}
                       />
@@ -582,29 +602,29 @@ export function JobDiffPage() {
                   </span>
                 </div>
                 {detailItem.status !== "same" ? (
-                  <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs text-amber-800">
+                  <div className="mt-2 rounded-md border border-[var(--ark-warning-line)] bg-[var(--ark-warning-bg)] px-2 py-1.5 text-xs text-[var(--ark-warning)]">
                     <p>Diff: {detailItem.status === "changed" ? describeChangeReason(detailItem) : getStatusLabel(detailItem.status)}</p>
                   </div>
                 ) : null}
                 {detailItem.status !== "same" ? (
                   <div className="mt-2">
-                    <button
-                      type="button"
-                      className="mp-btn mp-btn-primary"
+                    <Button
+                      variant="primary"
                       disabled={syncingFile || detailItem.status === "destination_only"}
+                      busy={syncingFile}
                       onClick={() => void handleSyncSelectedFile()}
                     >
                       {syncingFile ? "同步中..." : "仅同步该文件"}
-                    </button>
+                    </Button>
                     {detailItem.status === "destination_only" ? (
                       <p className="mt-1 text-xs mp-muted">该文件仅在目标目录存在，无法从源目录执行单文件同步。</p>
                     ) : null}
                     {(detailItem.status === "source_only" || detailItem.status === "destination_only") ? (
                       <div className="mt-2">
-                        <button
-                          type="button"
-                          className="mp-btn"
+                        <Button
+                          variant="danger"
                           disabled={deletingFile}
+                          busy={deletingFile}
                           onClick={() => void handleDeleteSelectedFile()}
                         >
                           {deletingFile
@@ -612,16 +632,16 @@ export function JobDiffPage() {
                             : detailItem.status === "source_only"
                               ? "删除源目录该文件"
                               : "删除目标目录该文件"}
-                        </button>
+                        </Button>
                       </div>
                     ) : null}
                   </div>
                 ) : null}
                 {detailItem ? (
                   <div className="mt-2">
-                    <button type="button" className="mp-btn" disabled={!previewSourceAvailable && !previewDestinationAvailable} onClick={handleOpenPreview}>
+                    <Button disabled={!previewSourceAvailable && !previewDestinationAvailable} onClick={handleOpenPreview}>
                       预览
-                    </button>
+                    </Button>
                   </div>
                 ) : null}
               </div>
@@ -639,11 +659,12 @@ export function JobDiffPage() {
             <p className="mt-3 text-sm mp-muted">点击方块查看详情。</p>
           )}
         </aside>
-      </div>
+        </div>
+      ) : null}
 
       {previewOpen && detailItem && previewFile ? (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/55 p-4">
-          <div className="w-full max-w-4xl rounded-xl border border-[var(--ark-line)] bg-[var(--ark-surface)] p-3 shadow-2xl">
+        <div className="mp-overlay fixed inset-0 z-40 flex items-center justify-center p-4">
+          <div className="mp-panel w-full max-w-4xl p-3">
             <div className="flex items-center justify-between gap-2">
               <div>
                 <p className="text-sm font-semibold">{previewTitle}</p>
@@ -676,9 +697,7 @@ export function JobDiffPage() {
                     </button>
                   </div>
                 ) : null}
-                <button type="button" className="mp-btn" onClick={handleClosePreview}>
-                  关闭
-                </button>
+                <Button onClick={handleClosePreview}>关闭</Button>
               </div>
             </div>
             <div className="mt-3 rounded-lg border border-[var(--ark-line)] bg-black/70 p-2">

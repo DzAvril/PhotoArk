@@ -1,4 +1,7 @@
 import { useEffect, useState } from "react";
+import { InlineAlert } from "../components/inline-alert";
+import { Button } from "../components/ui/button";
+import { Card } from "../components/ui/card";
 import { getStorageMediaStreamUrl } from "../lib/api";
 import type { DiffItem } from "../types/diff";
 
@@ -48,23 +51,24 @@ export function DiffPreviewModal({
   if (!fileInfo) {
     return (
       <div
-        className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/78 p-3 backdrop-blur-[3px]"
+        className="mp-overlay fixed inset-0 z-50 flex items-center justify-center p-3 backdrop-blur-[3px]"
         onClick={onClose}
       >
-        <div
-          className="w-full max-w-3xl rounded-2xl border border-[var(--ark-line)] bg-[var(--ark-surface)] p-6 shadow-[0_28px_64px_rgba(2,8,23,0.45)]"
+        <Card
+          variant="panel"
+          className="w-full max-w-3xl p-6"
           onClick={(e) => e.stopPropagation()}
         >
           <div className="flex items-center justify-between">
             <h3 className="text-base font-semibold">预览</h3>
-            <button type="button" className="mp-btn" onClick={onClose}>
+            <Button onClick={onClose}>
               关闭
-            </button>
+            </Button>
           </div>
           <p className="mt-4 text-sm text-[var(--ark-ink-soft)]">
             该文件在 {side === "left" ? "左侧" : "右侧"} 存储中不存在
           </p>
-        </div>
+        </Card>
       </div>
     );
   }
@@ -74,11 +78,12 @@ export function DiffPreviewModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/78 p-3 backdrop-blur-[3px]"
+      className="mp-overlay fixed inset-0 z-50 flex items-center justify-center p-3 backdrop-blur-[3px]"
       onClick={onClose}
     >
-      <div
-        className="flex max-h-[90vh] w-full max-w-5xl flex-col rounded-2xl border border-[var(--ark-line)] bg-[var(--ark-surface)] shadow-[0_28px_64px_rgba(2,8,23,0.45)]"
+      <Card
+        variant="panel"
+        className="flex max-h-[90vh] w-full max-w-5xl flex-col"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-[var(--ark-line)] px-4 py-3">
@@ -92,20 +97,20 @@ export function DiffPreviewModal({
           </div>
           <div className="flex items-center gap-2">
             {item.left && item.right && (
-              <button type="button" className="mp-btn" onClick={onSwitchSide}>
+              <Button onClick={onSwitchSide}>
                 切换侧边
-              </button>
+              </Button>
             )}
-            <button type="button" className="mp-btn" onClick={onClose}>
+            <Button onClick={onClose}>
               关闭
-            </button>
+            </Button>
           </div>
         </div>
 
         <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-4">
           {error ? (
             <div className="text-center">
-              <p className="text-sm text-red-600">{error}</p>
+              <InlineAlert tone="error">{error}</InlineAlert>
             </div>
           ) : isImage ? (
             <img
@@ -120,7 +125,7 @@ export function DiffPreviewModal({
             </div>
           )}
         </div>
-      </div>
+      </Card>
     </div>
   );
 }

@@ -232,7 +232,7 @@ export interface JobRun {
   id: string;
   jobId: string;
   trigger: JobRunTrigger;
-  status: "success" | "failed";
+  status: "success" | "failed" | "canceled";
   startedAt: string;
   finishedAt: string;
   scannedCount: number;
@@ -247,7 +247,7 @@ export interface JobRun {
   message?: string;
 }
 
-export type JobExecutionStatus = "queued" | "running" | "success" | "failed";
+export type JobExecutionStatus = "queued" | "running" | "success" | "failed" | "canceled";
 export type JobExecutionPhase = "queued" | "scanning" | "syncing" | "finished";
 
 export interface JobExecutionProgress {

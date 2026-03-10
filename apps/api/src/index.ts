@@ -28,7 +28,7 @@ import type {
   JobRunTrigger
 } from "./modules/backup/repository/types.js";
 
-const app = Fastify({ logger: true });
+const app = Fastify({ logger: { level: "info" }, disableRequestLogging: true });
 await app.register(cors, { origin: true });
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
 const publicRoot = path.resolve(currentDir, "../public");
@@ -39,7 +39,7 @@ if (hasWebAssets) {
     prefix: "/"
   });
 }
-app.setErrorHandler((error, _req, reply) => {
+app.setErrorHandler((error, req, reply) => {
   if (error instanceof z.ZodError) {
     return reply.code(400).send({
       message: "Invalid request payload",
@@ -57,6 +57,26 @@ app.setErrorHandler((error, _req, reply) => {
       ? fastifyError.statusCode
       : 500;
   const message = error instanceof Error ? error.message : "Internal server error";
+  // #region debug-point A:api-error-handler
+  fetch("http://127.0.0.1:7777/event", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      sessionId: "backup-500",
+      runId: "post-fix",
+      hypothesisId: "A",
+      location: "apps/api/src/index.ts:42",
+      msg: "[DEBUG] api error handler",
+      data: {
+        statusCode,
+        code: fastifyError.code,
+        message,
+        method: req.method,
+        url: req.url
+      }
+    })
+  }).catch(() => {});
+  // #endregion
   return reply.code(statusCode).send({ message });
 });
 
@@ -672,6 +692,9 @@ type SourceMediaActivityResult = {
 const SOURCE_ACTIVITY_CACHE_TTL_MS = 30_000;
 const SOURCE_ACTIVITY_CACHE_MAX_ENTRIES = 24;
 const sourceActivityCache = new Map<string, { expiresAt: number; data: SourceMediaActivityResult }>();
+const RELATION_GRAPH_CACHE_TTL_MS = 60_000;
+const RELATION_GRAPH_CACHE_MAX_ENTRIES = 4;
+const relationGraphCache = new Map<string, { expiresAt: number; data: { nodes: StorageRelationNodeItem[]; edges: StorageRelationEdgeItem[] } }>();
 const SOURCE_ACTIVITY_METADATA_BATCH_SIZE = 24;
 const SOURCE_ACTIVITY_MEDIA_DATE_CACHE_MAX_ENTRIES = 60_000;
 const sourceActivityMediaDateCache = new Map<string, { mtimeMs: number; mediaDateMs: number | null }>();
@@ -886,7 +909,33 @@ type MediaPathSnapshotResult =
       error: string;
     };
 
+function buildRelationGraphCacheKey(state: BackupState): string {
+  const storageKey = [...state.storages]
+    .sort((a, b) => a.id.localeCompare(b.id))
+    .map((storage) => `${storage.id}:${storage.basePath}:${storage.type}`)
+    .join("|");
+  const jobsKey = [...state.jobs]
+    .sort((a, b) => a.id.localeCompare(b.id))
+    .map((job) =>
+      [
+        job.id,
+        job.enabled ? "1" : "0",
+        job.sourceTargetId,
+        job.destinationTargetId,
+        job.sourcePath,
+        job.destinationPath
+      ].join(":"))
+    .join("|");
+  return `${storageKey}::${jobsKey}`;
+}
+
 async function buildStorageRelationGraph(state: BackupState): Promise<{ nodes: StorageRelationNodeItem[]; edges: StorageRelationEdgeItem[] }> {
+  const cacheKey = buildRelationGraphCacheKey(state);
+  const nowMs = Date.now();
+  const cached = relationGraphCache.get(cacheKey);
+  if (cached && cached.expiresAt > nowMs) {
+    return cached.data;
+  }
   const nodes = state.storages
     .map((storage) => ({
       storageId: storage.id,
@@ -1037,7 +1086,14 @@ async function buildStorageRelationGraph(state: BackupState): Promise<{ nodes: S
       return a.destinationStorageName.localeCompare(b.destinationStorageName, "zh-CN");
     });
 
-  return { nodes, edges };
+  const result = { nodes, edges };
+  relationGraphCache.set(cacheKey, { expiresAt: nowMs + RELATION_GRAPH_CACHE_TTL_MS, data: result });
+  while (relationGraphCache.size > RELATION_GRAPH_CACHE_MAX_ENTRIES) {
+    const firstKey = relationGraphCache.keys().next().value;
+    if (!firstKey) break;
+    relationGraphCache.delete(firstKey);
+  }
+  return result;
 }
 
 function buildEmptyJobDiffSummary(): JobDiffSummary {
@@ -1364,9 +1420,10 @@ const queuedWatchJobs = new Set<string>();
 let runExecutionQueue: Promise<unknown> = Promise.resolve();
 let watcherReconcileTimer: NodeJS.Timeout | null = null;
 const jobExecutions = new Map<string, JobExecution>();
+const jobExecutionControls = new Map<string, { cancelRequested: boolean; requestedAt: string | null }>();
 const JOB_EXECUTION_HISTORY_LIMIT = 200;
 
-type JobExecutionStatus = "queued" | "running" | "success" | "failed";
+type JobExecutionStatus = "queued" | "running" | "success" | "failed" | "canceled";
 type JobExecutionPhase = "queued" | "scanning" | "syncing" | "finished";
 
 type JobExecutionProgress = {
@@ -1907,6 +1964,9 @@ type JobExecutionProgressUpdate = {
 };
 
 type ExecuteJobProgressHandler = (progress: JobExecutionProgressUpdate) => void;
+type ExecuteJobOptions = {
+  shouldCancel?: () => boolean;
+};
 
 function clampProgressPercent(value: number): number {
   if (!Number.isFinite(value)) return 0;
@@ -1935,7 +1995,7 @@ function trimJobExecutions() {
   const all = [...jobExecutions.values()];
   const activeIds = new Set(all.filter((item) => item.status === "queued" || item.status === "running").map((item) => item.id));
   const finishedIds = all
-    .filter((item) => item.status === "success" || item.status === "failed")
+    .filter((item) => item.status === "success" || item.status === "failed" || item.status === "canceled")
     .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
     .slice(0, JOB_EXECUTION_HISTORY_LIMIT)
     .map((item) => item.id);
@@ -1943,6 +2003,7 @@ function trimJobExecutions() {
   for (const id of jobExecutions.keys()) {
     if (!keepIds.has(id)) {
       jobExecutions.delete(id);
+      jobExecutionControls.delete(id);
     }
   }
 }
@@ -1977,8 +2038,34 @@ function createJobExecution(jobId: string, trigger: JobRunTrigger): JobExecution
     }
   };
   jobExecutions.set(execution.id, execution);
+  jobExecutionControls.set(execution.id, { cancelRequested: false, requestedAt: null });
   trimJobExecutions();
   return execution;
+}
+
+function requestCancelExecution(executionId: string): JobExecution | null {
+  const current = jobExecutions.get(executionId);
+  if (!current) return null;
+  if (current.status !== "queued" && current.status !== "running") return current;
+  const control = jobExecutionControls.get(executionId);
+  if (control) {
+    control.cancelRequested = true;
+    control.requestedAt = new Date().toISOString();
+  } else {
+    jobExecutionControls.set(executionId, { cancelRequested: true, requestedAt: new Date().toISOString() });
+  }
+  if (current.status === "queued") {
+    updateJobExecution(executionId, (execution) => {
+      execution.status = "canceled";
+      execution.finishedAt = new Date().toISOString();
+      execution.message = "任务已取消";
+      execution.error = null;
+      execution.progress.phase = "finished";
+      execution.progress.percent = 100;
+      execution.progress.currentPath = null;
+    });
+  }
+  return jobExecutions.get(executionId) ?? null;
 }
 
 function updateJobExecution(executionId: string, updater: (execution: JobExecution) => void) {
@@ -1992,7 +2079,8 @@ async function executeJob(
   state: BackupState,
   jobId: string,
   trigger: JobRunTrigger,
-  onProgress?: ExecuteJobProgressHandler
+  onProgress?: ExecuteJobProgressHandler,
+  options?: ExecuteJobOptions
 ): Promise<JobRun> {
   const job = state.jobs.find((item) => item.id === jobId);
   if (!job) {
@@ -2052,6 +2140,16 @@ async function executeJob(
   };
 
   const startedAt = new Date().toISOString();
+  const scanStartedMs = Date.now();
+  let canceled = false;
+  const shouldCancel = options?.shouldCancel;
+  const checkCancel = () => {
+    if (shouldCancel && shouldCancel()) {
+      canceled = true;
+      return true;
+    }
+    return false;
+  };
   emitProgress("scanning", {
     totalCount: null,
     scannedCount: 0,
@@ -2065,9 +2163,16 @@ async function executeJob(
     currentPath: null
   });
 
+  app.log.info({ event: "job.exec.scan.start", jobId, trigger }, "Job scan started");
+
   const sourceFiles = await collectMediaFiles(sourceRoot);
   const relativePaths = sourceFiles.map((fullPath) => toPosixPath(path.relative(sourceRoot, fullPath)));
   const livePhotoMap = buildLivePhotoIdByRelativePath(relativePaths);
+  const scanTookMs = Date.now() - scanStartedMs;
+  app.log.info(
+    { event: "job.exec.scan.done", jobId, trigger, scannedCount: sourceFiles.length, scanTookMs },
+    "Job scan finished"
+  );
 
   const copiedSamples: string[] = [];
   const errors: JobRun["errors"] = [];
@@ -2101,12 +2206,28 @@ async function executeJob(
     currentPath: null
   });
 
-  for (let i = 0; i < sourceFiles.length; i += 1) {
-    const sourceFile = sourceFiles[i];
-    const relativePath = relativePaths[i];
-    const destinationFile = path.join(destinationRoot, relativePath);
-    try {
-      const sourceStat = await stat(sourceFile);
+  if (checkCancel()) {
+    app.log.warn({ event: "job.exec.cancel.requested", jobId, trigger }, "Cancel requested before sync loop");
+  }
+
+  app.log.info(
+    { event: "job.exec.sync.start", jobId, trigger, scannedCount },
+    "Job sync started"
+  );
+
+  let lastHeartbeatAt = Date.now();
+  let lastHeartbeatProcessed = 0;
+
+  if (!canceled) {
+    for (let i = 0; i < sourceFiles.length; i += 1) {
+      if (checkCancel()) {
+        break;
+      }
+      const sourceFile = sourceFiles[i];
+      const relativePath = relativePaths[i];
+      const destinationFile = path.join(destinationRoot, relativePath);
+      try {
+        const sourceStat = await stat(sourceFile);
       const sourceCapturedAt = sourceStat.mtime.toISOString();
       const livePhotoAssetId = livePhotoMap.get(relativePath);
       const nextKind = detectAssetKind(relativePath, livePhotoAssetId);
@@ -2152,6 +2273,26 @@ async function executeJob(
           livePhotoPairCount: copiedLivePhotoIds.size,
           currentPath: relativePath
         });
+      const now = Date.now();
+      if (now - lastHeartbeatAt >= 5000 || processedCount - lastHeartbeatProcessed >= 500) {
+        app.log.info(
+          {
+            event: "job.exec.progress",
+            jobId,
+            trigger,
+            processedCount,
+            copiedCount,
+            skippedCount,
+            failedCount,
+            scannedCount,
+            percent: clampProgressPercent(scannedCount > 0 ? (processedCount / scannedCount) * 100 : 0),
+            currentPath: relativePath
+          },
+          "Job sync progress"
+        );
+        lastHeartbeatAt = now;
+        lastHeartbeatProcessed = processedCount;
+      }
         continue;
       }
 
@@ -2207,25 +2348,52 @@ async function executeJob(
         livePhotoPairCount: copiedLivePhotoIds.size,
         currentPath: relativePath
       });
+      const now = Date.now();
+      if (now - lastHeartbeatAt >= 5000 || processedCount - lastHeartbeatProcessed >= 500) {
+        app.log.info(
+          {
+            event: "job.exec.progress",
+            jobId,
+            trigger,
+            processedCount,
+            copiedCount,
+            skippedCount,
+            failedCount,
+            scannedCount,
+            percent: clampProgressPercent(scannedCount > 0 ? (processedCount / scannedCount) * 100 : 0),
+            currentPath: relativePath
+          },
+          "Job sync progress"
+        );
+        lastHeartbeatAt = now;
+        lastHeartbeatProcessed = processedCount;
+      }
       if (copiedSamples.length < 20) {
         copiedSamples.push(relativePath);
       }
-    } catch (error) {
-      failedCount += 1;
-      processedCount += 1;
-      errors.push({ path: relativePath, error: (error as Error).message });
-      emitProgress("syncing", {
-        totalCount: scannedCount,
-        scannedCount,
-        processedCount,
-        copiedCount,
-        skippedCount,
-        failedCount,
-        photoCount,
-        videoCount,
-        livePhotoPairCount: copiedLivePhotoIds.size,
-        currentPath: relativePath
-      });
+      } catch (error) {
+        failedCount += 1;
+        processedCount += 1;
+        errors.push({ path: relativePath, error: (error as Error).message });
+        if (errors.length <= 5) {
+          app.log.warn(
+            { event: "job.exec.error", jobId, trigger, path: relativePath, err: (error as Error).message },
+            "Job sync error"
+          );
+        }
+        emitProgress("syncing", {
+          totalCount: scannedCount,
+          scannedCount,
+          processedCount,
+          copiedCount,
+          skippedCount,
+          failedCount,
+          photoCount,
+          videoCount,
+          livePhotoPairCount: copiedLivePhotoIds.size,
+          currentPath: relativePath
+        });
+      }
     }
   }
 
@@ -2234,7 +2402,7 @@ async function executeJob(
     id: `run_${randomUUID()}`,
     jobId: job.id,
     trigger,
-    status: failedCount === 0 ? "success" : "failed",
+    status: canceled ? "canceled" : failedCount === 0 ? "success" : "failed",
     startedAt,
     finishedAt,
     scannedCount,
@@ -2246,7 +2414,9 @@ async function executeJob(
     livePhotoPairCount: copiedLivePhotoIds.size,
     copiedSamples,
     errors,
-    message: `扫描 ${scannedCount}，同步 ${copiedCount}，跳过 ${skippedCount}，失败 ${failedCount}；照片 ${photoCount}，视频 ${videoCount}，Live Photo ${copiedLivePhotoIds.size}`
+    message: canceled
+      ? `任务已取消（扫描 ${scannedCount}，已处理 ${processedCount}）`
+      : `扫描 ${scannedCount}，同步 ${copiedCount}，跳过 ${skippedCount}，失败 ${failedCount}；照片 ${photoCount}，视频 ${videoCount}，Live Photo ${copiedLivePhotoIds.size}`
   };
   state.jobRuns.unshift(run);
   state.jobRuns = state.jobRuns.slice(0, 200);
@@ -2265,6 +2435,17 @@ async function executeJob(
     livePhotoPairCount: copiedLivePhotoIds.size,
     currentPath: null
   });
+  if (canceled) {
+    app.log.warn(
+      { event: "job.exec.canceled", jobId, trigger, scannedCount, processedCount },
+      "Job execution canceled"
+    );
+  } else {
+    app.log.info(
+      { event: "job.exec.finished", jobId, trigger, scannedCount, processedCount, copiedCount, failedCount },
+      "Job execution finished"
+    );
+  }
   return run;
 }
 
@@ -2441,7 +2622,7 @@ function mapTriggerLabel(trigger: JobRunTrigger): string {
 
 function buildRunTelegramSummary(state: BackupState, run: JobRun): string {
   const job = state.jobs.find((item) => item.id === run.jobId);
-  const statusLabel = run.status === "success" ? "成功" : "失败";
+  const statusLabel = run.status === "success" ? "成功" : run.status === "canceled" ? "已取消" : "失败";
   return [
     `PhotoArk 备份${statusLabel}`,
     `任务: ${job?.name ?? run.jobId}`,
@@ -2484,7 +2665,23 @@ async function executeJobAndPersist(jobId: string, trigger: JobRunTrigger): Prom
 
 function startJobExecution(jobId: string, trigger: JobRunTrigger): JobExecution {
   const execution = createJobExecution(jobId, trigger);
+  app.log.info({ event: "job.exec.queued", executionId: execution.id, jobId, trigger }, "Job execution queued");
   void enqueueRunExecution(async () => {
+    const control = jobExecutionControls.get(execution.id);
+    if (control?.cancelRequested) {
+      updateJobExecution(execution.id, (current) => {
+        current.status = "canceled";
+        current.startedAt = new Date().toISOString();
+        current.finishedAt = new Date().toISOString();
+        current.progress.phase = "finished";
+        current.progress.percent = 100;
+        current.message = "任务已取消";
+        current.error = null;
+      });
+      app.log.warn({ event: "job.exec.canceled", executionId: execution.id, jobId, trigger }, "Job execution canceled before start");
+      trimJobExecutions();
+      return;
+    }
     updateJobExecution(execution.id, (current) => {
       current.status = "running";
       current.startedAt = new Date().toISOString();
@@ -2494,9 +2691,20 @@ function startJobExecution(jobId: string, trigger: JobRunTrigger): JobExecution 
       current.error = null;
       current.message = null;
     });
+    app.log.info(
+      {
+        event: "job.exec.started",
+        executionId: execution.id,
+        jobId,
+        trigger,
+        queueDelayMs: Date.now() - Date.parse(execution.createdAt)
+      },
+      "Job execution started"
+    );
 
     try {
       const state = await stateRepo.loadState();
+      const shouldCancel = () => jobExecutionControls.get(execution.id)?.cancelRequested ?? false;
       const run = await executeJob(state, jobId, trigger, (progress) => {
         updateJobExecution(execution.id, (current) => {
           current.progress = {
@@ -2504,8 +2712,20 @@ function startJobExecution(jobId: string, trigger: JobRunTrigger): JobExecution 
             ...progress
           };
         });
-      });
+      }, { shouldCancel });
+      const saveStartedMs = Date.now();
       await stateRepo.saveState(state);
+      app.log.info(
+        {
+          event: "state.save",
+          tookMs: Date.now() - saveStartedMs,
+          assets: state.assets.length,
+          jobs: state.jobs.length,
+          jobRuns: state.jobRuns.length
+        },
+        "Backup state saved"
+      );
+      const processedCount = run.copiedCount + run.skippedCount + run.failedCount;
       updateJobExecution(execution.id, (current) => {
         current.status = run.status;
         current.finishedAt = run.finishedAt;
@@ -2517,14 +2737,14 @@ function startJobExecution(jobId: string, trigger: JobRunTrigger): JobExecution 
           phase: "finished",
           totalCount: run.scannedCount,
           scannedCount: run.scannedCount,
-          processedCount: run.scannedCount,
+          processedCount,
           copiedCount: run.copiedCount,
           skippedCount: run.skippedCount,
           failedCount: run.failedCount,
           photoCount: run.photoCount,
           videoCount: run.videoCount,
           livePhotoPairCount: run.livePhotoPairCount,
-          percent: 100,
+          percent: run.status === "canceled" ? clampProgressPercent(run.scannedCount ? (processedCount / run.scannedCount) * 100 : 0) : 100,
           currentPath: null
         };
       });
@@ -2920,19 +3140,70 @@ app.get("/api/version", async () => {
 });
 
 app.get("/api/auth/status", async () => {
-  const state = await stateRepo.loadState();
-  const cleaned = pruneExpiredSessions(state);
-  if (cleaned) {
-    await stateRepo.saveState(state);
+  try {
+    const state = await stateRepo.loadState();
+    const cleaned = pruneExpiredSessions(state);
+    if (cleaned) {
+      await stateRepo.saveState(state);
+    }
+    // #region debug-point C:auth-status-ok
+    fetch("http://127.0.0.1:7777/event", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionId: "backup-500",
+        runId: "post-fix",
+        hypothesisId: "C",
+        location: "apps/api/src/index.ts:3142",
+        msg: "[DEBUG] auth status ok",
+        data: { hasUsers: state.users.length > 0 }
+      })
+    }).catch(() => {});
+    // #endregion
+    return {
+      enabled: true,
+      hasUsers: state.users.length > 0
+    };
+  } catch (error) {
+    // #region debug-point C:auth-status-error
+    fetch("http://127.0.0.1:7777/event", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionId: "backup-500",
+        runId: "post-fix",
+        hypothesisId: "C",
+        location: "apps/api/src/index.ts:3142",
+        msg: "[DEBUG] auth status error",
+        data: { message: (error as Error).message }
+      })
+    }).catch(() => {});
+    // #endregion
+    throw error;
   }
-  return {
-    enabled: true,
-    hasUsers: state.users.length > 0
-  };
 });
 
 app.post<{ Body: { username: string; password: string } }>("/api/auth/bootstrap", async (req, reply) => {
-  const state = await stateRepo.loadState();
+  let state: BackupState | null = null;
+  try {
+    state = await stateRepo.loadState();
+  } catch (error) {
+    // #region debug-point D:auth-bootstrap-load-error
+    fetch("http://127.0.0.1:7777/event", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionId: "backup-500",
+        runId: "pre-fix",
+        hypothesisId: "D",
+        location: "apps/api/src/index.ts:3154",
+        msg: "[DEBUG] auth bootstrap load error",
+        data: { message: (error as Error).message }
+      })
+    }).catch(() => {});
+    // #endregion
+    throw error;
+  }
   if (state.users.length > 0) {
     return reply.code(409).send({ message: "User system has already been initialized" });
   }
@@ -3238,42 +3509,33 @@ app.get<{ Params: { storageId: string }; Querystring: { path?: string } }>(
       return reply.code(403).send({ message: (error as Error).message });
     }
 
-    const entries = await readdir(currentPath, { withFileTypes: true }).catch(() => null);
-    if (!entries) {
+    let rows: IndexedMediaFile[] = [];
+    try {
+      rows = await collectIndexedMediaFiles(currentPath);
+    } catch {
       return reply.code(404).send({ message: "Directory not found" });
     }
-    const files = (
-      await Promise.all(
-        entries
-          .filter((entry) => entry.isFile())
-          .map(async (entry) => {
-            const ext = path.extname(entry.name).toLowerCase();
-            const kind = IMAGE_EXTENSIONS.has(ext) ? "image" : VIDEO_EXTENSIONS.has(ext) ? "video" : "other";
-            if (kind === "other") return null;
 
-            const fullPath = path.join(currentPath, entry.name);
-            const fileStat = await stat(fullPath).catch(() => null);
-            const modifiedAt = fileStat?.mtime?.toISOString() ?? null;
-            const capturedAt =
-              fileStat && Number.isFinite(fileStat.birthtimeMs) && fileStat.birthtimeMs > 0
-                ? fileStat.birthtime.toISOString()
-                : modifiedAt;
+    const files = rows
+      .map((row) => {
+        const ext = path.extname(row.relativePath).toLowerCase();
+        const kind = IMAGE_EXTENSIONS.has(ext) ? "image" : VIDEO_EXTENSIONS.has(ext) ? "video" : "other";
+        if (kind === "other") return null;
 
-            return {
-              name: entry.name,
-              path: fullPath,
-              kind,
-              sizeBytes: fileStat?.size ?? null,
-              modifiedAt,
-              capturedAt,
-              latitude: null,
-              longitude: null
-            };
-          })
-      )
-    )
+        const modifiedAt = Number.isFinite(row.mtimeMs) && row.mtimeMs > 0 ? new Date(row.mtimeMs).toISOString() : null;
+        return {
+          name: path.basename(row.relativePath),
+          path: row.fullPath,
+          kind,
+          sizeBytes: row.sizeBytes ?? null,
+          modifiedAt,
+          capturedAt: modifiedAt,
+          latitude: null,
+          longitude: null
+        };
+      })
       .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))
-      .sort((a, b) => a.name.localeCompare(b.name));
+      .sort((a, b) => a.path.localeCompare(b.path, "zh-CN"));
 
     return {
       storageId: storage.id,
@@ -3349,6 +3611,20 @@ app.delete<{ Params: { storageId: string } }>("/api/storages/:storageId", async 
   state.storages = state.storages.filter((s) => s.id !== req.params.storageId);
   if (state.storages.length === before) {
     return reply.code(404).send({ message: "Storage not found" });
+  }
+  const relatedJobIds = new Set(
+    state.jobs
+      .filter((job) => job.sourceTargetId === req.params.storageId || job.destinationTargetId === req.params.storageId)
+      .map((job) => job.id)
+  );
+  if (relatedJobIds.size > 0) {
+    state.jobs = state.jobs.filter((job) => !relatedJobIds.has(job.id));
+    state.jobRuns = state.jobRuns.filter((run) => !relatedJobIds.has(run.jobId));
+    for (const [executionId, execution] of jobExecutions.entries()) {
+      if (relatedJobIds.has(execution.jobId)) {
+        jobExecutions.delete(executionId);
+      }
+    }
   }
   await stateRepo.saveState(state);
   if (removed && isLocalStorage(removed.type)) {
@@ -3511,6 +3787,29 @@ app.get<{ Params: { executionId: string } }>("/api/job-executions/:executionId",
   if (!execution) {
     return reply.code(404).send({ message: "Execution not found" });
   }
+  return { execution: normalizeJobExecution(execution) };
+});
+
+app.post<{ Params: { executionId: string } }>("/api/job-executions/:executionId/cancel", async (req, reply) => {
+  const execution = requestCancelExecution(req.params.executionId);
+  if (!execution) {
+    return reply.code(404).send({ message: "Execution not found" });
+  }
+  // #region debug-point B:cancel-exec
+  fetch("http://127.0.0.1:7777/event", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      sessionId: "backup-500",
+      runId: "post-fix",
+      hypothesisId: "B",
+      location: "apps/api/src/index.ts:3586",
+      msg: "[DEBUG] cancel execution requested",
+      data: { executionId: execution.id, jobId: execution.jobId, status: execution.status }
+    })
+  }).catch(() => {});
+  // #endregion
+  app.log.warn({ event: "job.exec.cancel.requested", executionId: execution.id, jobId: execution.jobId }, "Cancel requested");
   return { execution: normalizeJobExecution(execution) };
 });
 

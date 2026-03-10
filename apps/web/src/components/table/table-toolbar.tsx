@@ -1,7 +1,8 @@
 import { useEffect, useRef } from "react";
+import { Search, X } from "lucide-react";
 
 interface TableToolbarProps {
-  title: string;
+  title?: string;
   search: string;
   onSearchChange: (value: string) => void;
   pageSize: number;
@@ -44,17 +45,18 @@ export function TableToolbar({ title, search, onSearchChange, pageSize, onPageSi
 
   return (
     <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-      <div>
-        <h3 className="text-base font-semibold">{title}</h3>
-        <p className="text-sm mp-muted">{search.trim() ? `筛选结果 ${totalItems} 条` : `共 ${totalItems} 条`}</p>
-      </div>
+      {title && title.trim() ? (
+        <div>
+          <h3 className="text-base font-semibold">{title}</h3>
+          <p className="text-sm mp-muted">{search.trim() ? `筛选结果 ${totalItems} 条` : `共 ${totalItems} 条`}</p>
+        </div>
+      ) : (
+        <div className="hidden sm:block" />
+      )}
       <div className="flex w-full flex-col gap-2 sm:w-auto sm:min-w-[320px] sm:flex-row sm:items-center">
         <label className="relative block w-full sm:min-w-[220px]">
           <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--ark-ink-soft)]">
-            <svg viewBox="0 0 24 24" fill="none" className="h-4 w-4" aria-hidden="true">
-              <circle cx="11" cy="11" r="6.5" stroke="currentColor" strokeWidth="1.7" />
-              <path d="M16 16 20 20" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
-            </svg>
+            <Search className="h-4 w-4" aria-hidden="true" />
           </span>
           <input
             ref={searchInputRef}
@@ -71,9 +73,7 @@ export function TableToolbar({ title, search, onSearchChange, pageSize, onPageSi
               aria-label="清空搜索"
               onClick={() => onSearchChange("")}
             >
-              <svg viewBox="0 0 20 20" fill="none" className="h-3.5 w-3.5" aria-hidden="true">
-                <path d="M5 5 15 15M15 5 5 15" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
-              </svg>
+              <X className="h-4 w-4" aria-hidden="true" />
             </button>
           ) : null}
         </label>
