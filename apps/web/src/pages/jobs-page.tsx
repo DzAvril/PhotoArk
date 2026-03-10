@@ -80,6 +80,18 @@ function getRunStatusClass(status: JobRun["status"]): string {
   return "mp-status-danger";
 }
 
+function formatBytes(bytes: number | null) {
+  if (bytes === null) return "-";
+  const units = ["B", "KB", "MB", "GB", "TB", "PB"];
+  let value = bytes;
+  let index = 0;
+  while (value >= 1024 && index < units.length - 1) {
+    value /= 1024;
+    index += 1;
+  }
+  return `${value.toFixed(value >= 100 || index === 0 ? 0 : 1)} ${units[index]}`;
+}
+
 function getStorageTypeLabel(type: StorageTarget["type"]): string {
   if (type === "local_fs") return "NAS";
   if (type === "external_ssd") return "SSD";
@@ -420,6 +432,12 @@ export function JobsPage() {
   const progressExecution = progressDialogExecutionId ? executionById[progressDialogExecutionId] : undefined;
   const progressJob = progressExecution ? items.find((item) => item.id === progressExecution.jobId) : undefined;
   const progressPercent = progressExecution?.progress.percent ?? 0;
+  const progressFileTotalBytes = progressExecution?.progress.currentFileTotalBytes ?? null;
+  const progressFileCopiedBytes = progressExecution?.progress.currentFileCopiedBytes ?? null;
+  const progressFilePercent =
+    progressFileTotalBytes && progressFileCopiedBytes !== null && progressFileTotalBytes > 0
+      ? Math.min(100, Math.round((progressFileCopiedBytes / progressFileTotalBytes) * 100))
+      : null;
   const progressStatusLabel = progressExecution ? getExecutionStatusLabel(progressExecution) : "";
   const progressStatusClass =
     progressExecution?.status === "failed"
@@ -978,6 +996,23 @@ export function JobsPage() {
             </div>
             {progressExecution.progress.currentPath ? (
               <p className="mt-2 break-all text-xs mp-muted">当前文件: {progressExecution.progress.currentPath}</p>
+            ) : null}
+            {progressFileTotalBytes !== null && progressFileCopiedBytes !== null ? (
+              <div className="mt-2">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="mp-muted">当前文件进度</span>
+                  <span className="font-medium">
+                    {formatBytes(progressFileCopiedBytes)} / {formatBytes(progressFileTotalBytes)}
+                    {progressFilePercent !== null ? ` · ${progressFilePercent}%` : ""}
+                  </span>
+                </div>
+                <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-[var(--ark-line)]">
+                  <div
+                    className="h-full rounded-full bg-[var(--ark-primary)] transition-all duration-300"
+                    style={{ width: `${progressFilePercent ?? 0}%` }}
+                  />
+                </div>
+              </div>
             ) : null}
             {progressExecution.error ? <p className="mp-error mt-3">{progressExecution.error}</p> : null}
 

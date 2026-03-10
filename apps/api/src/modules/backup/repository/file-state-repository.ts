@@ -41,6 +41,20 @@ export class FileStateRepository {
       }
 
       const raw = await readFile(this.stateFilePath, "utf8");
+      // #region debug-point D:state-load-raw
+      fetch("http://127.0.0.1:7777/event", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId: "backup-oom-001",
+          runId: "pre-fix",
+          hypothesisId: "D",
+          location: "apps/api/src/modules/backup/repository/file-state-repository.ts:43",
+          msg: "[DEBUG] state file raw loaded",
+          data: { stateFilePath: this.stateFilePath, fileBytes: fileStat.size, rawLength: raw.length, memory: process.memoryUsage() }
+        })
+      }).catch(() => {});
+      // #endregion
       const parsed = JSON.parse(raw) as Partial<BackupState>;
       const parsedTelegram = parsed.settings?.telegram;
       const nextState: BackupState = {
@@ -61,6 +75,27 @@ export class FileStateRepository {
       };
       this.cachedState = structuredClone(nextState);
       this.cachedMtimeMs = fileStat.mtimeMs;
+      // #region debug-point B:state-load-parsed
+      fetch("http://127.0.0.1:7777/event", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId: "backup-oom-001",
+          runId: "pre-fix",
+          hypothesisId: "B",
+          location: "apps/api/src/modules/backup/repository/file-state-repository.ts:60",
+          msg: "[DEBUG] state file parsed",
+          data: {
+            stateFilePath: this.stateFilePath,
+            assetsCount: nextState.assets.length,
+            jobsCount: nextState.jobs.length,
+            usersCount: nextState.users.length,
+            sessionsCount: nextState.sessions.length,
+            memory: process.memoryUsage()
+          }
+        })
+      }).catch(() => {});
+      // #endregion
       return nextState;
     } catch {
       this.cachedState = structuredClone(defaultState);
@@ -70,8 +105,29 @@ export class FileStateRepository {
   }
 
   async saveState(state: BackupState): Promise<void> {
+    const serialized = JSON.stringify(state, null, 2);
+    // #region debug-point B:state-save-serialized
+    fetch("http://127.0.0.1:7777/event", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionId: "backup-oom-001",
+        runId: "pre-fix",
+        hypothesisId: "B",
+        location: "apps/api/src/modules/backup/repository/file-state-repository.ts:72",
+        msg: "[DEBUG] state file serialized",
+        data: {
+          stateFilePath: this.stateFilePath,
+          serializedBytes: Buffer.byteLength(serialized, "utf8"),
+          assetsCount: state.assets.length,
+          jobsCount: state.jobs.length,
+          memory: process.memoryUsage()
+        }
+      })
+    }).catch(() => {});
+    // #endregion
     await mkdir(path.dirname(this.stateFilePath), { recursive: true });
-    await writeFile(this.stateFilePath, JSON.stringify(state, null, 2), "utf8");
+    await writeFile(this.stateFilePath, serialized, "utf8");
     this.cachedState = structuredClone(state);
     const fileStat = await stat(this.stateFilePath).catch(() => null);
     this.cachedMtimeMs = fileStat?.mtimeMs ?? Date.now();

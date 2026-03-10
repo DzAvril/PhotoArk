@@ -263,6 +263,8 @@ export interface JobExecutionProgress {
   livePhotoPairCount: number;
   percent: number;
   currentPath: string | null;
+  currentFileTotalBytes: number | null;
+  currentFileCopiedBytes: number | null;
 }
 
 export interface JobExecution {

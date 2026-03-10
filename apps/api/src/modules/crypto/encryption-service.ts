@@ -30,6 +30,8 @@ type KeyEntry = {
   keyId: Buffer<ArrayBufferLike>;
 };
 
+type ProgressCallback = (deltaBytes: number) => void;
+
 function assertKeyLength(input: Buffer, label: string): Buffer {
   if (input.length !== KEY_LENGTH) {
     throw new Error(`${label} must be 32 bytes after base64 decoding.`);
@@ -62,6 +64,16 @@ function isAuthFailure(error: unknown): boolean {
 
 function hasEnvelopeHeader(blob: Buffer): boolean {
   return blob.length >= MIN_ENVELOPE_LENGTH && blob.subarray(0, MAGIC.length).equals(MAGIC);
+}
+
+function createProgressTransform(onProgress?: ProgressCallback): Transform | null {
+  if (!onProgress) return null;
+  return new Transform({
+    transform(chunk, _encoding, callback) {
+      onProgress(chunk.length);
+      callback(null, chunk);
+    }
+  });
 }
 
 type EncryptedFileMeta = {
@@ -222,14 +234,16 @@ export class EncryptionService {
     }
   }
 
-  async encryptFile(sourcePath: string, destinationPath: string): Promise<void> {
+  async encryptFile(sourcePath: string, destinationPath: string, onProgress?: ProgressCallback): Promise<void> {
     const iv = randomBytes(IV_LENGTH);
     const cipher = createCipheriv("aes-256-gcm", this.current.key, iv) as CipherGCM;
     const header = encryptHeaderV2(this.current.keyId, iv);
     const envelope = this.createEnvelopeTransform(header, cipher);
 
     await this.withAtomicWrite(destinationPath, async (tmpPath) => {
-      await pipeline(createReadStream(sourcePath), cipher, envelope, createWriteStream(tmpPath));
+      const progressTransform = createProgressTransform(onProgress);
+      const streams = [createReadStream(sourcePath), ...(progressTransform ? [progressTransform] : []), cipher, envelope, createWriteStream(tmpPath)];
+      await pipeline(streams);
     });
   }
 
@@ -306,25 +320,29 @@ export class EncryptionService {
     sourcePath: string,
     destinationPath: string,
     meta: EncryptedFileMeta,
-    candidate: KeyEntry
+    candidate: KeyEntry,
+    onProgress?: ProgressCallback
   ): Promise<void> {
     await this.withAtomicWrite(destinationPath, async (tmpPath) => {
       const decipher = createDecipheriv("aes-256-gcm", candidate.key, meta.iv);
       decipher.setAuthTag(meta.tag);
-      await pipeline(
+      const progressTransform = createProgressTransform(onProgress);
+      const streams = [
         this.createRangeReadStream(sourcePath, meta.startOffset, meta.endOffset),
+        ...(progressTransform ? [progressTransform] : []),
         decipher,
         createWriteStream(tmpPath)
-      );
+      ];
+      await pipeline(streams);
     });
   }
 
-  async decryptFile(sourcePath: string, destinationPath: string): Promise<void> {
+  async decryptFile(sourcePath: string, destinationPath: string, onProgress?: ProgressCallback): Promise<void> {
     const meta = await this.inspectEncryptedFile(sourcePath);
     let lastError: unknown = null;
     for (const candidate of meta.candidates) {
       try {
-        await this.runDecryptPipeline(sourcePath, destinationPath, meta, candidate);
+        await this.runDecryptPipeline(sourcePath, destinationPath, meta, candidate, onProgress);
         return;
       } catch (error) {
         lastError = error;
@@ -340,7 +358,8 @@ export class EncryptionService {
     sourcePath: string,
     destinationPath: string,
     meta: EncryptedFileMeta,
-    candidate: KeyEntry
+    candidate: KeyEntry,
+    onProgress?: ProgressCallback
   ): Promise<void> {
     await this.withAtomicWrite(destinationPath, async (tmpPath) => {
       const decipher = createDecipheriv("aes-256-gcm", candidate.key, meta.iv);
@@ -348,22 +367,25 @@ export class EncryptionService {
       const nextIv = randomBytes(IV_LENGTH);
       const nextCipher = createCipheriv("aes-256-gcm", this.current.key, nextIv) as CipherGCM;
       const envelope = this.createEnvelopeTransform(encryptHeaderV2(this.current.keyId, nextIv), nextCipher);
-      await pipeline(
+      const progressTransform = createProgressTransform(onProgress);
+      const streams = [
         this.createRangeReadStream(sourcePath, meta.startOffset, meta.endOffset),
+        ...(progressTransform ? [progressTransform] : []),
         decipher,
         nextCipher,
         envelope,
         createWriteStream(tmpPath)
-      );
+      ];
+      await pipeline(streams);
     });
   }
 
-  async reencryptFile(sourcePath: string, destinationPath: string): Promise<void> {
+  async reencryptFile(sourcePath: string, destinationPath: string, onProgress?: ProgressCallback): Promise<void> {
     const meta = await this.inspectEncryptedFile(sourcePath);
     let lastError: unknown = null;
     for (const candidate of meta.candidates) {
       try {
-        await this.runReencryptPipeline(sourcePath, destinationPath, meta, candidate);
+        await this.runReencryptPipeline(sourcePath, destinationPath, meta, candidate, onProgress);
         return;
       } catch (error) {
         lastError = error;

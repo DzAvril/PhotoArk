@@ -1070,6 +1070,12 @@ export function DashboardPage() {
   }, [progressDialogEdge, activeExecutionByJobId, latestExecutionByJobId]);
   const progressDialogJob = progressDialogExecution ? jobById.get(progressDialogExecution.jobId) : undefined;
   const progressDialogPercent = progressDialogExecution?.progress.percent ?? 0;
+  const progressDialogFileTotalBytes = progressDialogExecution?.progress.currentFileTotalBytes ?? null;
+  const progressDialogFileCopiedBytes = progressDialogExecution?.progress.currentFileCopiedBytes ?? null;
+  const progressDialogFilePercent =
+    progressDialogFileTotalBytes && progressDialogFileCopiedBytes !== null && progressDialogFileTotalBytes > 0
+      ? Math.min(100, Math.round((progressDialogFileCopiedBytes / progressDialogFileTotalBytes) * 100))
+      : null;
   const progressDialogStatusLabel = progressDialogExecution ? getExecutionStatusLabel(progressDialogExecution) : "";
   const progressDialogStatusClass =
     progressDialogExecution?.status === "failed"
@@ -1622,6 +1628,23 @@ export function DashboardPage() {
             </div>
             {progressDialogExecution.progress.currentPath ? (
               <p className="mt-2 break-all text-xs mp-muted">当前文件: {progressDialogExecution.progress.currentPath}</p>
+            ) : null}
+            {progressDialogFileTotalBytes !== null && progressDialogFileCopiedBytes !== null ? (
+              <div className="mt-2">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="mp-muted">当前文件进度</span>
+                  <span className="font-medium">
+                    {formatBytes(progressDialogFileCopiedBytes)} / {formatBytes(progressDialogFileTotalBytes)}
+                    {progressDialogFilePercent !== null ? ` · ${progressDialogFilePercent}%` : ""}
+                  </span>
+                </div>
+                <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-[var(--ark-line)]">
+                  <div
+                    className="h-full rounded-full bg-[var(--ark-primary)] transition-all duration-300"
+                    style={{ width: `${progressDialogFilePercent ?? 0}%` }}
+                  />
+                </div>
+              </div>
             ) : null}
             {progressDialogExecution.error ? <p className="mp-error mt-3">{progressDialogExecution.error}</p> : null}
 

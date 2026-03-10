@@ -1,9 +1,12 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { createReadStream } from "node:fs";
-import { copyFile, mkdir, readdir, readFile, stat, statfs, unlink, utimes } from "node:fs/promises";
+import { createReadStream, createWriteStream } from "node:fs";
+import { mkdir, readdir, readFile, stat, statfs, unlink, utimes } from "node:fs/promises";
+import { rename } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { Transform } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import Fastify, { type FastifyReply } from "fastify";
 import cors from "@fastify/cors";
 import fastifyStatic from "@fastify/static";
@@ -1439,6 +1442,8 @@ type JobExecutionProgress = {
   livePhotoPairCount: number;
   percent: number;
   currentPath: string | null;
+  currentFileTotalBytes: number | null;
+  currentFileCopiedBytes: number | null;
 };
 
 type JobExecution = {
@@ -1961,6 +1966,8 @@ type JobExecutionProgressUpdate = {
   livePhotoPairCount: number;
   percent: number;
   currentPath: string | null;
+  currentFileTotalBytes: number | null;
+  currentFileCopiedBytes: number | null;
 };
 
 type ExecuteJobProgressHandler = (progress: JobExecutionProgressUpdate) => void;
@@ -1973,6 +1980,36 @@ function clampProgressPercent(value: number): number {
   if (value <= 0) return 0;
   if (value >= 100) return 100;
   return Math.round(value);
+}
+
+const FILE_PROGRESS_MIN_INTERVAL_MS = 200;
+const FILE_PROGRESS_MIN_BYTES = 512 * 1024;
+
+async function copyFileWithProgress(
+  sourcePath: string,
+  destinationPath: string,
+  onBytes?: (deltaBytes: number) => void
+): Promise<void> {
+  await mkdir(path.dirname(destinationPath), { recursive: true });
+  const tmpPath = `${destinationPath}.tmp-${randomUUID()}`;
+  const transforms = onBytes
+    ? [
+        new Transform({
+          transform(chunk, _encoding, callback) {
+            onBytes(chunk.length);
+            callback(null, chunk);
+          }
+        })
+      ]
+    : [];
+  try {
+    const streams = [createReadStream(sourcePath), ...transforms, createWriteStream(tmpPath)];
+    await pipeline(streams);
+    await rename(tmpPath, destinationPath);
+  } catch (error) {
+    await unlink(tmpPath).catch(() => undefined);
+    throw error;
+  }
 }
 
 function normalizeJobExecution(execution: JobExecution): JobExecution {
@@ -2034,7 +2071,9 @@ function createJobExecution(jobId: string, trigger: JobRunTrigger): JobExecution
       videoCount: 0,
       livePhotoPairCount: 0,
       percent: 0,
-      currentPath: null
+      currentPath: null,
+      currentFileTotalBytes: null,
+      currentFileCopiedBytes: null
     }
   };
   jobExecutions.set(execution.id, execution);
@@ -2063,6 +2102,8 @@ function requestCancelExecution(executionId: string): JobExecution | null {
       execution.progress.phase = "finished";
       execution.progress.percent = 100;
       execution.progress.currentPath = null;
+      execution.progress.currentFileTotalBytes = null;
+      execution.progress.currentFileCopiedBytes = null;
     });
   }
   return jobExecutions.get(executionId) ?? null;
@@ -2118,6 +2159,8 @@ async function executeJob(
       videoCount: number;
       livePhotoPairCount: number;
       currentPath: string | null;
+      currentFileTotalBytes: number | null;
+      currentFileCopiedBytes: number | null;
     }
   ) => {
     if (!onProgress) return;
@@ -2135,7 +2178,9 @@ async function executeJob(
       videoCount: progress.videoCount,
       livePhotoPairCount: progress.livePhotoPairCount,
       percent,
-      currentPath: progress.currentPath
+      currentPath: progress.currentPath,
+      currentFileTotalBytes: progress.currentFileTotalBytes,
+      currentFileCopiedBytes: progress.currentFileCopiedBytes
     });
   };
 
@@ -2160,19 +2205,105 @@ async function executeJob(
     photoCount: 0,
     videoCount: 0,
     livePhotoPairCount: 0,
-    currentPath: null
+    currentPath: null,
+    currentFileTotalBytes: null,
+    currentFileCopiedBytes: null
   });
 
   app.log.info({ event: "job.exec.scan.start", jobId, trigger }, "Job scan started");
+  // #region debug-point E:scan-start-mem
+  fetch("http://127.0.0.1:7777/event", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      sessionId: "backup-500",
+      runId: "pre-fix",
+      hypothesisId: "E",
+      location: "apps/api/src/index.ts:2122",
+      msg: "[DEBUG] scan start memory",
+      data: { jobId, trigger, memory: process.memoryUsage() }
+    })
+  }).catch(() => {});
+  // #endregion
+  // #region debug-point A:scan-before-collect
+  fetch("http://127.0.0.1:7777/event", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      sessionId: "backup-oom-001",
+      runId: "pre-fix",
+      hypothesisId: "A",
+      location: "apps/api/src/index.ts:2170",
+      msg: "[DEBUG] before collectMediaFiles",
+      data: { jobId, trigger, sourceRoot, memory: process.memoryUsage() }
+    })
+  }).catch(() => {});
+  // #endregion
 
   const sourceFiles = await collectMediaFiles(sourceRoot);
+  // #region debug-point A:scan-after-collect
+  fetch("http://127.0.0.1:7777/event", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      sessionId: "backup-oom-001",
+      runId: "pre-fix",
+      hypothesisId: "A",
+      location: "apps/api/src/index.ts:2185",
+      msg: "[DEBUG] after collectMediaFiles",
+      data: { jobId, trigger, sourceFilesCount: sourceFiles.length, memory: process.memoryUsage() }
+    })
+  }).catch(() => {});
+  // #endregion
   const relativePaths = sourceFiles.map((fullPath) => toPosixPath(path.relative(sourceRoot, fullPath)));
+  // #region debug-point A:scan-after-relative-map
+  fetch("http://127.0.0.1:7777/event", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      sessionId: "backup-oom-001",
+      runId: "pre-fix",
+      hypothesisId: "A",
+      location: "apps/api/src/index.ts:2187",
+      msg: "[DEBUG] after relativePaths map",
+      data: { jobId, trigger, relativePathsCount: relativePaths.length, memory: process.memoryUsage() }
+    })
+  }).catch(() => {});
+  // #endregion
   const livePhotoMap = buildLivePhotoIdByRelativePath(relativePaths);
+  // #region debug-point A:scan-after-livephoto-map
+  fetch("http://127.0.0.1:7777/event", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      sessionId: "backup-oom-001",
+      runId: "pre-fix",
+      hypothesisId: "A",
+      location: "apps/api/src/index.ts:2189",
+      msg: "[DEBUG] after livePhoto map",
+      data: { jobId, trigger, livePhotoMapSize: livePhotoMap.size, memory: process.memoryUsage() }
+    })
+  }).catch(() => {});
+  // #endregion
   const scanTookMs = Date.now() - scanStartedMs;
   app.log.info(
     { event: "job.exec.scan.done", jobId, trigger, scannedCount: sourceFiles.length, scanTookMs },
     "Job scan finished"
   );
+  // #region debug-point E:scan-done-mem
+  fetch("http://127.0.0.1:7777/event", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      sessionId: "backup-500",
+      runId: "pre-fix",
+      hypothesisId: "E",
+      location: "apps/api/src/index.ts:2148",
+      msg: "[DEBUG] scan done memory",
+      data: { jobId, trigger, scannedCount: sourceFiles.length, scanTookMs, memory: process.memoryUsage() }
+    })
+  }).catch(() => {});
+  // #endregion
 
   const copiedSamples: string[] = [];
   const errors: JobRun["errors"] = [];
@@ -2192,6 +2323,20 @@ async function executeJob(
       destinationAssetIndexByName.set(asset.name, idx);
     }
   }
+  // #region debug-point C:asset-index-built
+  fetch("http://127.0.0.1:7777/event", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      sessionId: "backup-oom-001",
+      runId: "pre-fix",
+      hypothesisId: "C",
+      location: "apps/api/src/index.ts:2247",
+      msg: "[DEBUG] destination asset index built",
+      data: { jobId, trigger, assetCount: state.assets.length, indexSize: destinationAssetIndexByName.size, memory: process.memoryUsage() }
+    })
+  }).catch(() => {});
+  // #endregion
 
   emitProgress("syncing", {
     totalCount: scannedCount,
@@ -2203,7 +2348,9 @@ async function executeJob(
     photoCount,
     videoCount,
     livePhotoPairCount: copiedLivePhotoIds.size,
-    currentPath: null
+    currentPath: null,
+    currentFileTotalBytes: null,
+    currentFileCopiedBytes: null
   });
 
   if (checkCancel()) {
@@ -2218,6 +2365,47 @@ async function executeJob(
   let lastHeartbeatAt = Date.now();
   let lastHeartbeatProcessed = 0;
 
+  const createFileProgressReporter = (relativePath: string, totalBytes: number) => {
+    let copiedBytes = 0;
+    let lastEmitAt = 0;
+    let lastEmitBytes = 0;
+    const emit = (force = false) => {
+      const now = Date.now();
+      if (!force && now - lastEmitAt < FILE_PROGRESS_MIN_INTERVAL_MS && copiedBytes - lastEmitBytes < FILE_PROGRESS_MIN_BYTES) {
+        return;
+      }
+      lastEmitAt = now;
+      lastEmitBytes = copiedBytes;
+      emitProgress("syncing", {
+        totalCount: scannedCount,
+        scannedCount,
+        processedCount,
+        copiedCount,
+        skippedCount,
+        failedCount,
+        photoCount,
+        videoCount,
+        livePhotoPairCount: copiedLivePhotoIds.size,
+        currentPath: relativePath,
+        currentFileTotalBytes: totalBytes,
+        currentFileCopiedBytes: copiedBytes
+      });
+    };
+    return {
+      reportDelta(delta: number, force = false) {
+        copiedBytes = Math.min(totalBytes, copiedBytes + delta);
+        emit(force || copiedBytes >= totalBytes);
+      },
+      snapshot() {
+        return copiedBytes;
+      },
+      finalize() {
+        copiedBytes = totalBytes;
+        emit(true);
+      }
+    };
+  };
+
   if (!canceled) {
     for (let i = 0; i < sourceFiles.length; i += 1) {
       if (checkCancel()) {
@@ -2226,8 +2414,10 @@ async function executeJob(
       const sourceFile = sourceFiles[i];
       const relativePath = relativePaths[i];
       const destinationFile = path.join(destinationRoot, relativePath);
+      let sourceStat: Awaited<ReturnType<typeof stat>> | null = null;
+      let fileReporter: ReturnType<typeof createFileProgressReporter> | null = null;
       try {
-        const sourceStat = await stat(sourceFile);
+        sourceStat = await stat(sourceFile);
       const sourceCapturedAt = sourceStat.mtime.toISOString();
       const livePhotoAssetId = livePhotoMap.get(relativePath);
       const nextKind = detectAssetKind(relativePath, livePhotoAssetId);
@@ -2235,14 +2425,47 @@ async function executeJob(
       const existing = existingIdx === undefined ? undefined : state.assets[existingIdx];
       const destinationStat = await stat(destinationFile).catch(() => null);
       const destinationExists = Boolean(destinationStat?.isFile());
-      if (
+      const shouldSkip =
         existing &&
         existingIdx !== undefined &&
         destinationExists &&
         existing.sizeBytes === sourceStat.size &&
         existing.capturedAt === sourceCapturedAt &&
-        existing.encrypted === destinationStorage.encrypted
-      ) {
+        existing.encrypted === destinationStorage.encrypted;
+      const decisionReasons: string[] = [];
+      if (shouldSkip) {
+        decisionReasons.push("index_match", "destination_exists", "size_match", "mtime_match", "encryption_match");
+      } else {
+        if (!existing || existingIdx === undefined) {
+          decisionReasons.push("missing_index");
+        }
+        if (!destinationExists) {
+          decisionReasons.push("destination_missing");
+        }
+        if (existing && existing.sizeBytes !== sourceStat.size) {
+          decisionReasons.push("size_mismatch");
+        }
+        if (existing && existing.capturedAt !== sourceCapturedAt) {
+          decisionReasons.push("mtime_mismatch");
+        }
+        if (existing && existing.encrypted !== destinationStorage.encrypted) {
+          decisionReasons.push("encryption_mismatch");
+        }
+      }
+      app.log.info(
+        {
+          event: "job.exec.file.decision",
+          jobId,
+          trigger,
+          path: relativePath,
+          decision: shouldSkip ? "skip" : "copy",
+          reasons: decisionReasons
+        },
+        "Job sync file decision"
+      );
+      fileReporter = createFileProgressReporter(relativePath, sourceStat.size);
+      if (shouldSkip) {
+        fileReporter.finalize();
         const nextAsset: BackupAsset = {
           id: existing.id,
           name: relativePath,
@@ -2271,7 +2494,9 @@ async function executeJob(
           photoCount,
           videoCount,
           livePhotoPairCount: copiedLivePhotoIds.size,
-          currentPath: relativePath
+          currentPath: relativePath,
+          currentFileTotalBytes: sourceStat.size,
+          currentFileCopiedBytes: sourceStat.size
         });
       const now = Date.now();
       if (now - lastHeartbeatAt >= 5000 || processedCount - lastHeartbeatProcessed >= 500) {
@@ -2290,22 +2515,59 @@ async function executeJob(
           },
           "Job sync progress"
         );
+        // #region debug-point C:sync-heartbeat-assets
+        fetch("http://127.0.0.1:7777/event", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sessionId: "backup-oom-001",
+            runId: "pre-fix",
+            hypothesisId: "C",
+            location: "apps/api/src/index.ts:2455",
+            msg: "[DEBUG] sync heartbeat assets",
+            data: {
+              jobId,
+              trigger,
+              processedCount,
+              scannedCount,
+              assetCount: state.assets.length,
+              indexSize: destinationAssetIndexByName.size,
+              memory: process.memoryUsage()
+            }
+          })
+        }).catch(() => {});
+        // #endregion
+        // #region debug-point E:sync-heartbeat-mem
+        fetch("http://127.0.0.1:7777/event", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sessionId: "backup-500",
+            runId: "pre-fix",
+            hypothesisId: "E",
+            location: "apps/api/src/index.ts:2230",
+            msg: "[DEBUG] sync heartbeat memory",
+            data: { jobId, trigger, processedCount, scannedCount, memory: process.memoryUsage() }
+          })
+        }).catch(() => {});
+        // #endregion
         lastHeartbeatAt = now;
         lastHeartbeatProcessed = processedCount;
       }
         continue;
       }
 
-      await mkdir(path.dirname(destinationFile), { recursive: true });
+      fileReporter.reportDelta(0, true);
       if (!sourceStorage.encrypted && !destinationStorage.encrypted) {
-        await copyFile(sourceFile, destinationFile);
+        await copyFileWithProgress(sourceFile, destinationFile, (delta) => fileReporter?.reportDelta(delta));
       } else if (!sourceStorage.encrypted && destinationStorage.encrypted) {
-        await encryption.encryptFile(sourceFile, destinationFile);
+        await encryption.encryptFile(sourceFile, destinationFile, (delta) => fileReporter?.reportDelta(delta));
       } else if (sourceStorage.encrypted && !destinationStorage.encrypted) {
-        await encryption.decryptFile(sourceFile, destinationFile);
+        await encryption.decryptFile(sourceFile, destinationFile, (delta) => fileReporter?.reportDelta(delta));
       } else {
-        await encryption.reencryptFile(sourceFile, destinationFile);
+        await encryption.reencryptFile(sourceFile, destinationFile, (delta) => fileReporter?.reportDelta(delta));
       }
+      fileReporter.finalize();
       await utimes(destinationFile, sourceStat.atime, sourceStat.mtime).catch(() => undefined);
       const nextAsset: BackupAsset = {
         id: existing?.id ?? `asset_${randomUUID()}`,
@@ -2346,7 +2608,9 @@ async function executeJob(
         photoCount,
         videoCount,
         livePhotoPairCount: copiedLivePhotoIds.size,
-        currentPath: relativePath
+        currentPath: relativePath,
+        currentFileTotalBytes: sourceStat.size,
+        currentFileCopiedBytes: sourceStat.size
       });
       const now = Date.now();
       if (now - lastHeartbeatAt >= 5000 || processedCount - lastHeartbeatProcessed >= 500) {
@@ -2365,6 +2629,42 @@ async function executeJob(
           },
           "Job sync progress"
         );
+        // #region debug-point C:sync-heartbeat-assets
+        fetch("http://127.0.0.1:7777/event", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sessionId: "backup-oom-001",
+            runId: "pre-fix",
+            hypothesisId: "C",
+            location: "apps/api/src/index.ts:2544",
+            msg: "[DEBUG] sync heartbeat assets",
+            data: {
+              jobId,
+              trigger,
+              processedCount,
+              scannedCount,
+              assetCount: state.assets.length,
+              indexSize: destinationAssetIndexByName.size,
+              memory: process.memoryUsage()
+            }
+          })
+        }).catch(() => {});
+        // #endregion
+        // #region debug-point E:sync-heartbeat-mem
+        fetch("http://127.0.0.1:7777/event", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sessionId: "backup-500",
+            runId: "pre-fix",
+            hypothesisId: "E",
+            location: "apps/api/src/index.ts:2262",
+            msg: "[DEBUG] sync heartbeat memory",
+            data: { jobId, trigger, processedCount, scannedCount, memory: process.memoryUsage() }
+          })
+        }).catch(() => {});
+        // #endregion
         lastHeartbeatAt = now;
         lastHeartbeatProcessed = processedCount;
       }
@@ -2381,18 +2681,22 @@ async function executeJob(
             "Job sync error"
           );
         }
-        emitProgress("syncing", {
-          totalCount: scannedCount,
-          scannedCount,
-          processedCount,
-          copiedCount,
-          skippedCount,
-          failedCount,
-          photoCount,
-          videoCount,
-          livePhotoPairCount: copiedLivePhotoIds.size,
-          currentPath: relativePath
-        });
+      const failedTotalBytes = sourceStat?.size ?? null;
+      const failedCopiedBytes = fileReporter ? fileReporter.snapshot() : null;
+      emitProgress("syncing", {
+        totalCount: scannedCount,
+        scannedCount,
+        processedCount,
+        copiedCount,
+        skippedCount,
+        failedCount,
+        photoCount,
+        videoCount,
+        livePhotoPairCount: copiedLivePhotoIds.size,
+        currentPath: relativePath,
+        currentFileTotalBytes: failedTotalBytes,
+        currentFileCopiedBytes: failedCopiedBytes
+      });
       }
     }
   }
@@ -2433,7 +2737,9 @@ async function executeJob(
     photoCount,
     videoCount,
     livePhotoPairCount: copiedLivePhotoIds.size,
-    currentPath: null
+    currentPath: null,
+    currentFileTotalBytes: null,
+    currentFileCopiedBytes: null
   });
   if (canceled) {
     app.log.warn(
@@ -2492,9 +2798,8 @@ async function syncSingleFileForJob(
     throw new Error("Source file not found");
   }
 
-  await mkdir(path.dirname(destinationFile), { recursive: true });
   if (!sourceStorage.encrypted && !destinationStorage.encrypted) {
-    await copyFile(sourceFile, destinationFile);
+    await copyFileWithProgress(sourceFile, destinationFile);
   } else if (!sourceStorage.encrypted && destinationStorage.encrypted) {
     await encryption.encryptFile(sourceFile, destinationFile);
   } else if (sourceStorage.encrypted && !destinationStorage.encrypted) {
@@ -2688,6 +2993,8 @@ function startJobExecution(jobId: string, trigger: JobRunTrigger): JobExecution 
       current.progress.phase = "scanning";
       current.progress.percent = 0;
       current.progress.currentPath = null;
+      current.progress.currentFileTotalBytes = null;
+      current.progress.currentFileCopiedBytes = null;
       current.error = null;
       current.message = null;
     });
@@ -2745,7 +3052,9 @@ function startJobExecution(jobId: string, trigger: JobRunTrigger): JobExecution 
           videoCount: run.videoCount,
           livePhotoPairCount: run.livePhotoPairCount,
           percent: run.status === "canceled" ? clampProgressPercent(run.scannedCount ? (processedCount / run.scannedCount) * 100 : 0) : 100,
-          currentPath: null
+          currentPath: null,
+          currentFileTotalBytes: null,
+          currentFileCopiedBytes: null
         };
       });
       void sendTelegramRunSummaryIfEnabled(state, run).catch((error) => {
@@ -3837,6 +4146,16 @@ app.post<{ Params: { jobId: string }; Body: { relativePath: string } }>(
     app.log.info(
       { event: "job.sync_file.request", jobId: req.params.jobId, relativePath: body.relativePath },
       "Single-file sync requested"
+    );
+    app.log.info(
+      {
+        event: "job.sync_file.decision",
+        jobId: req.params.jobId,
+        relativePath: body.relativePath,
+        decision: "copy",
+        reasons: ["single_file_sync_forced"]
+      },
+      "Single-file sync decision"
     );
     try {
       const state = req.appState ?? (await stateRepo.loadState());
