@@ -6,7 +6,7 @@ COPY apps/api/package.json ./apps/api/package.json
 COPY apps/web/package.json ./apps/web/package.json
 COPY packages/shared/package.json ./packages/shared/package.json
 
-RUN npm install -g npm@10.9.2
+RUN npm install -g npm@11.11.0
 RUN npm ci --workspaces --include-workspace-root
 
 COPY . .
