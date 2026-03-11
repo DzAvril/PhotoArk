@@ -10,3 +10,4 @@ coverage
 *.tsbuildinfo
 apps/web/src/**/*.js
 apps/api/apps/
+.trae/
