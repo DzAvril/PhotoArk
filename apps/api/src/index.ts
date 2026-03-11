@@ -3,8 +3,10 @@ import { existsSync } from "node:fs";
 import { createReadStream, createWriteStream } from "node:fs";
 import { mkdir, readdir, readFile, stat, statfs, unlink, utimes } from "node:fs/promises";
 import { rename } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import v8 from "node:v8";
 import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import Fastify, { type FastifyReply } from "fastify";
@@ -108,6 +110,134 @@ const livePhoto = new LivePhotoService();
 const passwordService = new PasswordService();
 const stateRepo = new FileStateRepository(env.BACKUP_STATE_FILE);
 const mediaIndexRepo = new MediaIndexRepository(path.join(path.dirname(path.resolve(env.BACKUP_STATE_FILE)), "media-index.json"));
+
+type MemorySample = {
+  timestamp: string;
+  rss: number;
+  heapUsed: number;
+  heapTotal: number;
+  external: number;
+  arrayBuffers: number;
+};
+
+const memorySamples: MemorySample[] = [];
+let memorySampleTimer: ReturnType<typeof setInterval> | null = null;
+let autoSnapshotTimer: ReturnType<typeof setInterval> | null = null;
+let autoSnapshotInFlight = false;
+let lastAutoSnapshotAt = 0;
+
+const captureMemorySample = () => {
+  const usage = process.memoryUsage();
+  memorySamples.push({
+    timestamp: new Date().toISOString(),
+    rss: usage.rss,
+    heapUsed: usage.heapUsed,
+    heapTotal: usage.heapTotal,
+    external: usage.external,
+    arrayBuffers: usage.arrayBuffers
+  });
+  if (memorySamples.length > env.MEMORY_SAMPLE_LIMIT) {
+    memorySamples.splice(0, memorySamples.length - env.MEMORY_SAMPLE_LIMIT);
+  }
+};
+
+const summarizeSamples = (samples: MemorySample[]) => {
+  if (!samples.length) return null;
+  const metrics = ["rss", "heapUsed", "heapTotal", "external", "arrayBuffers"] as const;
+  const summary: Record<string, { min: number; max: number; avg: number; p95: number }> = {};
+  for (const metric of metrics) {
+    const values = samples.map((item) => item[metric]).sort((a, b) => a - b);
+    const total = values.reduce((sum, value) => sum + value, 0);
+    const p95Index = Math.min(values.length - 1, Math.floor(values.length * 0.95));
+    summary[metric] = {
+      min: values[0],
+      max: values[values.length - 1],
+      avg: Math.round(total / values.length),
+      p95: values[p95Index]
+    };
+  }
+  return summary;
+};
+
+const createHeapSnapshot = async () => {
+  const snapshotDir = path.resolve(env.MEMORY_SNAPSHOT_DIR);
+  await mkdir(snapshotDir, { recursive: true });
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const snapshotFile = path.join(snapshotDir, `heap-${timestamp}-${process.pid}.heapsnapshot`);
+  await pipeline(v8.getHeapSnapshot(), createWriteStream(snapshotFile));
+  const fileStat = await stat(snapshotFile);
+  return {
+    filePath: snapshotFile,
+    sizeBytes: fileStat.size
+  };
+};
+
+const pruneHeapSnapshots = async () => {
+  if (env.MEMORY_AUTO_SNAPSHOT_MAX_FILES <= 0) return;
+  const snapshotDir = path.resolve(env.MEMORY_SNAPSHOT_DIR);
+  const entries = await readdir(snapshotDir, { withFileTypes: true }).catch(() => []);
+  const snapshots = entries
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".heapsnapshot"))
+    .map((entry) => path.join(snapshotDir, entry.name));
+  if (snapshots.length <= env.MEMORY_AUTO_SNAPSHOT_MAX_FILES) return;
+  const stats = await Promise.all(
+    snapshots.map(async (file) => ({ file, stat: await stat(file).catch(() => null) }))
+  );
+  const ordered = stats
+    .filter((item) => item.stat)
+    .sort((a, b) => (a.stat?.mtimeMs ?? 0) - (b.stat?.mtimeMs ?? 0));
+  const toDelete = ordered.slice(0, Math.max(0, ordered.length - env.MEMORY_AUTO_SNAPSHOT_MAX_FILES));
+  await Promise.all(toDelete.map((item) => unlink(item.file).catch(() => {})));
+};
+
+const maybeAutoSnapshot = async (reason: "interval" | "rss-threshold") => {
+  if (!env.MEMORY_PROFILING_ENABLED || !env.MEMORY_AUTO_SNAPSHOT_ENABLED) return;
+  if (autoSnapshotInFlight) return;
+  autoSnapshotInFlight = true;
+  try {
+    const usage = process.memoryUsage();
+    if (reason === "rss-threshold" && env.MEMORY_AUTO_SNAPSHOT_RSS_THRESHOLD_MB > 0) {
+      const thresholdBytes = env.MEMORY_AUTO_SNAPSHOT_RSS_THRESHOLD_MB * 1024 * 1024;
+      if (usage.rss < thresholdBytes) return;
+    }
+    const snapshot = await createHeapSnapshot();
+    lastAutoSnapshotAt = Date.now();
+    await pruneHeapSnapshots();
+    app.log.info(
+      {
+        event: "memory.auto_snapshot",
+        reason,
+        rss: usage.rss,
+        heapUsed: usage.heapUsed,
+        filePath: snapshot.filePath,
+        sizeBytes: snapshot.sizeBytes
+      },
+      "Auto heap snapshot created"
+    );
+  } catch (error) {
+    app.log.error({ err: error, event: "memory.auto_snapshot" }, "Auto heap snapshot failed");
+  } finally {
+    autoSnapshotInFlight = false;
+  }
+};
+
+if (env.MEMORY_PROFILING_ENABLED) {
+  captureMemorySample();
+  memorySampleTimer = setInterval(captureMemorySample, env.MEMORY_SAMPLE_INTERVAL_MS);
+  memorySampleTimer.unref();
+  if (env.MEMORY_AUTO_SNAPSHOT_ENABLED) {
+    autoSnapshotTimer = setInterval(() => {
+      const intervalMs = env.MEMORY_AUTO_SNAPSHOT_INTERVAL_MS;
+      if (intervalMs > 0 && Date.now() - lastAutoSnapshotAt >= intervalMs) {
+        void maybeAutoSnapshot("interval");
+      }
+      if (env.MEMORY_AUTO_SNAPSHOT_RSS_THRESHOLD_MB > 0) {
+        void maybeAutoSnapshot("rss-threshold");
+      }
+    }, Math.max(1000, Math.min(env.MEMORY_SAMPLE_INTERVAL_MS, env.MEMORY_AUTO_SNAPSHOT_INTERVAL_MS)));
+    autoSnapshotTimer.unref();
+  }
+}
 
 const previewTokens = new Map<string, { assetId: string; expiresAt: number }>();
 const previewTickets = new Map<string, { assetId: string; expiresAt: number }>();
@@ -272,7 +402,9 @@ const publicApiRoutes = new Set<string>([
   "/api/version",
   "/api/auth/status",
   "/api/auth/bootstrap",
-  "/api/auth/login"
+  "/api/auth/login",
+  "/api/memory/metrics",
+  "/api/memory/snapshot"
 ]);
 
 function metricSummary(state: BackupState) {
@@ -3454,6 +3586,39 @@ app.get("/api/metrics", async () => {
   return metricSummary(state);
 });
 
+if (env.MEMORY_PROFILING_ENABLED) {
+  app.get("/api/memory/metrics", async () => {
+    const usage = process.memoryUsage();
+    const heapStats = v8.getHeapStatistics();
+    const resource = process.resourceUsage();
+    const recentLimit = Math.min(env.MEMORY_SAMPLE_RECENT_LIMIT, memorySamples.length);
+    return {
+      now: new Date().toISOString(),
+      process: {
+        pid: process.pid,
+        uptimeMs: Math.round(process.uptime() * 1000)
+      },
+      memoryUsage: usage,
+      heapStats,
+      resource,
+      samples: {
+        count: memorySamples.length,
+        summary: summarizeSamples(memorySamples),
+        recent: recentLimit ? memorySamples.slice(-recentLimit) : []
+      },
+      system: {
+        totalMemory: os.totalmem(),
+        freeMemory: os.freemem(),
+        loadAverage: os.loadavg()
+      }
+    };
+  });
+
+  app.post("/api/memory/snapshot", async () => {
+    return createHeapSnapshot();
+  });
+}
+
 app.get<{ Querystring: { year?: string } }>("/api/dashboard/source-activity", async (req) => {
   const query = sourceActivityQuerySchema.parse(req.query ?? {});
   const state = req.appState ?? (await stateRepo.loadState());
@@ -4466,6 +4631,14 @@ app.post<{ Body: { contentBase64: string } }>("/api/crypto/encrypt", async (req)
 });
 
 app.addHook("onClose", async () => {
+  if (memorySampleTimer) {
+    clearInterval(memorySampleTimer);
+    memorySampleTimer = null;
+  }
+  if (autoSnapshotTimer) {
+    clearInterval(autoSnapshotTimer);
+    autoSnapshotTimer = null;
+  }
   if (watcherReconcileTimer) {
     clearInterval(watcherReconcileTimer);
     watcherReconcileTimer = null;
