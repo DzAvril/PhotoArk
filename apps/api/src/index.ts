@@ -1,14 +1,9 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { createReadStream, createWriteStream } from "node:fs";
-import { mkdir, readdir, readFile, stat, statfs, unlink, utimes } from "node:fs/promises";
-import { rename } from "node:fs/promises";
-import os from "node:os";
+import { createReadStream } from "node:fs";
+import { copyFile, mkdir, readdir, readFile, stat, statfs, unlink, utimes } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import v8 from "node:v8";
-import { Transform } from "node:stream";
-import { pipeline } from "node:stream/promises";
 import Fastify, { type FastifyReply } from "fastify";
 import cors from "@fastify/cors";
 import fastifyStatic from "@fastify/static";
@@ -110,134 +105,6 @@ const livePhoto = new LivePhotoService();
 const passwordService = new PasswordService();
 const stateRepo = new FileStateRepository(env.BACKUP_STATE_FILE);
 const mediaIndexRepo = new MediaIndexRepository(path.join(path.dirname(path.resolve(env.BACKUP_STATE_FILE)), "media-index.json"));
-
-type MemorySample = {
-  timestamp: string;
-  rss: number;
-  heapUsed: number;
-  heapTotal: number;
-  external: number;
-  arrayBuffers: number;
-};
-
-const memorySamples: MemorySample[] = [];
-let memorySampleTimer: ReturnType<typeof setInterval> | null = null;
-let autoSnapshotTimer: ReturnType<typeof setInterval> | null = null;
-let autoSnapshotInFlight = false;
-let lastAutoSnapshotAt = 0;
-
-const captureMemorySample = () => {
-  const usage = process.memoryUsage();
-  memorySamples.push({
-    timestamp: new Date().toISOString(),
-    rss: usage.rss,
-    heapUsed: usage.heapUsed,
-    heapTotal: usage.heapTotal,
-    external: usage.external,
-    arrayBuffers: usage.arrayBuffers
-  });
-  if (memorySamples.length > env.MEMORY_SAMPLE_LIMIT) {
-    memorySamples.splice(0, memorySamples.length - env.MEMORY_SAMPLE_LIMIT);
-  }
-};
-
-const summarizeSamples = (samples: MemorySample[]) => {
-  if (!samples.length) return null;
-  const metrics = ["rss", "heapUsed", "heapTotal", "external", "arrayBuffers"] as const;
-  const summary: Record<string, { min: number; max: number; avg: number; p95: number }> = {};
-  for (const metric of metrics) {
-    const values = samples.map((item) => item[metric]).sort((a, b) => a - b);
-    const total = values.reduce((sum, value) => sum + value, 0);
-    const p95Index = Math.min(values.length - 1, Math.floor(values.length * 0.95));
-    summary[metric] = {
-      min: values[0],
-      max: values[values.length - 1],
-      avg: Math.round(total / values.length),
-      p95: values[p95Index]
-    };
-  }
-  return summary;
-};
-
-const createHeapSnapshot = async () => {
-  const snapshotDir = path.resolve(env.MEMORY_SNAPSHOT_DIR);
-  await mkdir(snapshotDir, { recursive: true });
-  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const snapshotFile = path.join(snapshotDir, `heap-${timestamp}-${process.pid}.heapsnapshot`);
-  await pipeline(v8.getHeapSnapshot(), createWriteStream(snapshotFile));
-  const fileStat = await stat(snapshotFile);
-  return {
-    filePath: snapshotFile,
-    sizeBytes: fileStat.size
-  };
-};
-
-const pruneHeapSnapshots = async () => {
-  if (env.MEMORY_AUTO_SNAPSHOT_MAX_FILES <= 0) return;
-  const snapshotDir = path.resolve(env.MEMORY_SNAPSHOT_DIR);
-  const entries = await readdir(snapshotDir, { withFileTypes: true }).catch(() => []);
-  const snapshots = entries
-    .filter((entry) => entry.isFile() && entry.name.endsWith(".heapsnapshot"))
-    .map((entry) => path.join(snapshotDir, entry.name));
-  if (snapshots.length <= env.MEMORY_AUTO_SNAPSHOT_MAX_FILES) return;
-  const stats = await Promise.all(
-    snapshots.map(async (file) => ({ file, stat: await stat(file).catch(() => null) }))
-  );
-  const ordered = stats
-    .filter((item) => item.stat)
-    .sort((a, b) => (a.stat?.mtimeMs ?? 0) - (b.stat?.mtimeMs ?? 0));
-  const toDelete = ordered.slice(0, Math.max(0, ordered.length - env.MEMORY_AUTO_SNAPSHOT_MAX_FILES));
-  await Promise.all(toDelete.map((item) => unlink(item.file).catch(() => {})));
-};
-
-const maybeAutoSnapshot = async (reason: "interval" | "rss-threshold") => {
-  if (!env.MEMORY_PROFILING_ENABLED || !env.MEMORY_AUTO_SNAPSHOT_ENABLED) return;
-  if (autoSnapshotInFlight) return;
-  autoSnapshotInFlight = true;
-  try {
-    const usage = process.memoryUsage();
-    if (reason === "rss-threshold" && env.MEMORY_AUTO_SNAPSHOT_RSS_THRESHOLD_MB > 0) {
-      const thresholdBytes = env.MEMORY_AUTO_SNAPSHOT_RSS_THRESHOLD_MB * 1024 * 1024;
-      if (usage.rss < thresholdBytes) return;
-    }
-    const snapshot = await createHeapSnapshot();
-    lastAutoSnapshotAt = Date.now();
-    await pruneHeapSnapshots();
-    app.log.info(
-      {
-        event: "memory.auto_snapshot",
-        reason,
-        rss: usage.rss,
-        heapUsed: usage.heapUsed,
-        filePath: snapshot.filePath,
-        sizeBytes: snapshot.sizeBytes
-      },
-      "Auto heap snapshot created"
-    );
-  } catch (error) {
-    app.log.error({ err: error, event: "memory.auto_snapshot" }, "Auto heap snapshot failed");
-  } finally {
-    autoSnapshotInFlight = false;
-  }
-};
-
-if (env.MEMORY_PROFILING_ENABLED) {
-  captureMemorySample();
-  memorySampleTimer = setInterval(captureMemorySample, env.MEMORY_SAMPLE_INTERVAL_MS);
-  memorySampleTimer.unref();
-  if (env.MEMORY_AUTO_SNAPSHOT_ENABLED) {
-    autoSnapshotTimer = setInterval(() => {
-      const intervalMs = env.MEMORY_AUTO_SNAPSHOT_INTERVAL_MS;
-      if (intervalMs > 0 && Date.now() - lastAutoSnapshotAt >= intervalMs) {
-        void maybeAutoSnapshot("interval");
-      }
-      if (env.MEMORY_AUTO_SNAPSHOT_RSS_THRESHOLD_MB > 0) {
-        void maybeAutoSnapshot("rss-threshold");
-      }
-    }, Math.max(1000, Math.min(env.MEMORY_SAMPLE_INTERVAL_MS, env.MEMORY_AUTO_SNAPSHOT_INTERVAL_MS)));
-    autoSnapshotTimer.unref();
-  }
-}
 
 const previewTokens = new Map<string, { assetId: string; expiresAt: number }>();
 const previewTickets = new Map<string, { assetId: string; expiresAt: number }>();
@@ -402,9 +269,7 @@ const publicApiRoutes = new Set<string>([
   "/api/version",
   "/api/auth/status",
   "/api/auth/bootstrap",
-  "/api/auth/login",
-  "/api/memory/metrics",
-  "/api/memory/snapshot"
+  "/api/auth/login"
 ]);
 
 function metricSummary(state: BackupState) {
@@ -1574,9 +1439,6 @@ type JobExecutionProgress = {
   livePhotoPairCount: number;
   percent: number;
   currentPath: string | null;
-  currentFileTotalBytes: number | null;
-  currentFileCopiedBytes: number | null;
-  currentFileStage: "copying" | "post_processing" | null;
 };
 
 type JobExecution = {
@@ -2086,32 +1948,6 @@ function buildLivePhotoIdByRelativePath(relativePaths: string[]): Map<string, st
   return out;
 }
 
-function buildLivePhotoIdByFullPaths(sourceRoot: string, fullPaths: string[]): Map<string, string> {
-  const images = new Set([".jpg", ".jpeg", ".heic"]);
-  const videos = new Set([".mov"]);
-  const baseGroups = new Map<string, { image?: string; video?: string }>();
-
-  for (const fullPath of fullPaths) {
-    const relPath = toPosixPath(path.relative(sourceRoot, fullPath));
-    const ext = path.extname(relPath).toLowerCase();
-    const base = relPath.slice(0, relPath.length - ext.length).toLowerCase();
-    const row = baseGroups.get(base) ?? {};
-    if (images.has(ext)) row.image = relPath;
-    if (videos.has(ext)) row.video = relPath;
-    baseGroups.set(base, row);
-  }
-
-  const out = new Map<string, string>();
-  for (const [base, pair] of baseGroups.entries()) {
-    if (pair.image && pair.video) {
-      const id = `lp_${base}`;
-      out.set(pair.image, id);
-      out.set(pair.video, id);
-    }
-  }
-  return out;
-}
-
 type JobExecutionProgressUpdate = {
   phase: JobExecutionPhase;
   totalCount: number | null;
@@ -2125,9 +1961,6 @@ type JobExecutionProgressUpdate = {
   livePhotoPairCount: number;
   percent: number;
   currentPath: string | null;
-  currentFileTotalBytes: number | null;
-  currentFileCopiedBytes: number | null;
-  currentFileStage: "copying" | "post_processing" | null;
 };
 
 type ExecuteJobProgressHandler = (progress: JobExecutionProgressUpdate) => void;
@@ -2140,36 +1973,6 @@ function clampProgressPercent(value: number): number {
   if (value <= 0) return 0;
   if (value >= 100) return 100;
   return Math.round(value);
-}
-
-const FILE_PROGRESS_MIN_INTERVAL_MS = 200;
-const FILE_PROGRESS_MIN_BYTES = 512 * 1024;
-
-async function copyFileWithProgress(
-  sourcePath: string,
-  destinationPath: string,
-  onBytes?: (deltaBytes: number) => void
-): Promise<void> {
-  await mkdir(path.dirname(destinationPath), { recursive: true });
-  const tmpPath = `${destinationPath}.tmp-${randomUUID()}`;
-  const transforms = onBytes
-    ? [
-        new Transform({
-          transform(chunk, _encoding, callback) {
-            onBytes(chunk.length);
-            callback(null, chunk);
-          }
-        })
-      ]
-    : [];
-  try {
-    const streams = [createReadStream(sourcePath), ...transforms, createWriteStream(tmpPath)];
-    await pipeline(streams);
-    await rename(tmpPath, destinationPath);
-  } catch (error) {
-    await unlink(tmpPath).catch(() => undefined);
-    throw error;
-  }
 }
 
 function normalizeJobExecution(execution: JobExecution): JobExecution {
@@ -2231,10 +2034,7 @@ function createJobExecution(jobId: string, trigger: JobRunTrigger): JobExecution
       videoCount: 0,
       livePhotoPairCount: 0,
       percent: 0,
-      currentPath: null,
-      currentFileTotalBytes: null,
-      currentFileCopiedBytes: null,
-      currentFileStage: null
+      currentPath: null
     }
   };
   jobExecutions.set(execution.id, execution);
@@ -2263,9 +2063,6 @@ function requestCancelExecution(executionId: string): JobExecution | null {
       execution.progress.phase = "finished";
       execution.progress.percent = 100;
       execution.progress.currentPath = null;
-      execution.progress.currentFileTotalBytes = null;
-      execution.progress.currentFileCopiedBytes = null;
-      execution.progress.currentFileStage = null;
     });
   }
   return jobExecutions.get(executionId) ?? null;
@@ -2321,9 +2118,6 @@ async function executeJob(
       videoCount: number;
       livePhotoPairCount: number;
       currentPath: string | null;
-      currentFileTotalBytes: number | null;
-      currentFileCopiedBytes: number | null;
-      currentFileStage: "copying" | "post_processing" | null;
     }
   ) => {
     if (!onProgress) return;
@@ -2341,10 +2135,7 @@ async function executeJob(
       videoCount: progress.videoCount,
       livePhotoPairCount: progress.livePhotoPairCount,
       percent,
-      currentPath: progress.currentPath,
-      currentFileTotalBytes: progress.currentFileTotalBytes,
-      currentFileCopiedBytes: progress.currentFileCopiedBytes,
-      currentFileStage: progress.currentFileStage
+      currentPath: progress.currentPath
     });
   };
 
@@ -2369,10 +2160,7 @@ async function executeJob(
     photoCount: 0,
     videoCount: 0,
     livePhotoPairCount: 0,
-    currentPath: null,
-    currentFileTotalBytes: null,
-    currentFileCopiedBytes: null,
-    currentFileStage: null
+    currentPath: null
   });
 
   app.log.info({ event: "job.exec.scan.start", jobId, trigger }, "Job scan started");
@@ -2390,51 +2178,10 @@ async function executeJob(
     })
   }).catch(() => {});
   // #endregion
-  // #region debug-point A:scan-before-collect
-  fetch("http://127.0.0.1:7777/event", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      sessionId: "backup-oom-001",
-      runId: "pre-fix",
-      hypothesisId: "A",
-      location: "apps/api/src/index.ts:2170",
-      msg: "[DEBUG] before collectMediaFiles",
-      data: { jobId, trigger, sourceRoot, memory: process.memoryUsage() }
-    })
-  }).catch(() => {});
-  // #endregion
 
   const sourceFiles = await collectMediaFiles(sourceRoot);
-  // #region debug-point A:scan-after-collect
-  fetch("http://127.0.0.1:7777/event", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      sessionId: "backup-oom-001",
-      runId: "pre-fix",
-      hypothesisId: "A",
-      location: "apps/api/src/index.ts:2185",
-      msg: "[DEBUG] after collectMediaFiles",
-      data: { jobId, trigger, sourceFilesCount: sourceFiles.length, memory: process.memoryUsage() }
-    })
-  }).catch(() => {});
-  // #endregion
-  const livePhotoMap = buildLivePhotoIdByFullPaths(sourceRoot, sourceFiles);
-  // #region debug-point A:scan-after-livephoto-map
-  fetch("http://127.0.0.1:7777/event", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      sessionId: "backup-oom-001",
-      runId: "pre-fix",
-      hypothesisId: "A",
-      location: "apps/api/src/index.ts:2189",
-      msg: "[DEBUG] after livePhoto map",
-      data: { jobId, trigger, livePhotoMapSize: livePhotoMap.size, memory: process.memoryUsage() }
-    })
-  }).catch(() => {});
-  // #endregion
+  const relativePaths = sourceFiles.map((fullPath) => toPosixPath(path.relative(sourceRoot, fullPath)));
+  const livePhotoMap = buildLivePhotoIdByRelativePath(relativePaths);
   const scanTookMs = Date.now() - scanStartedMs;
   app.log.info(
     { event: "job.exec.scan.done", jobId, trigger, scannedCount: sourceFiles.length, scanTookMs },
@@ -2473,20 +2220,6 @@ async function executeJob(
       destinationAssetIndexByName.set(asset.name, idx);
     }
   }
-  // #region debug-point C:asset-index-built
-  fetch("http://127.0.0.1:7777/event", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      sessionId: "backup-oom-001",
-      runId: "pre-fix",
-      hypothesisId: "C",
-      location: "apps/api/src/index.ts:2247",
-      msg: "[DEBUG] destination asset index built",
-      data: { jobId, trigger, assetCount: state.assets.length, indexSize: destinationAssetIndexByName.size, memory: process.memoryUsage() }
-    })
-  }).catch(() => {});
-  // #endregion
 
   emitProgress("syncing", {
     totalCount: scannedCount,
@@ -2498,10 +2231,7 @@ async function executeJob(
     photoCount,
     videoCount,
     livePhotoPairCount: copiedLivePhotoIds.size,
-    currentPath: null,
-    currentFileTotalBytes: null,
-    currentFileCopiedBytes: null,
-    currentFileStage: null
+    currentPath: null
   });
 
   if (checkCancel()) {
@@ -2516,60 +2246,16 @@ async function executeJob(
   let lastHeartbeatAt = Date.now();
   let lastHeartbeatProcessed = 0;
 
-  const createFileProgressReporter = (relativePath: string, totalBytes: number) => {
-    let copiedBytes = 0;
-    let lastEmitAt = 0;
-    let lastEmitBytes = 0;
-    const emit = (force = false) => {
-      const now = Date.now();
-      if (!force && now - lastEmitAt < FILE_PROGRESS_MIN_INTERVAL_MS && copiedBytes - lastEmitBytes < FILE_PROGRESS_MIN_BYTES) {
-        return;
-      }
-      lastEmitAt = now;
-      lastEmitBytes = copiedBytes;
-      emitProgress("syncing", {
-        totalCount: scannedCount,
-        scannedCount,
-        processedCount,
-        copiedCount,
-        skippedCount,
-        failedCount,
-        photoCount,
-        videoCount,
-        livePhotoPairCount: copiedLivePhotoIds.size,
-        currentPath: relativePath,
-        currentFileTotalBytes: totalBytes,
-        currentFileCopiedBytes: copiedBytes,
-        currentFileStage: "copying"
-      });
-    };
-    return {
-      reportDelta(delta: number, force = false) {
-        copiedBytes = Math.min(totalBytes, copiedBytes + delta);
-        emit(force || copiedBytes >= totalBytes);
-      },
-      snapshot() {
-        return copiedBytes;
-      },
-      finalize() {
-        copiedBytes = totalBytes;
-        emit(true);
-      }
-    };
-  };
-
   if (!canceled) {
     for (let i = 0; i < sourceFiles.length; i += 1) {
       if (checkCancel()) {
         break;
       }
       const sourceFile = sourceFiles[i];
-      const relativePath = toPosixPath(path.relative(sourceRoot, sourceFile));
+      const relativePath = relativePaths[i];
       const destinationFile = path.join(destinationRoot, relativePath);
-      let sourceStat: Awaited<ReturnType<typeof stat>> | null = null;
-      let fileReporter: ReturnType<typeof createFileProgressReporter> | null = null;
       try {
-        sourceStat = await stat(sourceFile);
+        const sourceStat = await stat(sourceFile);
       const sourceCapturedAt = sourceStat.mtime.toISOString();
       const livePhotoAssetId = livePhotoMap.get(relativePath);
       const nextKind = detectAssetKind(relativePath, livePhotoAssetId);
@@ -2577,61 +2263,16 @@ async function executeJob(
       const existing = existingIdx === undefined ? undefined : state.assets[existingIdx];
       const destinationStat = await stat(destinationFile).catch(() => null);
       const destinationExists = Boolean(destinationStat?.isFile());
-      const destinationMatchesSource =
+      if (
+        existing &&
+        existingIdx !== undefined &&
         destinationExists &&
-        destinationStat &&
-        !sourceStorage.encrypted &&
-        !destinationStorage.encrypted &&
-        destinationStat.size === sourceStat.size &&
-        destinationStat.mtimeMs === sourceStat.mtimeMs;
-      const shouldSkip =
-        (existing &&
-          existingIdx !== undefined &&
-          destinationExists &&
-          existing.sizeBytes === sourceStat.size &&
-          existing.capturedAt === sourceCapturedAt &&
-          existing.encrypted === destinationStorage.encrypted) ||
-        (!existing && destinationMatchesSource);
-      const decisionReasons: string[] = [];
-      if (shouldSkip) {
-        if (existing) {
-          decisionReasons.push("index_match", "destination_exists", "size_match", "mtime_match", "encryption_match");
-        } else {
-          decisionReasons.push("destination_exists", "size_match", "mtime_match", "missing_index");
-        }
-      } else {
-        if (!existing || existingIdx === undefined) {
-          decisionReasons.push("missing_index");
-        }
-        if (!destinationExists) {
-          decisionReasons.push("destination_missing");
-        }
-        if (existing && existing.sizeBytes !== sourceStat.size) {
-          decisionReasons.push("size_mismatch");
-        }
-        if (existing && existing.capturedAt !== sourceCapturedAt) {
-          decisionReasons.push("mtime_mismatch");
-        }
-        if (existing && existing.encrypted !== destinationStorage.encrypted) {
-          decisionReasons.push("encryption_mismatch");
-        }
-      }
-      app.log.info(
-        {
-          event: "job.exec.file.decision",
-          jobId,
-          trigger,
-          path: relativePath,
-          decision: shouldSkip ? "skip" : "copy",
-          reasons: decisionReasons
-        },
-        "Job sync file decision"
-      );
-      fileReporter = createFileProgressReporter(relativePath, sourceStat.size);
-      if (shouldSkip) {
-        fileReporter.finalize();
+        existing.sizeBytes === sourceStat.size &&
+        existing.capturedAt === sourceCapturedAt &&
+        existing.encrypted === destinationStorage.encrypted
+      ) {
         const nextAsset: BackupAsset = {
-          id: existing?.id ?? `asset_${randomUUID()}`,
+          id: existing.id,
           name: relativePath,
           kind: nextKind,
           storageTargetId: destinationStorage.id,
@@ -2640,16 +2281,11 @@ async function executeJob(
           capturedAt: sourceCapturedAt,
           livePhotoAssetId
         };
-        if (existingIdx !== undefined && existing) {
-          if (
-            existing.kind !== nextAsset.kind ||
-            (existing.livePhotoAssetId ?? undefined) !== (nextAsset.livePhotoAssetId ?? undefined)
-          ) {
-            state.assets[existingIdx] = nextAsset;
-          }
-        } else {
-          state.assets.push(nextAsset);
-          destinationAssetIndexByName.set(relativePath, state.assets.length - 1);
+        if (
+          existing.kind !== nextAsset.kind ||
+          (existing.livePhotoAssetId ?? undefined) !== (nextAsset.livePhotoAssetId ?? undefined)
+        ) {
+          state.assets[existingIdx] = nextAsset;
         }
         skippedCount += 1;
         processedCount += 1;
@@ -2663,10 +2299,7 @@ async function executeJob(
           photoCount,
           videoCount,
           livePhotoPairCount: copiedLivePhotoIds.size,
-          currentPath: relativePath,
-          currentFileTotalBytes: sourceStat.size,
-          currentFileCopiedBytes: sourceStat.size,
-          currentFileStage: "post_processing"
+          currentPath: relativePath
         });
       const now = Date.now();
       if (now - lastHeartbeatAt >= 5000 || processedCount - lastHeartbeatProcessed >= 500) {
@@ -2685,28 +2318,6 @@ async function executeJob(
           },
           "Job sync progress"
         );
-        // #region debug-point C:sync-heartbeat-assets
-        fetch("http://127.0.0.1:7777/event", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            sessionId: "backup-oom-001",
-            runId: "pre-fix",
-            hypothesisId: "C",
-            location: "apps/api/src/index.ts:2455",
-            msg: "[DEBUG] sync heartbeat assets",
-            data: {
-              jobId,
-              trigger,
-              processedCount,
-              scannedCount,
-              assetCount: state.assets.length,
-              indexSize: destinationAssetIndexByName.size,
-              memory: process.memoryUsage()
-            }
-          })
-        }).catch(() => {});
-        // #endregion
         // #region debug-point E:sync-heartbeat-mem
         fetch("http://127.0.0.1:7777/event", {
           method: "POST",
@@ -2727,32 +2338,16 @@ async function executeJob(
         continue;
       }
 
-      fileReporter.reportDelta(0, true);
+      await mkdir(path.dirname(destinationFile), { recursive: true });
       if (!sourceStorage.encrypted && !destinationStorage.encrypted) {
-        await copyFileWithProgress(sourceFile, destinationFile, (delta) => fileReporter?.reportDelta(delta));
+        await copyFile(sourceFile, destinationFile);
       } else if (!sourceStorage.encrypted && destinationStorage.encrypted) {
-        await encryption.encryptFile(sourceFile, destinationFile, (delta) => fileReporter?.reportDelta(delta));
+        await encryption.encryptFile(sourceFile, destinationFile);
       } else if (sourceStorage.encrypted && !destinationStorage.encrypted) {
-        await encryption.decryptFile(sourceFile, destinationFile, (delta) => fileReporter?.reportDelta(delta));
+        await encryption.decryptFile(sourceFile, destinationFile);
       } else {
-        await encryption.reencryptFile(sourceFile, destinationFile, (delta) => fileReporter?.reportDelta(delta));
+        await encryption.reencryptFile(sourceFile, destinationFile);
       }
-      fileReporter.finalize();
-      emitProgress("syncing", {
-        totalCount: scannedCount,
-        scannedCount,
-        processedCount,
-        copiedCount,
-        skippedCount,
-        failedCount,
-        photoCount,
-        videoCount,
-        livePhotoPairCount: copiedLivePhotoIds.size,
-        currentPath: relativePath,
-        currentFileTotalBytes: sourceStat.size,
-        currentFileCopiedBytes: sourceStat.size,
-        currentFileStage: "post_processing"
-      });
       await utimes(destinationFile, sourceStat.atime, sourceStat.mtime).catch(() => undefined);
       const nextAsset: BackupAsset = {
         id: existing?.id ?? `asset_${randomUUID()}`,
@@ -2793,10 +2388,7 @@ async function executeJob(
         photoCount,
         videoCount,
         livePhotoPairCount: copiedLivePhotoIds.size,
-        currentPath: relativePath,
-        currentFileTotalBytes: sourceStat.size,
-        currentFileCopiedBytes: sourceStat.size,
-        currentFileStage: "post_processing"
+        currentPath: relativePath
       });
       const now = Date.now();
       if (now - lastHeartbeatAt >= 5000 || processedCount - lastHeartbeatProcessed >= 500) {
@@ -2815,28 +2407,6 @@ async function executeJob(
           },
           "Job sync progress"
         );
-        // #region debug-point C:sync-heartbeat-assets
-        fetch("http://127.0.0.1:7777/event", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            sessionId: "backup-oom-001",
-            runId: "pre-fix",
-            hypothesisId: "C",
-            location: "apps/api/src/index.ts:2544",
-            msg: "[DEBUG] sync heartbeat assets",
-            data: {
-              jobId,
-              trigger,
-              processedCount,
-              scannedCount,
-              assetCount: state.assets.length,
-              indexSize: destinationAssetIndexByName.size,
-              memory: process.memoryUsage()
-            }
-          })
-        }).catch(() => {});
-        // #endregion
         // #region debug-point E:sync-heartbeat-mem
         fetch("http://127.0.0.1:7777/event", {
           method: "POST",
@@ -2867,23 +2437,18 @@ async function executeJob(
             "Job sync error"
           );
         }
-      const failedTotalBytes = sourceStat?.size ?? null;
-      const failedCopiedBytes = fileReporter ? fileReporter.snapshot() : null;
-      emitProgress("syncing", {
-        totalCount: scannedCount,
-        scannedCount,
-        processedCount,
-        copiedCount,
-        skippedCount,
-        failedCount,
-        photoCount,
-        videoCount,
-        livePhotoPairCount: copiedLivePhotoIds.size,
-        currentPath: relativePath,
-        currentFileTotalBytes: failedTotalBytes,
-        currentFileCopiedBytes: failedCopiedBytes,
-        currentFileStage: null
-      });
+        emitProgress("syncing", {
+          totalCount: scannedCount,
+          scannedCount,
+          processedCount,
+          copiedCount,
+          skippedCount,
+          failedCount,
+          photoCount,
+          videoCount,
+          livePhotoPairCount: copiedLivePhotoIds.size,
+          currentPath: relativePath
+        });
       }
     }
   }
@@ -2924,10 +2489,7 @@ async function executeJob(
     photoCount,
     videoCount,
     livePhotoPairCount: copiedLivePhotoIds.size,
-    currentPath: null,
-    currentFileTotalBytes: null,
-    currentFileCopiedBytes: null,
-    currentFileStage: null
+    currentPath: null
   });
   if (canceled) {
     app.log.warn(
@@ -2986,8 +2548,9 @@ async function syncSingleFileForJob(
     throw new Error("Source file not found");
   }
 
+  await mkdir(path.dirname(destinationFile), { recursive: true });
   if (!sourceStorage.encrypted && !destinationStorage.encrypted) {
-    await copyFileWithProgress(sourceFile, destinationFile);
+    await copyFile(sourceFile, destinationFile);
   } else if (!sourceStorage.encrypted && destinationStorage.encrypted) {
     await encryption.encryptFile(sourceFile, destinationFile);
   } else if (sourceStorage.encrypted && !destinationStorage.encrypted) {
@@ -3181,9 +2744,6 @@ function startJobExecution(jobId: string, trigger: JobRunTrigger): JobExecution 
       current.progress.phase = "scanning";
       current.progress.percent = 0;
       current.progress.currentPath = null;
-      current.progress.currentFileTotalBytes = null;
-      current.progress.currentFileCopiedBytes = null;
-      current.progress.currentFileStage = null;
       current.error = null;
       current.message = null;
     });
@@ -3241,9 +2801,7 @@ function startJobExecution(jobId: string, trigger: JobRunTrigger): JobExecution 
           videoCount: run.videoCount,
           livePhotoPairCount: run.livePhotoPairCount,
           percent: run.status === "canceled" ? clampProgressPercent(run.scannedCount ? (processedCount / run.scannedCount) * 100 : 0) : 100,
-          currentPath: null,
-          currentFileTotalBytes: null,
-          currentFileCopiedBytes: null
+          currentPath: null
         };
       });
       void sendTelegramRunSummaryIfEnabled(state, run).catch((error) => {
@@ -3585,39 +3143,6 @@ app.get("/api/metrics", async () => {
   const state = await stateRepo.loadState();
   return metricSummary(state);
 });
-
-if (env.MEMORY_PROFILING_ENABLED) {
-  app.get("/api/memory/metrics", async () => {
-    const usage = process.memoryUsage();
-    const heapStats = v8.getHeapStatistics();
-    const resource = process.resourceUsage();
-    const recentLimit = Math.min(env.MEMORY_SAMPLE_RECENT_LIMIT, memorySamples.length);
-    return {
-      now: new Date().toISOString(),
-      process: {
-        pid: process.pid,
-        uptimeMs: Math.round(process.uptime() * 1000)
-      },
-      memoryUsage: usage,
-      heapStats,
-      resource,
-      samples: {
-        count: memorySamples.length,
-        summary: summarizeSamples(memorySamples),
-        recent: recentLimit ? memorySamples.slice(-recentLimit) : []
-      },
-      system: {
-        totalMemory: os.totalmem(),
-        freeMemory: os.freemem(),
-        loadAverage: os.loadavg()
-      }
-    };
-  });
-
-  app.post("/api/memory/snapshot", async () => {
-    return createHeapSnapshot();
-  });
-}
 
 app.get<{ Querystring: { year?: string } }>("/api/dashboard/source-activity", async (req) => {
   const query = sourceActivityQuerySchema.parse(req.query ?? {});
@@ -4369,16 +3894,6 @@ app.post<{ Params: { jobId: string }; Body: { relativePath: string } }>(
       { event: "job.sync_file.request", jobId: req.params.jobId, relativePath: body.relativePath },
       "Single-file sync requested"
     );
-    app.log.info(
-      {
-        event: "job.sync_file.decision",
-        jobId: req.params.jobId,
-        relativePath: body.relativePath,
-        decision: "copy",
-        reasons: ["single_file_sync_forced"]
-      },
-      "Single-file sync decision"
-    );
     try {
       const state = req.appState ?? (await stateRepo.loadState());
       const result = await syncSingleFileForJob(state, req.params.jobId, body.relativePath);
@@ -4631,14 +4146,6 @@ app.post<{ Body: { contentBase64: string } }>("/api/crypto/encrypt", async (req)
 });
 
 app.addHook("onClose", async () => {
-  if (memorySampleTimer) {
-    clearInterval(memorySampleTimer);
-    memorySampleTimer = null;
-  }
-  if (autoSnapshotTimer) {
-    clearInterval(autoSnapshotTimer);
-    autoSnapshotTimer = null;
-  }
   if (watcherReconcileTimer) {
     clearInterval(watcherReconcileTimer);
     watcherReconcileTimer = null;

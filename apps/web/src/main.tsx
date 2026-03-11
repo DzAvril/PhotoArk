@@ -4,6 +4,7 @@ import { BrowserRouter } from "react-router-dom";
 import { registerSW } from "virtual:pwa-register";
 import { App } from "./app";
 import "./styles.css";
+import "./lib/performance-monitor";
 
 registerSW({ immediate: true });
 

@@ -219,6 +219,7 @@ export interface JobDiffResult {
   total: number;
   totalPages: number;
   items: JobDiffItem[];
+  truncated?: boolean;
 }
 
 export interface JobRunErrorItem {
@@ -349,4 +350,8 @@ export interface MediaBrowseResult {
   storageId: string;
   path: string;
   files: MediaFileItem[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
 }

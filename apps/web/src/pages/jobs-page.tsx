@@ -11,6 +11,7 @@ import { Button } from "../components/ui/button";
 import { EmptyState } from "../components/ui/empty-state";
 import { SectionCard } from "../components/ui/section-card";
 import { useLocalStorageState } from "../hooks/use-local-storage-state";
+import { usePageVisibility } from "../hooks/use-page-visibility";
 import { cancelJobExecution, createJob, deleteJob, getJobExecutions, getJobs, getRuns, getStorages, runJob, updateJob } from "../lib/api";
 import type { BackupJob, JobExecution, JobRun, StorageTarget } from "../types/api";
 
@@ -124,6 +125,7 @@ export function JobsPage() {
   const [progressDialogExecutionId, setProgressDialogExecutionId] = useState<string | null>(null);
   const [cancelingExecutionIds, setCancelingExecutionIds] = useState<Set<string>>(new Set());
   const editJobIdFromQuery = searchParams.get("editJobId");
+  const isVisible = usePageVisibility();
 
   const storageById = useMemo(() => Object.fromEntries(storages.map((s) => [s.id, s])), [storages]);
   const sourceStorage = form.sourceTargetId ? storageById[form.sourceTargetId] : undefined;
@@ -385,6 +387,10 @@ export function JobsPage() {
   const hasActiveExecution = Object.values(activeExecutionByJobId).some(Boolean);
 
   useEffect(() => {
+    if (!isVisible) {
+      return;
+    }
+
     let disposed = false;
     let timer: number | null = null;
 
@@ -426,7 +432,7 @@ export function JobsPage() {
         window.clearTimeout(timer);
       }
     };
-  }, [hasActiveExecution]);
+  }, [hasActiveExecution, isVisible]);
 
   const executionById = useMemo(() => Object.fromEntries(executions.map((item) => [item.id, item])), [executions]);
   const progressExecution = progressDialogExecutionId ? executionById[progressDialogExecutionId] : undefined;

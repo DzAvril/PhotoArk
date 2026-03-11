@@ -1,4 +1,4 @@
-import { useId } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Info } from "lucide-react";
 import { Button } from "../../components/ui/button";
 import { Card } from "../../components/ui/card";
@@ -6,6 +6,9 @@ import { getStorageMediaStreamUrl } from "../../lib/api";
 import type { StorageTarget } from "../../types/api";
 import type { DisplayMediaItem, LivePhotoPair, ViewerRuntimeMeta } from "./media-types";
 import { formatBytes, formatDateTime, formatDuration } from "./media-utils";
+
+const LAZY_LOAD_DELAY_MS = 100;
+const MAX_META_CACHE_SIZE = 50;
 
 type MediaPreviewDialogProps = {
   open: boolean;
@@ -61,6 +64,47 @@ export function MediaPreviewDialog(props: MediaPreviewDialogProps) {
 
   const previewTitleId = useId();
   const previewHintId = useId();
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [isVisible, setIsVisible] = useState(false);
+  const [shouldLoad, setShouldLoad] = useState(false);
+
+  useEffect(() => {
+    if (!open) {
+      setIsVisible(false);
+      setShouldLoad(false);
+      return;
+    }
+    setIsVisible(true);
+    const timer = setTimeout(() => setShouldLoad(true), LAZY_LOAD_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open && videoRef.current) {
+      videoRef.current.pause();
+      videoRef.current.src = "";
+      videoRef.current.load();
+    }
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const container = containerRef.current;
+    if (!container) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (!entry.isIntersecting && videoRef.current) {
+            videoRef.current.pause();
+          }
+        });
+      },
+      { threshold: 0.1 }
+    );
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [open]);
 
   if (!open) return null;
 
@@ -143,15 +187,17 @@ export function MediaPreviewDialog(props: MediaPreviewDialogProps) {
         </div>
 
         <div
+          ref={containerRef}
           className="relative flex h-[62vh] items-center justify-center overflow-hidden rounded-xl border border-white/10 bg-black/85"
           onPointerDown={pointerHandlers.onPointerDown}
           onPointerUp={pointerHandlers.onPointerUp}
           onPointerLeave={pointerHandlers.onPointerLeave}
           onPointerCancel={pointerHandlers.onPointerCancel}
         >
-          {shouldShowVideoViewer && activeViewerVideoPath ? (
+          {shouldLoad && shouldShowVideoViewer && activeViewerVideoPath ? (
             activePair ? (
               <video
+                ref={videoRef}
                 src={getStorageMediaStreamUrl(selectedStorage.id, activeViewerVideoPath)}
                 className="max-h-full max-w-full"
                 autoPlay
@@ -169,6 +215,7 @@ export function MediaPreviewDialog(props: MediaPreviewDialogProps) {
               />
             ) : (
               <video
+                ref={videoRef}
                 src={getStorageMediaStreamUrl(selectedStorage.id, activeViewerVideoPath)}
                 className="max-h-full max-w-full"
                 controls
@@ -183,7 +230,7 @@ export function MediaPreviewDialog(props: MediaPreviewDialogProps) {
                 }}
               />
             )
-          ) : activeViewerImagePath && !brokenViewerImagePaths.has(activeViewerImagePath) ? (
+          ) : shouldLoad && activeViewerImagePath && !brokenViewerImagePaths.has(activeViewerImagePath) ? (
             <img
               src={getStorageMediaStreamUrl(selectedStorage.id, activeViewerImagePath)}
               alt={activeItem.file.name}
@@ -197,10 +244,12 @@ export function MediaPreviewDialog(props: MediaPreviewDialogProps) {
               }}
               onError={() => onViewerImageError(activeViewerImagePath)}
             />
-          ) : (
+          ) : shouldLoad ? (
             <div className="px-4 text-center text-sm text-white/80">
               当前浏览器无法预览该图片格式{activePair ? "，可点击“播放动态”查看 Live Photo 动态部分" : ""}
             </div>
+          ) : (
+            <div className="px-4 text-center text-sm text-white/60">加载中...</div>
           )}
 
           <button

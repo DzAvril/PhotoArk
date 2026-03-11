@@ -6,6 +6,9 @@ import { EmptyState } from "../components/ui/empty-state";
 import { SectionCard } from "../components/ui/section-card";
 import { deleteJobFile, getJobDiff, getJobs, getStorageMediaStreamUrl, getStorages, runJob, syncJobFile } from "../lib/api";
 import type { BackupJob, JobDiffFile, JobDiffItem, JobDiffKind, JobDiffResult, JobDiffStatus, StorageTarget } from "../types/api";
+import AutoSizer from "react-virtualized-auto-sizer";
+import { useViewCache } from "../context/view-cache-context";
+import { useVirtualGrid } from "../hooks/use-virtual-grid";
 
 function isLocalStorageType(type: StorageTarget["type"]): boolean {
   return type === "local_fs" || type === "external_ssd";
@@ -91,8 +94,8 @@ function getSquareSizePx(itemCount: number): number {
   return Math.max(10, Math.min(20, Math.round(adaptive)));
 }
 
-const DIFF_INITIAL_RENDER_COUNT = 1200;
-const DIFF_RENDER_BATCH = 1200;
+const DIFF_PAGE_SIZE = 300;
+const MAX_DIFF_ITEMS = 3000;
 
 function DiffFileMeta({
   title,
@@ -133,20 +136,28 @@ function DiffFileMeta({
   );
 }
 
+
+
 export function JobDiffPage() {
   const navigate = useNavigate();
+  const cache = useViewCache();
   const requestSeqRef = useRef(0);
-  const leftPaneRef = useRef<HTMLDivElement | null>(null);
-  const rightPaneRef = useRef<HTMLDivElement | null>(null);
   const syncScrollSourceRef = useRef<"left" | "right" | null>(null);
+  const leftContainerRef = useRef<HTMLDivElement | null>(null);
+  const rightContainerRef = useRef<HTMLDivElement | null>(null);
+  const savedScrollPositionRef = useRef<{ scrollLeft: number; scrollTop: number }>({ scrollLeft: 0, scrollTop: 0 });
+  const previewVideoRef = useRef<HTMLVideoElement>(null);
 
   const [jobs, setJobs] = useState<BackupJob[]>([]);
   const [storages, setStorages] = useState<StorageTarget[]>([]);
   const [selectedJobId, setSelectedJobId] = useState("");
   const [kindFilter, setKindFilter] = useState<"all" | JobDiffKind>("all");
   const [hideSame, setHideSame] = useState(true);
-  const [visibleCount, setVisibleCount] = useState(DIFF_INITIAL_RENDER_COUNT);
   const [result, setResult] = useState<JobDiffResult | null>(null);
+  const [diffItems, setDiffItems] = useState<JobDiffItem[]>([]);
+  const [diffPage, setDiffPage] = useState(1);
+  const [hasMoreDiff, setHasMoreDiff] = useState(false);
+  const [loadingMoreDiff, setLoadingMoreDiff] = useState(false);
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [loadingSetup, setLoadingSetup] = useState(true);
   const [loadingDiff, setLoadingDiff] = useState(false);
@@ -159,6 +170,24 @@ export function JobDiffPage() {
   const [previewFailed, setPreviewFailed] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
+
+  // Restore from cache on mount
+  useEffect(() => {
+    const cached = cache.current.jobDiff;
+    if (cached && cached.selectedJobId) {
+      setSelectedJobId(cached.selectedJobId);
+      if (cached.result) {
+        setResult(cached.result);
+        setDiffItems(cached.items);
+        setDiffPage(cached.page);
+        setHasMoreDiff(cached.hasMore);
+      }
+      if (cached.scrollTop !== undefined) {
+        savedScrollPositionRef.current = { scrollLeft: 0, scrollTop: cached.scrollTop };
+      }
+    }
+  }, []);
 
   const storageById = useMemo(() => new Map(storages.map((item) => [item.id, item])), [storages]);
   const diffableJobs = useMemo(
@@ -171,11 +200,39 @@ export function JobDiffPage() {
     [jobs, storageById]
   );
 
+  const displayItems = useMemo(() => {
+    const rows = diffItems;
+    if (!hideSame) return rows;
+    return rows.filter((item) => item.status !== "same");
+  }, [diffItems, hideSame]);
+
+  const displayItemById = useMemo(() => new Map(displayItems.map((item) => [item.id, item])), [displayItems]);
+  const squareSizePx = useMemo(() => getSquareSizePx(displayItems.length), [displayItems.length]);
+  const gapPx = 6;
+  const cellSize = squareSizePx + gapPx;
+
+  const columnCount = useMemo(() => {
+    if (containerSize.width === 0) return 1;
+    return Math.floor(containerSize.width / cellSize) || 1;
+  }, [containerSize.width, cellSize]);
+
+  const rowCount = useMemo(() => {
+    return Math.ceil(displayItems.length / columnCount);
+  }, [displayItems.length, columnCount]);
+
   const loadDiff = useCallback(
     async (forceRefresh = false) => {
       if (!selectedJobId) {
         setResult(null);
+        setDiffItems([]);
+        setDiffPage(1);
+        setHasMoreDiff(false);
         setSelectedItemId(null);
+        return;
+      }
+
+      // If we have cached result and it matches current job, skip loading unless forceRefresh
+      if (!forceRefresh && result && result.job.id === selectedJobId && diffItems.length > 0) {
         return;
       }
 
@@ -192,13 +249,20 @@ export function JobDiffPage() {
           status: "all",
           kind: kindFilter,
           refresh: forceRefresh,
-          all: true
+          page: 1,
+          pageSize: DIFF_PAGE_SIZE
         });
         if (requestSeqRef.current !== reqSeq) return;
         setResult(res);
+        setDiffItems(res.items);
+        setDiffPage(res.page);
+        setHasMoreDiff(res.page < res.totalPages);
       } catch (err) {
         if (requestSeqRef.current !== reqSeq) return;
         setResult(null);
+        setDiffItems([]);
+        setDiffPage(1);
+        setHasMoreDiff(false);
         setSelectedItemId(null);
         setError((err as Error).message);
       } finally {
@@ -208,8 +272,46 @@ export function JobDiffPage() {
         }
       }
     },
-    [selectedJobId, kindFilter]
+    [selectedJobId, kindFilter, result, diffItems.length]
   );
+
+  const loadMoreDiff = useCallback(async () => {
+    if (!selectedJobId || loadingMoreDiff || loadingDiff || refreshingDiff) return;
+    if (!hasMoreDiff) return;
+    setLoadingMoreDiff(true);
+    setError("");
+    try {
+      const nextPage = diffPage + 1;
+      const res = await getJobDiff(selectedJobId, {
+        status: "all",
+        kind: kindFilter,
+        page: nextPage,
+        pageSize: DIFF_PAGE_SIZE
+      });
+      setDiffItems((prev) => {
+        const combined = [...prev, ...res.items];
+        if (combined.length > MAX_DIFF_ITEMS) {
+          const removeCount = combined.length - MAX_DIFF_ITEMS;
+          return combined.slice(removeCount);
+        }
+        return combined;
+      });
+      setDiffPage(res.page);
+      setHasMoreDiff(res.page < res.totalPages);
+      setResult((prev) => (prev ? { ...prev, ...res, items: prev.items } : res));
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setLoadingMoreDiff(false);
+    }
+  }, [selectedJobId, loadingMoreDiff, loadingDiff, refreshingDiff, hasMoreDiff, diffPage, kindFilter]);
+
+  const clearDiffData = useCallback(() => {
+    setDiffItems([]);
+    setDiffPage(1);
+    setHasMoreDiff(false);
+    setSelectedItemId(null);
+  }, []);
 
   useEffect(() => {
     let canceled = false;
@@ -250,23 +352,6 @@ export function JobDiffPage() {
     void loadDiff(false);
   }, [loadDiff]);
 
-  const displayItems = useMemo(() => {
-    const rows = result?.items ?? [];
-    if (!hideSame) return rows;
-    return rows.filter((item) => item.status !== "same");
-  }, [result, hideSame]);
-
-  useEffect(() => {
-    setVisibleCount(DIFF_INITIAL_RENDER_COUNT);
-  }, [selectedJobId, kindFilter, hideSame, result?.generatedAt]);
-
-  const visibleItems = useMemo(
-    () => displayItems.slice(0, Math.min(displayItems.length, visibleCount)),
-    [displayItems, visibleCount]
-  );
-  const displayItemById = useMemo(() => new Map(displayItems.map((item) => [item.id, item])), [displayItems]);
-  const squareSizePx = useMemo(() => getSquareSizePx(displayItems.length), [displayItems.length]);
-
   useEffect(() => {
     if (!displayItems.length) {
       setSelectedItemId(null);
@@ -295,37 +380,80 @@ export function JobDiffPage() {
   const previewStreamUrl = previewOpen && previewFile ? getStorageMediaStreamUrl(previewStorageId, previewFile.absolutePath) : "";
   const previewTitle = previewSide === "source" ? "源目录预览" : "目标目录预览";
 
-  function handleLeftPaneScroll() {
-    const source = leftPaneRef.current;
-    const target = rightPaneRef.current;
-    if (!source || !target) return;
-    if (syncScrollSourceRef.current === "right") return;
-    syncScrollSourceRef.current = "left";
-    target.scrollTop = source.scrollTop;
-    target.scrollLeft = source.scrollLeft;
-    if (source.scrollTop + source.clientHeight >= source.scrollHeight - 220) {
-      setVisibleCount((prev) => Math.min(displayItems.length, prev + DIFF_RENDER_BATCH));
-    }
-    window.requestAnimationFrame(() => {
-      if (syncScrollSourceRef.current === "left") syncScrollSourceRef.current = null;
-    });
-  }
+  const leftGrid = useVirtualGrid({
+    columnCount,
+    rowCount,
+    columnWidth: cellSize,
+    rowHeight: cellSize,
+    containerWidth: containerSize.width,
+    containerHeight: containerSize.height,
+    overscan: 5,
+  });
 
-  function handleRightPaneScroll() {
-    const source = rightPaneRef.current;
-    const target = leftPaneRef.current;
-    if (!source || !target) return;
-    if (syncScrollSourceRef.current === "left") return;
-    syncScrollSourceRef.current = "right";
-    target.scrollTop = source.scrollTop;
-    target.scrollLeft = source.scrollLeft;
-    if (source.scrollTop + source.clientHeight >= source.scrollHeight - 220) {
-      setVisibleCount((prev) => Math.min(displayItems.length, prev + DIFF_RENDER_BATCH));
+  const rightGrid = useVirtualGrid({
+    columnCount,
+    rowCount,
+    columnWidth: cellSize,
+    rowHeight: cellSize,
+    containerWidth: containerSize.width,
+    containerHeight: containerSize.height,
+    overscan: 5,
+  });
+
+  useEffect(() => {
+    if (savedScrollPositionRef.current.scrollTop > 0 && leftContainerRef.current) {
+      leftContainerRef.current.scrollTop = savedScrollPositionRef.current.scrollTop;
+      savedScrollPositionRef.current = { scrollLeft: 0, scrollTop: 0 };
     }
-    window.requestAnimationFrame(() => {
-      if (syncScrollSourceRef.current === "right") syncScrollSourceRef.current = null;
-    });
-  }
+  }, [leftGrid.virtualCells.length]);
+
+  const handleLeftPaneScroll = useCallback(
+    (event: React.UIEvent<HTMLDivElement>) => {
+      if (syncScrollSourceRef.current === "right") return;
+      syncScrollSourceRef.current = "left";
+      const { scrollLeft, scrollTop } = event.currentTarget;
+      rightGrid.scrollTo({ scrollLeft, scrollTop });
+      savedScrollPositionRef.current = { scrollLeft, scrollTop };
+      window.requestAnimationFrame(() => {
+        if (syncScrollSourceRef.current === "left") syncScrollSourceRef.current = null;
+      });
+    },
+    [rightGrid]
+  );
+
+  const handleRightPaneScroll = useCallback(
+    (event: React.UIEvent<HTMLDivElement>) => {
+      if (syncScrollSourceRef.current === "left") return;
+      syncScrollSourceRef.current = "right";
+      const { scrollLeft, scrollTop } = event.currentTarget;
+      leftGrid.scrollTo({ scrollLeft, scrollTop });
+      savedScrollPositionRef.current = { scrollLeft, scrollTop };
+      window.requestAnimationFrame(() => {
+        if (syncScrollSourceRef.current === "right") syncScrollSourceRef.current = null;
+      });
+    },
+    [leftGrid]
+  );
+
+  useEffect(() => {
+    const visibleStopIndex = Math.floor((leftGrid.scrollTop + containerSize.height) / cellSize) * columnCount + columnCount;
+    if (hasMoreDiff && !loadingMoreDiff && visibleStopIndex >= displayItems.length - 50) {
+      void loadMoreDiff();
+    }
+  }, [leftGrid.scrollTop, containerSize.height, columnCount, hasMoreDiff, loadingMoreDiff, displayItems.length, loadMoreDiff, cellSize]);
+
+  useEffect(() => {
+    if (selectedJobId) {
+      cache.current.jobDiff = {
+        selectedJobId,
+        result,
+        items: diffItems,
+        page: diffPage,
+        hasMore: hasMoreDiff,
+        scrollTop: savedScrollPositionRef.current.scrollTop,
+      };
+    }
+  }, [selectedJobId, result, diffItems, diffPage, hasMoreDiff]);
 
   async function handleRunSync() {
     if (!selectedJobId) return;
@@ -395,9 +523,23 @@ export function JobDiffPage() {
   }
 
   function handleClosePreview() {
+    if (previewVideoRef.current) {
+      previewVideoRef.current.pause();
+      previewVideoRef.current.src = "";
+      previewVideoRef.current.load();
+    }
     setPreviewOpen(false);
     setPreviewFailed(false);
   }
+
+  useEffect(() => {
+    if (!previewOpen) return;
+    if (previewVideoRef.current && detailItem?.kind === "video") {
+      previewVideoRef.current.pause();
+      previewVideoRef.current.src = previewStreamUrl;
+      previewVideoRef.current.load();
+    }
+  }, [previewSide, previewStreamUrl, previewOpen, detailItem?.kind]);
 
   return (
     <section className="space-y-3 md:flex md:h-full md:flex-col">
@@ -518,9 +660,24 @@ export function JobDiffPage() {
               {hideSame ? "显示相同项" : "隐藏相同项"}
             </button>
             {result ? (
-              <span className="inline-flex items-center rounded-full border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] px-3 py-2 text-sm mp-muted">
-                当前显示 {displayItems.length} 项
-              </span>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="inline-flex items-center rounded-full border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] px-3 py-2 text-sm mp-muted">
+                  内存中 {diffItems.length.toLocaleString()} / {MAX_DIFF_ITEMS.toLocaleString()} 项
+                </span>
+                <span className="inline-flex items-center rounded-full border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] px-3 py-2 text-sm mp-muted">
+                  当前显示 {displayItems.length} 项 / 总计 {result.total} 项
+                </span>
+                {diffItems.length > 0 ? (
+                  <Button variant="default" size="sm" onClick={clearDiffData}>
+                    清理数据
+                  </Button>
+                ) : null}
+                {hasMoreDiff ? (
+                  <Button variant="default" size="sm" busy={loadingMoreDiff} onClick={() => void loadMoreDiff()}>
+                    {loadingMoreDiff ? "加载中..." : "加载更多"}
+                  </Button>
+                ) : null}
+              </div>
             ) : null}
           </div>
 
@@ -530,25 +687,57 @@ export function JobDiffPage() {
                 <p className="text-xs font-semibold">源目录视图</p>
                 <span className="text-[11px] mp-muted">{result ? result.job.sourceStorageName : "-"}</span>
               </div>
-              <div
-                ref={leftPaneRef}
-                className="h-[46vh] min-h-[280px] overflow-auto rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface)] p-2 md:h-auto md:min-h-0 md:flex-1"
-                onScroll={handleLeftPaneScroll}
-              >
-                <div className="flex flex-wrap content-start gap-1.5">
-                  {visibleItems.map((item) => {
-                    const active = selectedItem?.id === item.id;
+              <div className="h-[46vh] min-h-[280px] overflow-hidden rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface)] p-2 md:h-auto md:min-h-0 md:flex-1">
+                <AutoSizer>
+                  {({ height, width }: { height: number; width: number }) => {
+                    if (containerSize.width !== width || containerSize.height !== height) {
+                      setTimeout(() => setContainerSize({ width, height }), 0);
+                    }
                     return (
-                      <button
-                        key={`left:${item.id}`}
-                        type="button"
-                        className={`rounded-sm transition-transform ${getCellColorClass(item, "source")} ${active ? "ring-2 ring-[var(--ark-primary)]" : ""}`}
-                        style={{ width: `${squareSizePx}px`, height: `${squareSizePx}px` }}
-                        onClick={() => setSelectedItemId(item.id)}
-                      />
+                      <div
+                        ref={(el) => {
+                          leftContainerRef.current = el;
+                          (leftGrid.containerRef as React.MutableRefObject<HTMLDivElement | null>).current = el;
+                        }}
+                        onScroll={handleLeftPaneScroll}
+                        style={{
+                          position: "relative",
+                          overflow: "auto",
+                          width,
+                          height,
+                        }}
+                      >
+                        <div
+                          style={{
+                            position: "relative",
+                            width: leftGrid.totalWidth,
+                            height: leftGrid.totalHeight,
+                          }}
+                        >
+                          {leftGrid.virtualCells.map((cell) => {
+                            const index = cell.rowIndex * columnCount + cell.columnIndex;
+                            if (index >= displayItems.length) return null;
+                            const item = displayItems[index];
+                            const active = selectedItemId === item.id;
+                            return (
+                              <button
+                                key={`${cell.rowIndex}-${cell.columnIndex}`}
+                                type="button"
+                                className={`rounded-sm transition-transform ${getCellColorClass(item, "source")} ${active ? "ring-2 ring-[var(--ark-primary)]" : ""}`}
+                                style={{
+                                  ...cell.style,
+                                  width: squareSizePx,
+                                  height: squareSizePx,
+                                }}
+                                onClick={() => setSelectedItemId(item.id)}
+                              />
+                            );
+                          })}
+                        </div>
+                      </div>
                     );
-                  })}
-                </div>
+                  }}
+                </AutoSizer>
               </div>
             </div>
 
@@ -557,30 +746,59 @@ export function JobDiffPage() {
                 <p className="text-xs font-semibold">目标目录视图</p>
                 <span className="text-[11px] mp-muted">{result ? result.job.destinationStorageName : "-"}</span>
               </div>
-              <div
-                ref={rightPaneRef}
-                className="h-[46vh] min-h-[280px] overflow-auto rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface)] p-2 md:h-auto md:min-h-0 md:flex-1"
-                onScroll={handleRightPaneScroll}
-              >
-                <div className="flex flex-wrap content-start gap-1.5">
-                  {visibleItems.map((item) => {
-                    const active = selectedItem?.id === item.id;
+              <div className="h-[46vh] min-h-[280px] overflow-hidden rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface)] p-2 md:h-auto md:min-h-0 md:flex-1">
+                <AutoSizer>
+                  {({ height, width }: { height: number; width: number }) => {
                     return (
-                      <button
-                        key={`right:${item.id}`}
-                        type="button"
-                        className={`rounded-sm transition-transform ${getCellColorClass(item, "destination")} ${active ? "ring-2 ring-[var(--ark-primary)]" : ""}`}
-                        style={{ width: `${squareSizePx}px`, height: `${squareSizePx}px` }}
-                        onClick={() => setSelectedItemId(item.id)}
-                      />
+                      <div
+                        ref={(el) => {
+                          rightContainerRef.current = el;
+                          (rightGrid.containerRef as React.MutableRefObject<HTMLDivElement | null>).current = el;
+                        }}
+                        onScroll={handleRightPaneScroll}
+                        style={{
+                          position: "relative",
+                          overflow: "auto",
+                          width,
+                          height,
+                        }}
+                      >
+                        <div
+                          style={{
+                            position: "relative",
+                            width: rightGrid.totalWidth,
+                            height: rightGrid.totalHeight,
+                          }}
+                        >
+                          {rightGrid.virtualCells.map((cell) => {
+                            const index = cell.rowIndex * columnCount + cell.columnIndex;
+                            if (index >= displayItems.length) return null;
+                            const item = displayItems[index];
+                            const active = selectedItemId === item.id;
+                            return (
+                              <button
+                                key={`${cell.rowIndex}-${cell.columnIndex}`}
+                                type="button"
+                                className={`rounded-sm transition-transform ${getCellColorClass(item, "destination")} ${active ? "ring-2 ring-[var(--ark-primary)]" : ""}`}
+                                style={{
+                                  ...cell.style,
+                                  width: squareSizePx,
+                                  height: squareSizePx,
+                                }}
+                                onClick={() => setSelectedItemId(item.id)}
+                              />
+                            );
+                          })}
+                        </div>
+                      </div>
                     );
-                  })}
-                </div>
+                  }}
+                </AutoSizer>
               </div>
             </div>
           </div>
           <p className="mt-2 text-xs mp-muted">
-            已渲染 {visibleItems.length}/{displayItems.length} 项
+            已加载 {diffItems.length.toLocaleString()} 项（上限 {MAX_DIFF_ITEMS.toLocaleString()} 项）
           </p>
 
         </article>
@@ -705,10 +923,10 @@ export function JobDiffPage() {
                 <div className="flex h-[68vh] items-center justify-center text-sm text-white/75">预览失败</div>
               ) : detailItem.kind === "video" ? (
                 <video
+                  ref={previewVideoRef}
                   className="h-[68vh] w-full rounded-md bg-black object-contain"
                   controls
                   preload="metadata"
-                  src={previewStreamUrl}
                   onError={() => setPreviewFailed(true)}
                 />
               ) : (
@@ -716,7 +934,7 @@ export function JobDiffPage() {
                   className="h-[68vh] w-full rounded-md bg-black object-contain"
                   src={previewStreamUrl}
                   alt={detailItem.relativePath}
-                  loading="eager"
+                  loading="lazy"
                   onError={() => setPreviewFailed(true)}
                 />
               )}

@@ -1,9 +1,8 @@
 import { motion } from "framer-motion";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ConfirmDialog } from "../components/confirm-dialog";
 import { InlineAlert } from "../components/inline-alert";
-import { SectionCard } from "../components/ui/section-card";
 import {
   getJobExecutions,
   getJobs,
@@ -22,6 +21,7 @@ import type {
   StorageRelationEdgeItem,
   StorageRelationNodeItem
 } from "../types/api";
+import { usePageVisibility } from "../hooks/use-page-visibility";
 
 type PieSlice = {
   label: string;
@@ -47,9 +47,9 @@ type RenderedRelationEdge = {
 };
 
 const mediaColors = {
-  video: "var(--ark-chart-video)",
-  image: "var(--ark-chart-image)",
-  livePhoto: "var(--ark-chart-live)"
+  video: "#f59e0b",
+  image: "#3b82f6",
+  livePhoto: "#10b981"
 } as const;
 
 const RELATION_GRAPH_WIDTH = 1240;
@@ -287,7 +287,7 @@ function buildRelationEdges(
     if (!source || !destination) return null;
 
     const isRunning = runningEdgeIds.has(edge.id);
-    const strokeColor = edge.status === "synced" ? "var(--ark-success)" : "var(--ark-warning)";
+    const strokeColor = edge.status === "synced" ? "#22c55e" : "#f59e0b";
     const markerId = edge.status === "synced" ? "relation-arrow-synced" : "relation-arrow-attention";
     const strokeDasharray = edge.unknownJobCount > 0 && !isRunning ? "8 6" : undefined;
 
@@ -349,17 +349,19 @@ function buildRelationEdges(
   return mapped.filter((item): item is RenderedRelationEdge => item !== null);
 }
 
-function PieStatCard({
-  title,
-  totalLabel,
-  emptyLabel,
-  slices
-}: {
+type PieStatCardProps = {
   title: string;
   totalLabel: string;
   emptyLabel: string;
   slices: PieSlice[];
-}) {
+};
+
+const PieStatCard = memo(function PieStatCard({
+  title,
+  totalLabel,
+  emptyLabel,
+  slices
+}: PieStatCardProps) {
   const total = slices.reduce((sum, slice) => sum + slice.value, 0);
   const [selectedSliceKey, setSelectedSliceKey] = useState<string | null>(null);
   const [hoverSliceKey, setHoverSliceKey] = useState<string | null>(null);
@@ -492,9 +494,9 @@ function PieStatCard({
       </div>
     </div>
   );
-}
+});
 
-const ACTIVITY_LEVEL_COLORS = ["var(--ark-heat-0)", "var(--ark-heat-1)", "var(--ark-heat-2)", "var(--ark-heat-3)", "var(--ark-heat-4)"] as const;
+const ACTIVITY_LEVEL_COLORS = ["#cbd5e1", "#b7e4c7", "#95d5b2", "#74c69d", "#52b788"] as const;
 const MONTH_LABELS = ["1月", "2月", "3月", "4月", "5月", "6月", "7月", "8月", "9月", "10月", "11月", "12月"] as const;
 
 function resolveActivityLevel(count: number, maxCount: number): number {
@@ -569,36 +571,71 @@ function SourceActivityPieChart({ data }: { data: SourceMediaActivity }) {
   );
 }
 
-function SourceActivityHeatmap({
-  data,
-  selectedYear,
-  loading,
-  years,
-  onSelectYear
-}: {
+type SourceActivityHeatmapProps = {
   data: SourceMediaActivity | null;
   selectedYear: number;
   loading: boolean;
   years: number[];
   onSelectYear: (year: number) => void;
-}) {
+};
+
+const SourceActivityHeatmap = memo(function SourceActivityHeatmap({
+  data,
+  selectedYear,
+  loading,
+  years,
+  onSelectYear
+}: SourceActivityHeatmapProps) {
   const [hoveredDate, setHoveredDate] = useState<SourceMediaActivity["days"][number] | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [isVisible, setIsVisible] = useState(false);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setIsVisible(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: "100px" }
+    );
+
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, []);
+
+  const columns = useMemo(() => {
+    if (!data || !data.days.length) return [];
+    const firstDate = new Date(`${data.days[0].date}T00:00:00`);
+    const firstDayOfWeek = (firstDate.getDay() + 6) % 7;
+    const leadingPlaceholders = Array.from({ length: firstDayOfWeek }, () => null as null | SourceMediaActivity["days"][number]);
+    const cells = [...leadingPlaceholders, ...data.days];
+    const result: Array<Array<null | SourceMediaActivity["days"][number]>> = [];
+    for (let index = 0; index < cells.length; index += 7) {
+      result.push(cells.slice(index, index + 7));
+    }
+    return result;
+  }, [data]);
+
+  const cellLevelMap = useMemo(() => {
+    if (!data) return new Map<string, number>();
+    const map = new Map<string, number>();
+    for (const day of data.days) {
+      map.set(day.date, resolveActivityLevel(day.count, data.maxDailyCount));
+    }
+    return map;
+  }, [data]);
 
   if (!data || !data.days.length) {
     return <p className="text-sm mp-muted">暂无媒体日期分布数据</p>;
   }
 
-  const firstDate = new Date(`${data.days[0].date}T00:00:00`);
-  const firstDayOfWeek = (firstDate.getDay() + 6) % 7;
-  const leadingPlaceholders = Array.from({ length: firstDayOfWeek }, () => null as null | SourceMediaActivity["days"][number]);
-  const cells = [...leadingPlaceholders, ...data.days];
-  const columns: Array<Array<null | SourceMediaActivity["days"][number]>> = [];
-  for (let index = 0; index < cells.length; index += 7) {
-    columns.push(cells.slice(index, index + 7));
-  }
-
   return (
-    <div className="rounded-2xl border border-[var(--ark-line)] bg-[var(--ark-surface)] p-3">
+    <div ref={containerRef} className="rounded-2xl border border-[var(--ark-line)] bg-[var(--ark-surface)] p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-lg font-semibold text-[var(--ark-ink)]">
           {data.year} 年媒体文件分布（共 {data.totalAddedCount} 个）
@@ -626,58 +663,58 @@ function SourceActivityHeatmap({
                     <span key={`month:${month}`}>{month}</span>
                   ))}
                 </div>
-                <div className="inline-flex gap-1.5">
-                  <div className="grid grid-rows-7 gap-1 text-[11px] mp-muted">
-                    <span className="h-3 leading-3">一</span>
-                    <span className="h-3 leading-3 opacity-0">二</span>
-                    <span className="h-3 leading-3">三</span>
-                    <span className="h-3 leading-3 opacity-0">四</span>
-                    <span className="h-3 leading-3">五</span>
-                    <span className="h-3 leading-3 opacity-0">六</span>
-                    <span className="h-3 leading-3 opacity-0">日</span>
+                {isVisible ? (
+                  <div className="inline-flex gap-1.5">
+                    <div className="grid grid-rows-7 gap-1 text-[11px] mp-muted">
+                      <span className="h-3 leading-3">一</span>
+                      <span className="h-3 leading-3 opacity-0">二</span>
+                      <span className="h-3 leading-3">三</span>
+                      <span className="h-3 leading-3 opacity-0">四</span>
+                      <span className="h-3 leading-3">五</span>
+                      <span className="h-3 leading-3 opacity-0">六</span>
+                      <span className="h-3 leading-3 opacity-0">日</span>
+                    </div>
+                    <div className="inline-flex gap-1">
+                      {columns.map((column, columnIndex) => (
+                        <div key={`col:${columnIndex}`} className="grid grid-rows-7 gap-1">
+                          {column.map((cell, rowIndex) => {
+                            if (!cell) {
+                              return <span key={`empty:${columnIndex}:${rowIndex}`} className="h-3 w-3 rounded-[2px] bg-transparent" />;
+                            }
+                            const level = cellLevelMap.get(cell.date) ?? 0;
+                            return (
+                              <button
+                                key={`day:${cell.date}`}
+                                type="button"
+                                className="h-3 w-3 rounded-[2px] border border-black/10 transition-transform hover:scale-[1.12] focus:scale-[1.12]"
+                                style={{ backgroundColor: ACTIVITY_LEVEL_COLORS[level] }}
+                                onMouseEnter={() => setHoveredDate(cell)}
+                                onMouseLeave={() => setHoveredDate((prev) => (prev?.date === cell.date ? null : prev))}
+                                onFocus={() => setHoveredDate(cell)}
+                                onBlur={() => setHoveredDate((prev) => (prev?.date === cell.date ? null : prev))}
+                                aria-label={`${cell.date} 文件 ${cell.count}`}
+                              />
+                            );
+                          })}
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                  <div className="inline-flex gap-1">
-                    {columns.map((column, columnIndex) => (
-                      <div key={`col:${columnIndex}`} className="grid grid-rows-7 gap-1">
-                        {column.map((cell, rowIndex) => {
-                          if (!cell) {
-                            return <span key={`empty:${columnIndex}:${rowIndex}`} className="h-3 w-3 rounded-sm bg-transparent" />;
-                          }
-                          const level = resolveActivityLevel(cell.count, data.maxDailyCount);
-                          return (
-                            <button
-                              key={`day:${cell.date}`}
-                              type="button"
-                              className="h-3 w-3 rounded-sm border border-[color-mix(in_oklab,var(--ark-line)_70%,transparent)] transition-transform hover:scale-[1.12] focus:scale-[1.12]"
-                              style={{ backgroundColor: ACTIVITY_LEVEL_COLORS[level] }}
-                              onMouseEnter={() => setHoveredDate(cell)}
-                              onMouseLeave={() => setHoveredDate((prev) => (prev?.date === cell.date ? null : prev))}
-                              onFocus={() => setHoveredDate(cell)}
-                              onBlur={() => setHoveredDate((prev) => (prev?.date === cell.date ? null : prev))}
-                              aria-label={`${cell.date} 文件 ${cell.count}`}
-                            />
-                          );
-                        })}
-                      </div>
-                    ))}
-                  </div>
-                </div>
+                ) : (
+                  <div className="h-[130px]" />
+                )}
               </div>
             </div>
 
             <div>
-              <SourceActivityPieChart data={data} />
+              {isVisible ? <SourceActivityPieChart data={data} /> : <div className="h-[150px]" />}
             </div>
           </div>
 
           <div className="mt-1.5 flex items-center gap-1 text-xs mp-muted">
             <span>少</span>
             {ACTIVITY_LEVEL_COLORS.map((color) => (
-              <span
-                key={color}
-                className="h-3 w-3 rounded-sm border border-[color-mix(in_oklab,var(--ark-line)_70%,transparent)]"
-                style={{ backgroundColor: color }}
-              />
+              <span key={color} className="h-3 w-3 rounded-[2px] border border-black/10" style={{ backgroundColor: color }} />
             ))}
             <span>多</span>
           </div>
@@ -701,10 +738,11 @@ function SourceActivityHeatmap({
       </div>
     </div>
   );
-}
+});
 
 export function DashboardPage() {
   const navigate = useNavigate();
+  const isVisible = usePageVisibility();
   const initialActivityYear = dashboardCache.selectedActivityYear ?? new Date().getFullYear();
   const cachedActivity = dashboardCache.sourceActivityByYear.get(initialActivityYear)?.data ?? null;
   const [capacities, setCapacities] = useState<StorageCapacityItem[]>(() => dashboardCache.capacities);
@@ -878,6 +916,10 @@ export function DashboardPage() {
   const hasAnyActiveExecution = activeExecutionByJobId.size > 0;
 
   useEffect(() => {
+    if (!isVisible) {
+      return;
+    }
+
     let disposed = false;
 
     const scheduleNextPoll = (delay: number) => {
@@ -912,7 +954,7 @@ export function DashboardPage() {
         window.clearTimeout(executionPollTimerRef.current);
       }
     };
-  }, [hasAnyActiveExecution]);
+  }, [hasAnyActiveExecution, isVisible]);
 
   useEffect(() => {
     if (hasAnyActiveExecution) {
@@ -1070,15 +1112,6 @@ export function DashboardPage() {
   }, [progressDialogEdge, activeExecutionByJobId, latestExecutionByJobId]);
   const progressDialogJob = progressDialogExecution ? jobById.get(progressDialogExecution.jobId) : undefined;
   const progressDialogPercent = progressDialogExecution?.progress.percent ?? 0;
-  const progressDialogFileTotalBytes = progressDialogExecution?.progress.currentFileTotalBytes ?? null;
-  const progressDialogFileCopiedBytes = progressDialogExecution?.progress.currentFileCopiedBytes ?? null;
-  const progressDialogFileStage = progressDialogExecution?.progress.currentFileStage ?? null;
-  const progressDialogFilePercent =
-    progressDialogFileTotalBytes && progressDialogFileCopiedBytes !== null && progressDialogFileTotalBytes > 0
-      ? Math.min(100, Math.round((progressDialogFileCopiedBytes / progressDialogFileTotalBytes) * 100))
-      : null;
-  const fileSpeedRef = useRef<{ executionId: string; path: string; bytes: number; timeMs: number } | null>(null);
-  const [fileWriteSpeed, setFileWriteSpeed] = useState<number | null>(null);
   const progressDialogStatusLabel = progressDialogExecution ? getExecutionStatusLabel(progressDialogExecution) : "";
   const progressDialogStatusClass =
     progressDialogExecution?.status === "failed"
@@ -1087,32 +1120,6 @@ export function DashboardPage() {
         ? "mp-status-success"
         : "mp-status-warning";
   const progressDialogCanBackground = Boolean(progressDialogExecution && isExecutionActive(progressDialogExecution));
-
-  useEffect(() => {
-    if (!progressDialogExecution || progressDialogFileCopiedBytes === null) {
-      setFileWriteSpeed(null);
-      fileSpeedRef.current = null;
-      return;
-    }
-    const currentPath = progressDialogExecution.progress.currentPath ?? "";
-    const now = Date.now();
-    const prev = fileSpeedRef.current;
-    if (prev && prev.executionId === progressDialogExecution.id && prev.path === currentPath) {
-      const deltaBytes = progressDialogFileCopiedBytes - prev.bytes;
-      const deltaMs = now - prev.timeMs;
-      if (deltaBytes >= 0 && deltaMs > 0) {
-        setFileWriteSpeed((deltaBytes * 1000) / deltaMs);
-      }
-    } else {
-      setFileWriteSpeed(null);
-    }
-    fileSpeedRef.current = {
-      executionId: progressDialogExecution.id,
-      path: currentPath,
-      bytes: progressDialogFileCopiedBytes,
-      timeMs: now
-    };
-  }, [progressDialogExecution?.id, progressDialogExecution?.progress.currentPath, progressDialogFileCopiedBytes]);
 
   const summaryTone = getCapacityTone(capacitySummary.freePercent);
 
@@ -1209,195 +1216,189 @@ export function DashboardPage() {
       ) : null}
 
       <motion.article
-        className=""
+        className="mp-panel p-4"
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.03, duration: 0.2, ease: "easeOut" }}
       >
-        <SectionCard
-          title="存储同步关系图"
-          right={
-            <>
-              <span className="mp-chip">存储节点 {relationNodes.length}</span>
-              <span className="mp-chip">同步关系 {relationEdges.length}</span>
-              <span className="mp-chip mp-chip-success">已同步 {relationSummary.syncedEdgeCount}</span>
-              <span className="mp-chip mp-chip-warning">待处理 {relationSummary.attentionEdgeCount}</span>
-              <span className="mp-chip">孤立节点 {relationSummary.isolatedNodeCount}</span>
-            </>
-          }
-        >
-          <div className="relative overflow-hidden rounded-2xl border border-[var(--ark-line)] p-3 sm:p-4 mp-relation-graph-surface">
-            <div className="pointer-events-none absolute right-3 top-3 z-10 flex flex-wrap items-center gap-2 rounded-full bg-[color-mix(in_oklab,var(--ark-surface)_70%,transparent)] px-2.5 py-1 text-[11px] text-[var(--ark-ink-soft)] backdrop-blur">
-              <span className="inline-flex items-center gap-1">
-                <span className="h-2 w-2 rounded-full" style={{ backgroundColor: "var(--ark-success)" }} />
-                已同步
-              </span>
-              <span className="inline-flex items-center gap-1">
-                <span className="h-2 w-2 rounded-full" style={{ backgroundColor: "var(--ark-warning)" }} />
-                待同步
-              </span>
-              <span className="inline-flex items-center gap-1">
-                <span className="h-2 w-2 rounded-full" style={{ backgroundColor: "var(--ark-accent)" }} />
-                同步中
-              </span>
-              <span className="inline-flex items-center gap-1">
-                <span className="h-2 w-2 rounded-full" style={{ backgroundColor: "var(--ark-ink-soft)" }} />
-                孤立
-              </span>
-            </div>
-            {relationNodes.length ? (
-              <div className="mx-auto w-full max-w-[1320px]" style={{ aspectRatio: `${RELATION_GRAPH_WIDTH} / ${relationGraphHeight}` }}>
-                <svg viewBox={`0 0 ${RELATION_GRAPH_WIDTH} ${relationGraphHeight}`} className="h-full w-full" role="img" aria-label="存储同步关系图">
-                  <defs>
-                    <marker id="relation-arrow-synced" markerWidth="12" markerHeight="12" refX="8.8" refY="6" orient="auto">
-                      <path d="M0,0 L0,12 L9,6 z" fill="var(--ark-success)" />
-                    </marker>
-                    <marker id="relation-arrow-attention" markerWidth="12" markerHeight="12" refX="8.8" refY="6" orient="auto">
-                      <path d="M0,0 L0,12 L9,6 z" fill="var(--ark-warning)" />
-                    </marker>
-                    <linearGradient id="relation-node-connected" x1="0%" y1="0%" x2="100%" y2="100%">
-                      <stop offset="0%" stopColor="color-mix(in oklab, var(--ark-accent) 12%, var(--ark-surface))" />
-                      <stop offset="100%" stopColor="color-mix(in oklab, var(--ark-primary) 18%, var(--ark-surface))" />
-                    </linearGradient>
-                    <linearGradient id="relation-node-isolated" x1="0%" y1="0%" x2="100%" y2="100%">
-                      <stop offset="0%" stopColor="color-mix(in oklab, var(--ark-surface) 92%, var(--ark-surface-soft))" />
-                      <stop offset="100%" stopColor="color-mix(in oklab, var(--ark-surface-soft) 70%, var(--ark-surface-deep))" />
-                    </linearGradient>
-                    <pattern id="relation-grid" width="40" height="40" patternUnits="userSpaceOnUse">
-                      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="rgba(148,163,184,0.18)" strokeWidth="1" />
-                    </pattern>
-                    <filter id="relation-node-shadow" x="-30%" y="-30%" width="160%" height="180%">
-                      <feDropShadow dx="0" dy="9" stdDeviation="6.5" floodColor="#0f172a" floodOpacity="0.15" />
-                    </filter>
-                  </defs>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h3 className="text-base font-semibold">存储同步关系图</h3>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 text-sm">
+            <span className="mp-chip">存储节点 {relationNodes.length}</span>
+            <span className="mp-chip">同步关系 {relationEdges.length}</span>
+            <span className="mp-chip mp-chip-success">已同步 {relationSummary.syncedEdgeCount}</span>
+            <span className="mp-chip mp-chip-warning">待处理 {relationSummary.attentionEdgeCount}</span>
+            <span className="mp-chip">孤立节点 {relationSummary.isolatedNodeCount}</span>
+          </div>
+        </div>
 
-                  <rect x={0} y={0} width={RELATION_GRAPH_WIDTH} height={relationGraphHeight} fill="url(#relation-grid)" opacity={0.68} />
-                  <ellipse cx={RELATION_GRAPH_WIDTH * 0.2} cy={relationGraphHeight * 0.16} rx={RELATION_GRAPH_WIDTH * 0.19} ry={relationGraphHeight * 0.32} fill="rgba(56,189,248,0.08)" />
-                  <ellipse cx={RELATION_GRAPH_WIDTH * 0.82} cy={relationGraphHeight * 0.84} rx={RELATION_GRAPH_WIDTH * 0.24} ry={relationGraphHeight * 0.34} fill="rgba(14,165,233,0.06)" />
+        <div className="relative mt-3 overflow-hidden rounded-2xl border border-[var(--ark-line)] p-3 sm:p-4 mp-relation-graph-surface">
+          <div className="pointer-events-none absolute right-3 top-3 z-10 flex flex-wrap items-center gap-2 rounded-full bg-white/70 px-2.5 py-1 text-[11px] text-slate-600 backdrop-blur">
+            <span className="inline-flex items-center gap-1">
+              <span className="h-2 w-2 rounded-full bg-emerald-500" />
+              已同步
+            </span>
+            <span className="inline-flex items-center gap-1">
+              <span className="h-2 w-2 rounded-full bg-amber-500" />
+              待同步
+            </span>
+            <span className="inline-flex items-center gap-1">
+              <span className="h-2 w-2 rounded-full bg-cyan-500" />
+              同步中
+            </span>
+            <span className="inline-flex items-center gap-1">
+              <span className="h-2 w-2 rounded-full bg-slate-400" />
+              孤立
+            </span>
+          </div>
+          {relationNodes.length ? (
+            <div className="mx-auto w-full max-w-[1320px]" style={{ aspectRatio: `${RELATION_GRAPH_WIDTH} / ${relationGraphHeight}` }}>
+              <svg viewBox={`0 0 ${RELATION_GRAPH_WIDTH} ${relationGraphHeight}`} className="h-full w-full" role="img" aria-label="存储同步关系图">
+                <defs>
+                  <marker id="relation-arrow-synced" markerWidth="12" markerHeight="12" refX="8.8" refY="6" orient="auto">
+                    <path d="M0,0 L0,12 L9,6 z" fill="#22c55e" />
+                  </marker>
+                  <marker id="relation-arrow-attention" markerWidth="12" markerHeight="12" refX="8.8" refY="6" orient="auto">
+                    <path d="M0,0 L0,12 L9,6 z" fill="#f59e0b" />
+                  </marker>
+                  <linearGradient id="relation-node-connected" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stopColor="#ecfeff" />
+                    <stop offset="100%" stopColor="#bfdbfe" />
+                  </linearGradient>
+                  <linearGradient id="relation-node-isolated" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stopColor="#f8fafc" />
+                    <stop offset="100%" stopColor="#e2e8f0" />
+                  </linearGradient>
+                  <pattern id="relation-grid" width="40" height="40" patternUnits="userSpaceOnUse">
+                    <path d="M 40 0 L 0 0 0 40" fill="none" stroke="rgba(148,163,184,0.18)" strokeWidth="1" />
+                  </pattern>
+                  <filter id="relation-node-shadow" x="-30%" y="-30%" width="160%" height="180%">
+                    <feDropShadow dx="0" dy="9" stdDeviation="6.5" floodColor="#0f172a" floodOpacity="0.15" />
+                  </filter>
+                </defs>
 
-                  {renderedRelationEdges.map((edge) => (
-                    <g key={`edge:${edge.id}`}>
-                      <path
-                        d={edge.d}
-                        fill="none"
-                        stroke={edge.strokeColor}
-                        strokeWidth={3.2}
-                        strokeLinecap="round"
-                        markerEnd={`url(#${edge.markerId})`}
-                        strokeDasharray={edge.strokeDasharray}
-                        opacity={0.96}
-                      >
-                        <title>{edge.description}</title>
-                      </path>
+                <rect x={0} y={0} width={RELATION_GRAPH_WIDTH} height={relationGraphHeight} fill="url(#relation-grid)" opacity={0.68} />
+                <ellipse cx={RELATION_GRAPH_WIDTH * 0.2} cy={relationGraphHeight * 0.16} rx={RELATION_GRAPH_WIDTH * 0.19} ry={relationGraphHeight * 0.32} fill="rgba(56,189,248,0.08)" />
+                <ellipse cx={RELATION_GRAPH_WIDTH * 0.82} cy={relationGraphHeight * 0.84} rx={RELATION_GRAPH_WIDTH * 0.24} ry={relationGraphHeight * 0.34} fill="rgba(14,165,233,0.06)" />
 
-                      {edge.isRunning ? (
-                        <>
-                          <path
-                            d={edge.d}
-                            fill="none"
-                            stroke="var(--ark-accent)"
-                            strokeWidth={6.2}
-                            strokeLinecap="round"
-                            className="mp-relation-edge-flow"
-                            opacity={0.96}
-                          />
-                          <circle r={4.2} fill="var(--ark-accent)" className="mp-relation-energy" opacity={0.95}>
-                            <animateMotion dur="1.4s" repeatCount="indefinite" path={edge.d} />
-                          </circle>
-                          <circle r={3.3} fill="color-mix(in oklab, var(--ark-accent) 60%, white)" className="mp-relation-energy" opacity={0.85}>
-                            <animateMotion dur="1.8s" begin="-0.9s" repeatCount="indefinite" path={edge.d} />
-                          </circle>
-                        </>
-                      ) : null}
+                {renderedRelationEdges.map((edge) => (
+                  <g key={`edge:${edge.id}`}>
+                    <path
+                      d={edge.d}
+                      fill="none"
+                      stroke={edge.strokeColor}
+                      strokeWidth={3.2}
+                      strokeLinecap="round"
+                      markerEnd={`url(#${edge.markerId})`}
+                      strokeDasharray={edge.strokeDasharray}
+                      opacity={0.96}
+                    >
+                      <title>{edge.description}</title>
+                    </path>
 
-                      {edge.isInteractive ? (
+                    {edge.isRunning ? (
+                      <>
                         <path
                           d={edge.d}
                           fill="none"
-                          stroke="transparent"
-                          strokeWidth={18}
-                          className="mp-relation-edge-hit"
-                          onClick={() => handleRelationEdgeClick(edge.id)}
-                        />
-                      ) : null}
-                    </g>
-                  ))}
-
-                  {relationNodes.map((node) => {
-                    const pos = nodePositions.get(node.storageId);
-                    if (!pos) return null;
-                    const connected = relationSummary.connectedNodeIds.has(node.storageId);
-                    const fill = connected ? "url(#relation-node-connected)" : "url(#relation-node-isolated)";
-                    const stroke = connected ? "var(--ark-accent)" : "var(--ark-line-strong)";
-                    const halo = connected ? "color-mix(in oklab, var(--ark-accent) 22%, transparent)" : "color-mix(in oklab, var(--ark-line) 24%, transparent)";
-                    const statusDot = connected ? "var(--ark-success)" : "var(--ark-ink-soft)";
-
-                    return (
-                      <g key={`node:${node.storageId}`} transform={`translate(${pos.x}, ${pos.y})`} className="mp-relation-node">
-                        <g filter="url(#relation-node-shadow)">
-                          <circle r={RELATION_NODE_RADIUS + 4} fill={halo} />
-                          <circle r={RELATION_NODE_RADIUS} fill={fill} stroke={stroke} strokeWidth={2.8} />
-                          <circle
-                            r={RELATION_NODE_RADIUS - 10}
-                            fill="color-mix(in oklab, var(--ark-surface) 84%, white)"
-                            stroke="color-mix(in oklab, var(--ark-line-strong) 40%, transparent)"
-                            strokeWidth={1.2}
-                          />
-                          <circle
-                            cx={RELATION_NODE_RADIUS - 8}
-                            cy={-RELATION_NODE_RADIUS + 8}
-                            r={4.4}
-                            fill={statusDot}
-                            stroke="color-mix(in oklab, var(--ark-surface) 90%, white)"
-                            strokeWidth={1.4}
-                          />
-                        </g>
-
-                        <text y={-6} textAnchor="middle" dominantBaseline="central" fontSize="10.5" fontWeight={600} fill="var(--ark-ink-soft)" letterSpacing={0.2}>
-                          {getStorageTypeLabel(node.type)}
-                        </text>
-
-                        <text y={13} textAnchor="middle" fontSize="12" fontWeight={700} fill="var(--ark-ink)">
-                          {clipLabel(node.storageName, 12)}
-                        </text>
-
-                        <text
-                          y={RELATION_NODE_RADIUS + 22}
-                          textAnchor="middle"
-                          fontSize="10.5"
-                          fontWeight={600}
-                          fill="var(--ark-ink)"
-                          className="mp-relation-node-path"
-                          paintOrder="stroke"
-                          stroke="color-mix(in oklab, var(--ark-surface) 88%, white)"
-                          strokeWidth={3.4}
+                          stroke="#22d3ee"
+                          strokeWidth={6.2}
                           strokeLinecap="round"
-                          strokeLinejoin="round"
-                        >
-                          {clipLabel(node.basePath, 22)}
-                        </text>
+                          className="mp-relation-edge-flow"
+                          opacity={0.96}
+                        />
+                        <circle r={4.2} fill="#22d3ee" className="mp-relation-energy" opacity={0.95}>
+                          <animateMotion dur="1.4s" repeatCount="indefinite" path={edge.d} />
+                        </circle>
+                        <circle r={3.3} fill="#67e8f9" className="mp-relation-energy" opacity={0.85}>
+                          <animateMotion dur="1.8s" begin="-0.9s" repeatCount="indefinite" path={edge.d} />
+                        </circle>
+                      </>
+                    ) : null}
 
-                        <title>{`${node.storageName}\n${node.basePath}`}</title>
+                    {edge.isInteractive ? (
+                      <path
+                        d={edge.d}
+                        fill="none"
+                        stroke="transparent"
+                        strokeWidth={18}
+                        className="mp-relation-edge-hit"
+                        onClick={() => handleRelationEdgeClick(edge.id)}
+                      />
+                    ) : null}
+                  </g>
+                ))}
+
+                {relationNodes.map((node) => {
+                  const pos = nodePositions.get(node.storageId);
+                  if (!pos) return null;
+                  const connected = relationSummary.connectedNodeIds.has(node.storageId);
+                  const fill = connected ? "url(#relation-node-connected)" : "url(#relation-node-isolated)";
+                  const stroke = connected ? "#0284c7" : "#94a3b8";
+                  const halo = connected ? "rgba(56,189,248,0.2)" : "rgba(148,163,184,0.16)";
+                  const statusDot = connected ? "#10b981" : "#94a3b8";
+
+                  return (
+                    <g key={`node:${node.storageId}`} transform={`translate(${pos.x}, ${pos.y})`} className="mp-relation-node">
+                      <g filter="url(#relation-node-shadow)">
+                        <circle r={RELATION_NODE_RADIUS + 4} fill={halo} />
+                        <circle r={RELATION_NODE_RADIUS} fill={fill} stroke={stroke} strokeWidth={2.8} />
+                        <circle r={RELATION_NODE_RADIUS - 10} fill="rgba(255,255,255,0.86)" stroke="rgba(148,163,184,0.34)" strokeWidth={1.2} />
+                        <circle cx={RELATION_NODE_RADIUS - 8} cy={-RELATION_NODE_RADIUS + 8} r={4.4} fill={statusDot} stroke="#ffffff" strokeWidth={1.4} />
                       </g>
-                    );
-                  })}
-                </svg>
-              </div>
-            ) : (
-              <p className="px-3 py-12 text-center text-sm mp-muted">暂无存储配置</p>
-            )}
-          </div>
-        </SectionCard>
+
+                      <text y={-6} textAnchor="middle" dominantBaseline="central" fontSize="10.5" fontWeight={600} fill="#475569" letterSpacing={0.2}>
+                        {getStorageTypeLabel(node.type)}
+                      </text>
+
+                      <text y={13} textAnchor="middle" fontSize="12" fontWeight={700} fill="#0f172a">
+                        {clipLabel(node.storageName, 12)}
+                      </text>
+
+                      <text
+                        y={RELATION_NODE_RADIUS + 22}
+                        textAnchor="middle"
+                        fontSize="10.5"
+                        fontWeight={600}
+                        fill="#334155"
+                        className="mp-relation-node-path"
+                        paintOrder="stroke"
+                        stroke="rgba(255,255,255,0.92)"
+                        strokeWidth={3.4}
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        {clipLabel(node.basePath, 22)}
+                      </text>
+
+                      <title>{`${node.storageName}\n${node.basePath}`}</title>
+                    </g>
+                  );
+                })}
+              </svg>
+            </div>
+          ) : (
+            <p className="px-3 py-12 text-center text-sm mp-muted">暂无存储配置</p>
+          )}
+        </div>
 
       </motion.article>
 
       <motion.article
-        className=""
+        className="mp-panel p-4"
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.06, duration: 0.2, ease: "easeOut" }}
       >
-        <SectionCard title="媒体日期分布热力图">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h3 className="text-base font-semibold">媒体日期分布热力图</h3>
+          </div>
+        </div>
+
+        <div className="mt-3">
           <SourceActivityHeatmap
             data={sourceActivity}
             selectedYear={selectedActivityYear}
@@ -1405,27 +1406,31 @@ export function DashboardPage() {
             years={activityYears}
             onSelectYear={handleSelectActivityYear}
           />
-        </SectionCard>
+        </div>
       </motion.article>
 
       <motion.article
-        className=""
+        className="mp-panel p-4"
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.05, duration: 0.2, ease: "easeOut" }}
       >
-        <SectionCard
-          title="存储盘容量"
-          description={`已读取 ${capacitySummary.readable}/${capacitySummary.groups} 组${capacitySummary.unreadable ? `，${capacitySummary.unreadable} 组不可读取` : ""}`}
-          right={
-            <>
-              <span className="mp-chip">总容量 {formatBytes(capacitySummary.totalBytes)}</span>
-              <span className="mp-chip">已用 {formatBytes(capacitySummary.usedBytes)}</span>
-              <span className={summaryTone.chipClass}>整体剩余 {capacitySummary.freePercent}%</span>
-            </>
-          }
-        >
-          <div className="grid gap-3 lg:grid-cols-2">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h3 className="text-base font-semibold">存储盘容量</h3>
+            <p className="mt-1 text-sm mp-muted">
+              已读取 {capacitySummary.readable}/{capacitySummary.groups} 组
+              {capacitySummary.unreadable ? `，${capacitySummary.unreadable} 组不可读取` : ""}
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 text-sm">
+            <span className="mp-chip">总容量 {formatBytes(capacitySummary.totalBytes)}</span>
+            <span className="mp-chip">已用 {formatBytes(capacitySummary.usedBytes)}</span>
+            <span className={summaryTone.chipClass}>整体剩余 {capacitySummary.freePercent}%</span>
+          </div>
+        </div>
+
+        <div className="mt-3 grid gap-3 lg:grid-cols-2">
           {capacities.map((item) => {
             const remainingPercent = getRemainingPercent(item.totalBytes, item.freeBytes);
             const tone = getCapacityTone(remainingPercent);
@@ -1467,29 +1472,29 @@ export function DashboardPage() {
             );
           })}
           {!capacities.length ? <p className="text-sm mp-muted">暂无存储容量数据</p> : null}
-          </div>
-        </SectionCard>
+        </div>
       </motion.article>
 
       <motion.article
-        className=""
+        className="mp-panel p-4"
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.08, duration: 0.2, ease: "easeOut" }}
       >
-        <SectionCard
-          title="媒体分布（按存储目录）"
-          right={
-            <>
-              <span className="mp-chip">
-                有媒体的存储 {mediaSummary.storagesWithMedia}/{mediaSummary.totalStorages}
-              </span>
-              <span className="mp-chip">总数量 {mediaSummary.totalCount}</span>
-              <span className="mp-chip">总体积 {formatBytes(mediaSummary.totalBytes)}</span>
-            </>
-          }
-        >
-          <div className="grid gap-3 xl:grid-cols-2">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h3 className="text-base font-semibold">媒体分布（按存储目录）</h3>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 text-sm">
+            <span className="mp-chip">
+              有媒体的存储 {mediaSummary.storagesWithMedia}/{mediaSummary.totalStorages}
+            </span>
+            <span className="mp-chip">总数量 {mediaSummary.totalCount}</span>
+            <span className="mp-chip">总体积 {formatBytes(mediaSummary.totalBytes)}</span>
+          </div>
+        </div>
+
+        <div className="mt-3 grid gap-3 xl:grid-cols-2">
           {storageMediaSummary.map((item) => {
             const countSlices: PieSlice[] = [
               { label: "视频", value: item.counts.video, color: mediaColors.video, formattedValue: String(item.counts.video) },
@@ -1533,13 +1538,12 @@ export function DashboardPage() {
             );
           })}
           {!storageMediaSummary.length ? <p className="text-sm mp-muted">暂无媒体统计数据</p> : null}
-          </div>
-        </SectionCard>
+        </div>
       </motion.article>
 
       {edgeActionEdge ? (
         <div
-          className="mp-overlay fixed inset-0 z-[58] flex items-center justify-center p-4"
+          className="fixed inset-0 z-[58] flex items-center justify-center bg-black/45 p-4"
           onClick={() => setEdgeActionEdgeId(null)}
         >
           <div className="mp-panel w-full max-w-lg p-4" onClick={(event) => event.stopPropagation()}>
@@ -1609,7 +1613,7 @@ export function DashboardPage() {
 
       {progressDialogExecution ? (
         <div
-          className="mp-overlay fixed inset-0 z-[60] flex items-center justify-center p-4"
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/45 p-4"
           onClick={() => {
             if (progressDialogCanBackground) {
               setProgressDialogEdgeId(null);
@@ -1656,22 +1660,7 @@ export function DashboardPage() {
               </div>
             </div>
             {progressDialogExecution.progress.currentPath ? (
-              <p className="mt-2 break-all text-xs mp-muted">
-                当前文件: {progressDialogExecution.progress.currentPath}
-                {progressDialogFileTotalBytes !== null && progressDialogFileCopiedBytes !== null
-                  ? ` · ${formatBytes(progressDialogFileCopiedBytes)} / ${formatBytes(progressDialogFileTotalBytes)}`
-                  : ""}
-                {progressDialogFileStage === "post_processing"
-                  ? " · 后处理"
-                  : progressDialogFilePercent !== null
-                    ? ` · ${progressDialogFilePercent}%`
-                    : ""}
-                {progressDialogFileStage === "post_processing"
-                  ? " · 元数据写入中"
-                  : fileWriteSpeed !== null
-                    ? ` · ${formatBytes(fileWriteSpeed)} /s`
-                    : ""}
-              </p>
+              <p className="mt-2 break-all text-xs mp-muted">当前文件: {progressDialogExecution.progress.currentPath}</p>
             ) : null}
             {progressDialogExecution.error ? <p className="mp-error mt-3">{progressDialogExecution.error}</p> : null}
 

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Button } from "../components/ui/button";
 import { useLocalStorageState } from "../hooks/use-local-storage-state";
 import { getStorages } from "../lib/api";
 import type { StorageTarget } from "../types/api";
@@ -10,6 +11,8 @@ import { useFocusTrap } from "./media/use-focus-trap";
 import { useLongPress } from "./media/use-long-press";
 import { useMediaBrowser } from "./media/use-media-browser";
 import { usePreviewHotkeys } from "./media/use-preview-hotkeys";
+
+const MAX_META_CACHE_SIZE = 50;
 
 interface MediaPaneProps {
   storages: StorageTarget[];
@@ -33,13 +36,17 @@ function MediaPane({ storages }: MediaPaneProps) {
   const selectedStorage = storages.find((s) => s.id === storageId);
 
   const {
+    media,
     loadingMedia,
+    loadingMore,
     error,
     setError,
     setMedia,
     displayItems,
     mediaSummary,
-    refresh
+    refresh,
+    hasMore,
+    loadMore
   } = useMediaBrowser(selectedStorage, kindFilter);
 
   useEffect(() => {
@@ -142,10 +149,17 @@ function MediaPane({ storages }: MediaPaneProps) {
   const normalizedThumbSize = Math.max(110, Math.min(260, Number(thumbSize) || 170));
 
   const upsertViewerMeta = useCallback((pathKey: string, next: ViewerRuntimeMeta) => {
-    setViewerMetaByPath((prev) => ({
-      ...prev,
-      [pathKey]: { ...prev[pathKey], ...next }
-    }));
+    setViewerMetaByPath((prev) => {
+      const updated = { ...prev, [pathKey]: { ...prev[pathKey], ...next } };
+      const keys = Object.keys(updated);
+      if (keys.length > MAX_META_CACHE_SIZE) {
+        const keysToRemove = keys.slice(0, keys.length - MAX_META_CACHE_SIZE);
+        for (const key of keysToRemove) {
+          delete updated[key];
+        }
+      }
+      return updated;
+    });
   }, []);
 
   const handleThumbImageError = useCallback((path: string) => {
@@ -194,11 +208,21 @@ function MediaPane({ storages }: MediaPaneProps) {
           <h3 className="text-sm font-semibold">存储媒体</h3>
           <p className="mt-1 text-xs mp-muted">按存储浏览媒体，支持 Live Photo 动态预览与元数据查看</p>
         </div>
-        <div className="flex flex-wrap gap-2 text-xs sm:text-sm">
+        <div className="flex flex-wrap items-center gap-2 text-xs sm:text-sm">
           <span className="mp-chip">总计 {mediaSummary.total}</span>
           <span className="mp-chip">图片 {mediaSummary.imageCount}</span>
           <span className="mp-chip">视频 {mediaSummary.videoCount}</span>
           <span className="mp-chip mp-chip-success">Live Photo {mediaSummary.liveCount}</span>
+          {media ? (
+            <span className="mp-chip">
+              已加载 {media.files.length}/{media.total}
+            </span>
+          ) : null}
+          {hasMore ? (
+            <Button variant="default" size="sm" busy={loadingMore} onClick={() => void loadMore()}>
+              {loadingMore ? "加载中..." : "加载更多"}
+            </Button>
+          ) : null}
         </div>
       </div>
       {error ? <p className="mp-error mt-3">{error}</p> : null}

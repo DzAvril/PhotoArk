@@ -237,8 +237,8 @@ export function browseStorageDirectories(storageId: string, dirPath?: string) {
   return fetchJson<DirectoryBrowseResult>(`/api/storages/${storageId}/directories${suffix}`);
 }
 
-export function browseStorageMedia(storageId: string, dirPath: string) {
-  const q = new URLSearchParams({ path: dirPath });
+export function browseStorageMedia(storageId: string, dirPath: string, page = 1, pageSize = 300) {
+  const q = new URLSearchParams({ path: dirPath, page: String(page), pageSize: String(pageSize) });
   return fetchJson<MediaBrowseResult>(`/api/storages/${storageId}/media?${q.toString()}`);
 }
 
