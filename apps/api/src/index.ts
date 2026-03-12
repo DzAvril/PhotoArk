@@ -1800,6 +1800,7 @@ async function scanMediaFilesWithStats(dirPath: string): Promise<IndexedMediaFil
     if (!currentPath) continue;
     const entries = await readdir(currentPath, { withFileTypes: true });
     const mediaFilesInDir: string[] = [];
+    const unknownEntries: Array<{ fullPath: string; name: string }> = [];
 
     for (const entry of entries) {
       const fullPath = path.join(currentPath, entry.name);
@@ -1807,6 +1808,28 @@ async function scanMediaFilesWithStats(dirPath: string): Promise<IndexedMediaFil
         dirQueue.push(fullPath);
       } else if (entry.isFile() && isMediaFile(entry.name)) {
         mediaFilesInDir.push(fullPath);
+      } else if (entry.isSymbolicLink()) {
+        unknownEntries.push({ fullPath, name: entry.name });
+      } else {
+        unknownEntries.push({ fullPath, name: entry.name });
+      }
+    }
+
+    for (let idx = 0; idx < unknownEntries.length; idx += MEDIA_INDEX_STAT_CONCURRENCY) {
+      const batch = unknownEntries.slice(idx, idx + MEDIA_INDEX_STAT_CONCURRENCY);
+      const rows = await Promise.all(
+        batch.map(async ({ fullPath, name }) => {
+          const fileStat = await stat(fullPath).catch(() => null);
+          return { fullPath, name, fileStat };
+        })
+      );
+      for (const row of rows) {
+        if (!row.fileStat) continue;
+        if (row.fileStat.isDirectory()) {
+          dirQueue.push(row.fullPath);
+        } else if (row.fileStat.isFile() && isMediaFile(row.name)) {
+          mediaFilesInDir.push(row.fullPath);
+        }
       }
     }
 
