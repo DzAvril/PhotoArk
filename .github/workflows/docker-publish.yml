@@ -58,7 +58,7 @@ jobs:
         id: appver
         shell: bash
         run: |
-          version=$(node -p "require('./package.json').version")
+          version=$(node -p "require('./apps/web/package.json').version")
           if [ -z "$version" ]; then
             echo "package.json version is empty" >&2
             exit 1
@@ -79,7 +79,7 @@ jobs:
           tags: |
             type=raw,value=v${{ steps.appver.outputs.version }}
             type=raw,value=${{ steps.appver.outputs.version }}
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=latest
             type=sha
             type=ref,event=tag
 

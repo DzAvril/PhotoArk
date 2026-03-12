@@ -197,6 +197,7 @@ docker compose up -d --build app
   - Telegram 同样支持 `secrets` 优先、`vars` 回退
 - 产物镜像：
   - `dzavril/photoark`
+  - 拉取方式示例：`docker pull dzavril/photoark:latest`
 - 若配置 Telegram，镜像构建成功后会发送通知，包含镜像 tag 与本次更新摘要
  - 更新摘要默认取“上一次成功构建”到“本次构建”之间的 commit 列表
 
