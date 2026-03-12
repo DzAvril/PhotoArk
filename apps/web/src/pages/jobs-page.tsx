@@ -1030,18 +1030,28 @@ export function JobsPage() {
               </div>
             </div>
             {progressExecution.progress.currentPath ? (
-              <p className="mt-2 break-all text-xs mp-muted">
-                当前文件: {progressExecution.progress.currentPath}
-                {progressFileTotalBytes !== null && progressFileCopiedBytes !== null
-                  ? ` · ${formatBytes(progressFileCopiedBytes)} / ${formatBytes(progressFileTotalBytes)}`
-                  : ""}
-                {progressFileStage === "post_processing" ? " · 后处理" : progressFilePercent !== null ? ` · ${progressFilePercent}%` : ""}
-                {progressFileStage === "post_processing"
-                  ? " · 元数据写入中"
-                  : fileWriteSpeed !== null
-                    ? ` · ${formatBytes(fileWriteSpeed)} /s`
+              <>
+                <p className="mt-2 break-all text-xs mp-muted">
+                  当前文件: {progressExecution.progress.currentPath}
+                  {progressFileTotalBytes !== null && progressFileCopiedBytes !== null
+                    ? ` · ${formatBytes(progressFileCopiedBytes)} / ${formatBytes(progressFileTotalBytes)}`
                     : ""}
-              </p>
+                  {progressFileStage === "post_processing" ? " · 后处理" : progressFilePercent !== null ? ` · ${progressFilePercent}%` : ""}
+                  {progressFileStage === "post_processing"
+                    ? " · 元数据写入中"
+                    : fileWriteSpeed !== null
+                      ? ` · ${formatBytes(fileWriteSpeed)} /s`
+                      : ""}
+                </p>
+                {progressFilePercent !== null ? (
+                  <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--ark-line)]">
+                    <div
+                      className="h-full rounded-full bg-[var(--ark-primary)] transition-all duration-200"
+                      style={{ width: `${progressFilePercent}%` }}
+                    />
+                  </div>
+                ) : null}
+              </>
             ) : null}
             {progressExecution.error ? <p className="mp-error mt-3">{progressExecution.error}</p> : null}
 

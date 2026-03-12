@@ -1123,6 +1123,13 @@ export function DashboardPage() {
   }, [progressDialogEdge, activeExecutionByJobId, latestExecutionByJobId]);
   const progressDialogJob = progressDialogExecution ? jobById.get(progressDialogExecution.jobId) : undefined;
   const progressDialogPercent = progressDialogExecution?.progress.percent ?? 0;
+  const progressFileTotalBytes = progressDialogExecution?.progress.currentFileTotalBytes ?? null;
+  const progressFileCopiedBytes = progressDialogExecution?.progress.currentFileCopiedBytes ?? null;
+  const progressFileStage = progressDialogExecution?.progress.currentFileStage ?? null;
+  const progressFilePercent =
+    progressFileTotalBytes && progressFileCopiedBytes !== null && progressFileTotalBytes > 0
+      ? Math.min(100, Math.round((progressFileCopiedBytes / progressFileTotalBytes) * 100))
+      : null;
   const progressDialogStatusLabel = progressDialogExecution ? getExecutionStatusLabel(progressDialogExecution) : "";
   const progressDialogStatusClass =
     progressDialogExecution?.status === "failed"
@@ -1671,7 +1678,24 @@ export function DashboardPage() {
               </div>
             </div>
             {progressDialogExecution.progress.currentPath ? (
-              <p className="mt-2 break-all text-xs mp-muted">当前文件: {progressDialogExecution.progress.currentPath}</p>
+              <>
+                <p className="mt-2 break-all text-xs mp-muted">
+                  当前文件: {progressDialogExecution.progress.currentPath}
+                  {progressFileTotalBytes !== null && progressFileCopiedBytes !== null
+                    ? ` · ${formatBytes(progressFileCopiedBytes)} / ${formatBytes(progressFileTotalBytes)}`
+                    : ""}
+                  {progressFileStage === "post_processing" ? " · 后处理" : progressFilePercent !== null ? ` · ${progressFilePercent}%` : ""}
+                  {progressFileStage === "post_processing" ? " · 元数据写入中" : ""}
+                </p>
+                {progressFilePercent !== null ? (
+                  <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--ark-line)]">
+                    <div
+                      className="h-full rounded-full bg-[var(--ark-primary)] transition-all duration-200"
+                      style={{ width: `${progressFilePercent}%` }}
+                    />
+                  </div>
+                ) : null}
+              </>
             ) : null}
             {progressDialogExecution.error ? <p className="mp-error mt-3">{progressDialogExecution.error}</p> : null}
 

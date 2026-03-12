@@ -1,8 +1,10 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { createReadStream } from "node:fs";
-import { copyFile, mkdir, readdir, readFile, stat, statfs, unlink, utimes } from "node:fs/promises";
+import { createReadStream, createWriteStream } from "node:fs";
+import { mkdir, readdir, readFile, stat, statfs, unlink, utimes } from "node:fs/promises";
 import path from "node:path";
+import { Transform } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
 import Fastify, { type FastifyReply } from "fastify";
 import cors from "@fastify/cors";
@@ -1457,6 +1459,9 @@ type JobExecutionProgress = {
   livePhotoPairCount: number;
   percent: number;
   currentPath: string | null;
+  currentFileTotalBytes: number | null;
+  currentFileCopiedBytes: number | null;
+  currentFileStage: "copying" | "post_processing" | null;
 };
 
 type JobExecution = {
@@ -2007,6 +2012,9 @@ type JobExecutionProgressUpdate = {
   livePhotoPairCount: number;
   percent: number;
   currentPath: string | null;
+  currentFileTotalBytes: number | null;
+  currentFileCopiedBytes: number | null;
+  currentFileStage: "copying" | "post_processing" | null;
 };
 
 type ExecuteJobProgressHandler = (progress: JobExecutionProgressUpdate) => void;
@@ -2014,6 +2022,28 @@ type ExecuteJobOptions = {
   shouldCancel?: () => boolean;
   watchChanges?: WatchChange[];
 };
+
+type FileProgressCallback = (deltaBytes: number) => void;
+
+function createProgressTransform(onProgress?: FileProgressCallback): Transform | null {
+  if (!onProgress) return null;
+  return new Transform({
+    transform(chunk, _encoding, callback) {
+      onProgress(chunk.length);
+      callback(null, chunk);
+    }
+  });
+}
+
+async function copyFileWithProgress(
+  sourcePath: string,
+  destinationPath: string,
+  onProgress?: FileProgressCallback
+): Promise<void> {
+  const progressTransform = createProgressTransform(onProgress);
+  const streams = [createReadStream(sourcePath), ...(progressTransform ? [progressTransform] : []), createWriteStream(destinationPath)];
+  await pipeline(streams);
+}
 
 function clampProgressPercent(value: number): number {
   if (!Number.isFinite(value)) return 0;
@@ -2081,7 +2111,10 @@ function createJobExecution(jobId: string, trigger: JobRunTrigger): JobExecution
       videoCount: 0,
       livePhotoPairCount: 0,
       percent: 0,
-      currentPath: null
+      currentPath: null,
+      currentFileTotalBytes: null,
+      currentFileCopiedBytes: null,
+      currentFileStage: null
     }
   };
   jobExecutions.set(execution.id, execution);
@@ -2110,6 +2143,9 @@ function requestCancelExecution(executionId: string): JobExecution | null {
       execution.progress.phase = "finished";
       execution.progress.percent = 100;
       execution.progress.currentPath = null;
+      execution.progress.currentFileTotalBytes = null;
+      execution.progress.currentFileCopiedBytes = null;
+      execution.progress.currentFileStage = null;
     });
   }
   return jobExecutions.get(executionId) ?? null;
@@ -2165,6 +2201,9 @@ async function executeJob(
       videoCount: number;
       livePhotoPairCount: number;
       currentPath: string | null;
+      currentFileTotalBytes?: number | null;
+      currentFileCopiedBytes?: number | null;
+      currentFileStage?: "copying" | "post_processing" | null;
     }
   ) => {
     if (!onProgress) return;
@@ -2182,7 +2221,10 @@ async function executeJob(
       videoCount: progress.videoCount,
       livePhotoPairCount: progress.livePhotoPairCount,
       percent,
-      currentPath: progress.currentPath
+      currentPath: progress.currentPath,
+      currentFileTotalBytes: progress.currentFileTotalBytes ?? null,
+      currentFileCopiedBytes: progress.currentFileCopiedBytes ?? null,
+      currentFileStage: progress.currentFileStage ?? null
     });
   };
 
@@ -2337,7 +2379,10 @@ async function executeJob(
     photoCount,
     videoCount,
     livePhotoPairCount: copiedLivePhotoIds.size,
-    currentPath: null
+    currentPath: null,
+    currentFileTotalBytes: null,
+    currentFileCopiedBytes: null,
+    currentFileStage: null
   });
 
   if (checkCancel()) {
@@ -2351,6 +2396,64 @@ async function executeJob(
 
   let lastHeartbeatAt = Date.now();
   let lastHeartbeatProcessed = 0;
+  let currentFileTotalBytes: number | null = null;
+  let currentFileCopiedBytes: number | null = null;
+  let currentFileStage: "copying" | "post_processing" | null = null;
+  let lastFileProgressAt = 0;
+
+  const emitSyncProgress = (currentPath: string | null, overrides?: Partial<{
+    currentFileTotalBytes: number | null;
+    currentFileCopiedBytes: number | null;
+    currentFileStage: "copying" | "post_processing" | null;
+  }>) => {
+    emitProgress("syncing", {
+      totalCount: scannedCount,
+      scannedCount,
+      processedCount,
+      copiedCount,
+      skippedCount,
+      failedCount,
+      photoCount,
+      videoCount,
+      livePhotoPairCount: copiedLivePhotoIds.size,
+      currentPath,
+      currentFileTotalBytes,
+      currentFileCopiedBytes,
+      currentFileStage,
+      ...overrides
+    });
+  };
+
+  const beginFileProgress = (relativePath: string, totalBytes: number | null) => {
+    currentFileTotalBytes = totalBytes;
+    currentFileCopiedBytes = totalBytes !== null ? 0 : null;
+    currentFileStage = "copying";
+    lastFileProgressAt = 0;
+    emitSyncProgress(relativePath);
+  };
+
+  const updateFileProgress = (relativePath: string, deltaBytes: number) => {
+    if (currentFileTotalBytes === null || currentFileCopiedBytes === null) return;
+    currentFileCopiedBytes += deltaBytes;
+    const now = Date.now();
+    if (now - lastFileProgressAt < 200 && currentFileCopiedBytes < currentFileTotalBytes) {
+      return;
+    }
+    lastFileProgressAt = now;
+    emitSyncProgress(relativePath);
+  };
+
+  const setFileStage = (relativePath: string, stage: "copying" | "post_processing" | null) => {
+    currentFileStage = stage;
+    emitSyncProgress(relativePath);
+  };
+
+  const clearFileProgress = (relativePath: string) => {
+    currentFileTotalBytes = null;
+    currentFileCopiedBytes = null;
+    currentFileStage = null;
+    emitSyncProgress(relativePath);
+  };
 
   if (!canceled) {
     for (let i = 0; i < sourceFiles.length; i += 1) {
@@ -2367,18 +2470,7 @@ async function executeJob(
           if (!nextStat?.isFile()) {
             skippedCount += 1;
             processedCount += 1;
-            emitProgress("syncing", {
-              totalCount: scannedCount,
-              scannedCount,
-              processedCount,
-              copiedCount,
-              skippedCount,
-              failedCount,
-              photoCount,
-              videoCount,
-              livePhotoPairCount: copiedLivePhotoIds.size,
-              currentPath: relativePath
-            });
+            clearFileProgress(relativePath);
             continue;
           }
           sourceStat = nextStat;
@@ -2418,18 +2510,7 @@ async function executeJob(
         }
         skippedCount += 1;
         processedCount += 1;
-        emitProgress("syncing", {
-          totalCount: scannedCount,
-          scannedCount,
-          processedCount,
-          copiedCount,
-          skippedCount,
-          failedCount,
-          photoCount,
-          videoCount,
-          livePhotoPairCount: copiedLivePhotoIds.size,
-          currentPath: relativePath
-        });
+        clearFileProgress(relativePath);
       const now = Date.now();
       if (now - lastHeartbeatAt >= 5000 || processedCount - lastHeartbeatProcessed >= 500) {
         app.log.info(
@@ -2468,15 +2549,25 @@ async function executeJob(
       }
 
       await mkdir(path.dirname(destinationFile), { recursive: true });
+      beginFileProgress(relativePath, Number.isFinite(sourceStat.size) ? sourceStat.size : null);
       if (!sourceStorage.encrypted && !destinationStorage.encrypted) {
-        await copyFile(sourceFile, destinationFile);
+        await copyFileWithProgress(sourceFile, destinationFile, (deltaBytes) => {
+          updateFileProgress(relativePath, deltaBytes);
+        });
       } else if (!sourceStorage.encrypted && destinationStorage.encrypted) {
-        await encryption.encryptFile(sourceFile, destinationFile);
+        await encryption.encryptFile(sourceFile, destinationFile, (deltaBytes) => {
+          updateFileProgress(relativePath, deltaBytes);
+        });
       } else if (sourceStorage.encrypted && !destinationStorage.encrypted) {
-        await encryption.decryptFile(sourceFile, destinationFile);
+        await encryption.decryptFile(sourceFile, destinationFile, (deltaBytes) => {
+          updateFileProgress(relativePath, deltaBytes);
+        });
       } else {
-        await encryption.reencryptFile(sourceFile, destinationFile);
+        await encryption.reencryptFile(sourceFile, destinationFile, (deltaBytes) => {
+          updateFileProgress(relativePath, deltaBytes);
+        });
       }
+      setFileStage(relativePath, "post_processing");
       await utimes(destinationFile, sourceStat.atime, sourceStat.mtime).catch(() => undefined);
       const nextAsset: BackupAsset = {
         id: existing?.id ?? `asset_${randomUUID()}`,
@@ -2507,18 +2598,7 @@ async function executeJob(
 
       copiedCount += 1;
       processedCount += 1;
-      emitProgress("syncing", {
-        totalCount: scannedCount,
-        scannedCount,
-        processedCount,
-        copiedCount,
-        skippedCount,
-        failedCount,
-        photoCount,
-        videoCount,
-        livePhotoPairCount: copiedLivePhotoIds.size,
-        currentPath: relativePath
-      });
+      emitSyncProgress(relativePath);
       const now = Date.now();
       if (now - lastHeartbeatAt >= 5000 || processedCount - lastHeartbeatProcessed >= 500) {
         app.log.info(
@@ -2566,18 +2646,7 @@ async function executeJob(
             "Job sync error"
           );
         }
-        emitProgress("syncing", {
-          totalCount: scannedCount,
-          scannedCount,
-          processedCount,
-          copiedCount,
-          skippedCount,
-          failedCount,
-          photoCount,
-          videoCount,
-          livePhotoPairCount: copiedLivePhotoIds.size,
-          currentPath: relativePath
-        });
+        clearFileProgress(relativePath);
       }
     }
   }
@@ -2618,7 +2687,10 @@ async function executeJob(
     photoCount,
     videoCount,
     livePhotoPairCount: copiedLivePhotoIds.size,
-    currentPath: null
+    currentPath: null,
+    currentFileTotalBytes: null,
+    currentFileCopiedBytes: null,
+    currentFileStage: null
   });
   if (canceled) {
     app.log.warn(
@@ -2679,7 +2751,7 @@ async function syncSingleFileForJob(
 
   await mkdir(path.dirname(destinationFile), { recursive: true });
   if (!sourceStorage.encrypted && !destinationStorage.encrypted) {
-    await copyFile(sourceFile, destinationFile);
+    await copyFileWithProgress(sourceFile, destinationFile);
   } else if (!sourceStorage.encrypted && destinationStorage.encrypted) {
     await encryption.encryptFile(sourceFile, destinationFile);
   } else if (sourceStorage.encrypted && !destinationStorage.encrypted) {
@@ -2858,11 +2930,15 @@ function startJobExecution(jobId: string, trigger: JobRunTrigger): JobExecution 
         current.status = "canceled";
         current.startedAt = new Date().toISOString();
         current.finishedAt = new Date().toISOString();
-        current.progress.phase = "finished";
-        current.progress.percent = 100;
-        current.message = "任务已取消";
-        current.error = null;
-      });
+      current.progress.phase = "finished";
+      current.progress.percent = 100;
+      current.progress.currentPath = null;
+      current.progress.currentFileTotalBytes = null;
+      current.progress.currentFileCopiedBytes = null;
+      current.progress.currentFileStage = null;
+      current.message = "任务已取消";
+      current.error = null;
+    });
       app.log.warn({ event: "job.exec.canceled", executionId: execution.id, jobId, trigger }, "Job execution canceled before start");
       trimJobExecutions();
       return;
@@ -2873,6 +2949,9 @@ function startJobExecution(jobId: string, trigger: JobRunTrigger): JobExecution 
       current.progress.phase = "scanning";
       current.progress.percent = 0;
       current.progress.currentPath = null;
+      current.progress.currentFileTotalBytes = null;
+      current.progress.currentFileCopiedBytes = null;
+      current.progress.currentFileStage = null;
       current.error = null;
       current.message = null;
     });
@@ -2930,7 +3009,10 @@ function startJobExecution(jobId: string, trigger: JobRunTrigger): JobExecution 
           videoCount: run.videoCount,
           livePhotoPairCount: run.livePhotoPairCount,
           percent: run.status === "canceled" ? clampProgressPercent(run.scannedCount ? (processedCount / run.scannedCount) * 100 : 0) : 100,
-          currentPath: null
+          currentPath: null,
+          currentFileTotalBytes: null,
+          currentFileCopiedBytes: null,
+          currentFileStage: null
         };
       });
       void sendTelegramRunSummaryIfEnabled(state, run).catch((error) => {
@@ -2945,6 +3027,10 @@ function startJobExecution(jobId: string, trigger: JobRunTrigger): JobExecution 
         current.error = message;
         current.message = message;
         current.progress.phase = "finished";
+        current.progress.currentPath = null;
+        current.progress.currentFileTotalBytes = null;
+        current.progress.currentFileCopiedBytes = null;
+        current.progress.currentFileStage = null;
       });
       app.log.error({ err: error, executionId: execution.id, jobId }, "Job execution failed");
     } finally {
