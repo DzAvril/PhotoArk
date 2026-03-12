@@ -409,6 +409,7 @@ export function JobDiffPage() {
 
   const handleLeftPaneScroll = useCallback(
     (event: React.UIEvent<HTMLDivElement>) => {
+      leftGrid.handleScroll(event);
       if (syncScrollSourceRef.current === "right") return;
       syncScrollSourceRef.current = "left";
       const { scrollLeft, scrollTop } = event.currentTarget;
@@ -418,11 +419,12 @@ export function JobDiffPage() {
         if (syncScrollSourceRef.current === "left") syncScrollSourceRef.current = null;
       });
     },
-    [rightGrid]
+    [leftGrid, rightGrid]
   );
 
   const handleRightPaneScroll = useCallback(
     (event: React.UIEvent<HTMLDivElement>) => {
+      rightGrid.handleScroll(event);
       if (syncScrollSourceRef.current === "left") return;
       syncScrollSourceRef.current = "right";
       const { scrollLeft, scrollTop } = event.currentTarget;
@@ -432,7 +434,7 @@ export function JobDiffPage() {
         if (syncScrollSourceRef.current === "right") syncScrollSourceRef.current = null;
       });
     },
-    [leftGrid]
+    [leftGrid, rightGrid]
   );
 
   useEffect(() => {

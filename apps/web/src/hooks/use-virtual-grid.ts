@@ -39,11 +39,34 @@ export function useVirtualGrid(options: UseVirtualGridOptions): UseVirtualGridRe
   const totalWidth = useMemo(() => columnCount * columnWidth, [columnCount, columnWidth]);
   const totalHeight = useMemo(() => rowCount * rowHeight, [rowCount, rowHeight]);
 
+  const maxScrollLeft = useMemo(() => Math.max(0, totalWidth - containerWidth), [totalWidth, containerWidth]);
+  const maxScrollTop = useMemo(() => Math.max(0, totalHeight - containerHeight), [totalHeight, containerHeight]);
+
+  useEffect(() => {
+    if (!containerRef.current) return;
+
+    const nextScrollLeft = Math.min(scrollLeft, maxScrollLeft);
+    const nextScrollTop = Math.min(scrollTop, maxScrollTop);
+    if (nextScrollLeft === scrollLeft && nextScrollTop === scrollTop) return;
+
+    if (nextScrollLeft !== scrollLeft) {
+      containerRef.current.scrollLeft = nextScrollLeft;
+      setScrollLeft(nextScrollLeft);
+    }
+    if (nextScrollTop !== scrollTop) {
+      containerRef.current.scrollTop = nextScrollTop;
+      setScrollTop(nextScrollTop);
+    }
+  }, [maxScrollLeft, maxScrollTop, scrollLeft, scrollTop]);
+
   const virtualCells = useMemo(() => {
     if (columnCount === 0 || rowCount === 0) return [];
 
-    const startColumnIndex = Math.max(0, Math.floor(scrollLeft / columnWidth) - overscan);
-    const startRowIndex = Math.max(0, Math.floor(scrollTop / rowHeight) - overscan);
+    const effectiveScrollLeft = Math.min(scrollLeft, maxScrollLeft);
+    const effectiveScrollTop = Math.min(scrollTop, maxScrollTop);
+
+    const startColumnIndex = Math.max(0, Math.floor(effectiveScrollLeft / columnWidth) - overscan);
+    const startRowIndex = Math.max(0, Math.floor(effectiveScrollTop / rowHeight) - overscan);
     
     const visibleColumnCount = Math.ceil(containerWidth / columnWidth);
     const visibleRowCount = Math.ceil(containerHeight / rowHeight);
@@ -68,7 +91,7 @@ export function useVirtualGrid(options: UseVirtualGridOptions): UseVirtualGridRe
       }
     }
     return cells;
-  }, [scrollLeft, scrollTop, columnCount, rowCount, columnWidth, rowHeight, containerWidth, containerHeight, overscan]);
+  }, [scrollLeft, scrollTop, maxScrollLeft, maxScrollTop, columnCount, rowCount, columnWidth, rowHeight, containerWidth, containerHeight, overscan]);
 
   const handleScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
     const target = event.currentTarget;
