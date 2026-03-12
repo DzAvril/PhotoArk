@@ -359,10 +359,23 @@ const JOB_DIFF_MTIME_TOLERANCE_MS = 1_000;
 
 type IndexedMediaFile = {
   relativePath: string;
+  relativePathKey?: string;
   fullPath: string;
   sizeBytes: number;
   mtimeMs: number;
 };
+
+function normalizeRelativePathKey(relativePath: string): string {
+  const normalized = relativePath.replace(/\\/g, "/");
+  const cleaned = path.posix.normalize(normalized).replace(/^(\.\/)+/, "");
+  const stable = cleaned === "." ? "" : cleaned;
+  return stable.normalize("NFC");
+}
+
+function compareRelativePathKeys(a: string, b: string): number {
+  if (a === b) return 0;
+  return a < b ? -1 : 1;
+}
 
 let mediaIndexStore: MediaIndexStore = {
   version: 1,
@@ -1211,7 +1224,9 @@ async function buildJobDiff(
     let relativePath = "";
 
     if (sourceCandidate && destinationCandidate) {
-      const pathCompare = sourceCandidate.relativePath.localeCompare(destinationCandidate.relativePath, "zh-CN");
+      const sourceKey = sourceCandidate.relativePathKey ?? normalizeRelativePathKey(sourceCandidate.relativePath);
+      const destinationKey = destinationCandidate.relativePathKey ?? normalizeRelativePathKey(destinationCandidate.relativePath);
+      const pathCompare = compareRelativePathKeys(sourceKey, destinationKey);
       if (pathCompare === 0) {
         sourceRow = sourceCandidate;
         destinationRow = destinationCandidate;
@@ -1762,11 +1777,12 @@ function buildMediaIndexEntry(rows: IndexedMediaFile[]): MediaIndexRootEntry {
 function rowsFromMediaIndexEntry(rootPath: string, entry: MediaIndexRootEntry): IndexedMediaFile[] {
   const rows = Object.entries(entry.files).map(([relativePath, value]) => ({
     relativePath,
+    relativePathKey: normalizeRelativePathKey(relativePath),
     fullPath: toSystemPathFromPosixRelative(rootPath, relativePath),
     sizeBytes: value.sizeBytes,
     mtimeMs: value.mtimeMs
   }));
-  rows.sort((a, b) => a.relativePath.localeCompare(b.relativePath));
+  rows.sort((a, b) => compareRelativePathKeys(a.relativePathKey ?? a.relativePath, b.relativePathKey ?? b.relativePath));
   return rows;
 }
 
@@ -1795,8 +1811,10 @@ async function scanMediaFilesWithStats(dirPath: string): Promise<IndexedMediaFil
       const rows = await Promise.all(
         batch.map(async (fullPath) => {
           const fileStat = await stat(fullPath).catch(() => null);
+          const relativePath = toPosixPath(path.relative(rootPath, fullPath));
           return {
-            relativePath: toPosixPath(path.relative(rootPath, fullPath)),
+            relativePath,
+            relativePathKey: normalizeRelativePathKey(relativePath),
             fullPath,
             sizeBytes: fileStat?.size ?? 0,
             mtimeMs: fileStat?.mtimeMs ?? 0
@@ -1807,7 +1825,7 @@ async function scanMediaFilesWithStats(dirPath: string): Promise<IndexedMediaFil
     }
   }
 
-  out.sort((a, b) => a.relativePath.localeCompare(b.relativePath));
+  out.sort((a, b) => compareRelativePathKeys(a.relativePathKey ?? a.relativePath, b.relativePathKey ?? b.relativePath));
   return out;
 }
 
