@@ -1427,8 +1427,7 @@ type JobWatcherControl = {
   faulted: boolean;
   lastError: string | null;
   debounceTimer: NodeJS.Timeout | null;
-  pendingPath: string | null;
-  pendingReason: string | null;
+  pendingChanges: Map<string, string>;
   pendingSinceMs: number | null;
 };
 
@@ -2013,6 +2012,7 @@ type JobExecutionProgressUpdate = {
 type ExecuteJobProgressHandler = (progress: JobExecutionProgressUpdate) => void;
 type ExecuteJobOptions = {
   shouldCancel?: () => boolean;
+  watchChanges?: WatchChange[];
 };
 
 function clampProgressPercent(value: number): number {
@@ -2226,8 +2226,67 @@ async function executeJob(
   }).catch(() => {});
   // #endregion
 
-  const sourceFiles = await collectMediaFiles(sourceRoot);
-  const relativePaths = sourceFiles.map((fullPath) => toPosixPath(path.relative(sourceRoot, fullPath)));
+  let sourceFiles: string[] = [];
+  let relativePaths: string[] = [];
+  if (trigger === "watch" && options?.watchChanges?.length) {
+    const targets = new Set<string>();
+    for (const change of options.watchChanges) {
+      if (change.reason === "add_dir") {
+        const dirStat = await stat(change.path).catch(() => null);
+        if (!dirStat?.isDirectory()) {
+          continue;
+        }
+        const dirFiles = await collectMediaFiles(change.path).catch(() => []);
+        for (const filePath of dirFiles) {
+          const relNative = path.relative(sourceRoot, filePath);
+          if (!relNative || relNative.startsWith("..") || path.isAbsolute(relNative)) {
+            continue;
+          }
+          targets.add(toPosixPath(relNative));
+        }
+        continue;
+      }
+
+      if (!isMediaFile(path.basename(change.path))) {
+        continue;
+      }
+      const relNative = path.relative(sourceRoot, change.path);
+      if (!relNative || relNative.startsWith("..") || path.isAbsolute(relNative)) {
+        continue;
+      }
+      targets.add(toPosixPath(relNative));
+    }
+
+    const imageExts = [".jpg", ".jpeg", ".heic"];
+    for (const relPath of [...targets]) {
+      const ext = path.extname(relPath).toLowerCase();
+      const basePath = relPath.slice(0, relPath.length - ext.length);
+      if (imageExts.includes(ext)) {
+        const candidate = `${basePath}.mov`;
+        const exists = await stat(toSystemPathFromPosixRelative(sourceRoot, candidate))
+          .then((row) => row.isFile())
+          .catch(() => false);
+        if (exists) targets.add(candidate);
+      } else if (ext === ".mov") {
+        for (const candidateExt of imageExts) {
+          const candidate = `${basePath}${candidateExt}`;
+          const exists = await stat(toSystemPathFromPosixRelative(sourceRoot, candidate))
+            .then((row) => row.isFile())
+            .catch(() => false);
+          if (exists) {
+            targets.add(candidate);
+            break;
+          }
+        }
+      }
+    }
+
+    relativePaths = [...targets].sort((a, b) => a.localeCompare(b));
+    sourceFiles = relativePaths.map((relPath) => toSystemPathFromPosixRelative(sourceRoot, relPath));
+  } else {
+    sourceFiles = await collectMediaFiles(sourceRoot);
+    relativePaths = sourceFiles.map((fullPath) => toPosixPath(path.relative(sourceRoot, fullPath)));
+  }
   const livePhotoMap = buildLivePhotoIdByRelativePath(relativePaths);
   const scanTookMs = Date.now() - scanStartedMs;
   app.log.info(
@@ -2302,7 +2361,30 @@ async function executeJob(
       const relativePath = relativePaths[i];
       const destinationFile = path.join(destinationRoot, relativePath);
       try {
-        const sourceStat = await stat(sourceFile);
+        let sourceStat: Awaited<ReturnType<typeof stat>>;
+        if (trigger === "watch") {
+          const nextStat = await stat(sourceFile).catch(() => null);
+          if (!nextStat?.isFile()) {
+            skippedCount += 1;
+            processedCount += 1;
+            emitProgress("syncing", {
+              totalCount: scannedCount,
+              scannedCount,
+              processedCount,
+              copiedCount,
+              skippedCount,
+              failedCount,
+              photoCount,
+              videoCount,
+              livePhotoPairCount: copiedLivePhotoIds.size,
+              currentPath: relativePath
+            });
+            continue;
+          }
+          sourceStat = nextStat;
+        } else {
+          sourceStat = await stat(sourceFile);
+        }
       const sourceCapturedAt = sourceStat.mtime.toISOString();
       const livePhotoAssetId = livePhotoMap.get(relativePath);
       const nextKind = detectAssetKind(relativePath, livePhotoAssetId);
@@ -2754,10 +2836,10 @@ async function sendTelegramRunSummaryIfEnabled(state: BackupState, run: JobRun):
   await telegram.send(buildRunTelegramSummary(state, run));
 }
 
-async function executeJobAndPersist(jobId: string, trigger: JobRunTrigger): Promise<JobRun> {
+async function executeJobAndPersist(jobId: string, trigger: JobRunTrigger, options?: ExecuteJobOptions): Promise<JobRun> {
   return enqueueRunExecution(async () => {
     const state = await stateRepo.loadState();
-    const run = await executeJob(state, jobId, trigger);
+    const run = await executeJob(state, jobId, trigger, undefined, options);
     await stateRepo.saveState(state);
     void sendTelegramRunSummaryIfEnabled(state, run).catch((error) => {
       app.log.error({ err: error, runId: run.id, jobId: run.jobId }, "Failed to send Telegram backup summary");
@@ -2933,8 +3015,7 @@ async function stopJobWatcher(jobId: string) {
     clearTimeout(control.debounceTimer);
     control.debounceTimer = null;
   }
-  control.pendingPath = null;
-  control.pendingReason = null;
+  control.pendingChanges.clear();
   control.pendingSinceMs = null;
   queuedWatchJobs.delete(jobId);
   runningWatchJobs.delete(jobId);
@@ -2942,21 +3023,29 @@ async function stopJobWatcher(jobId: string) {
   jobWatchers.delete(jobId);
 }
 
-async function runWatchedJob(jobId: string, reason: string, changedPath?: string) {
+type WatchChange = { path: string; reason: string };
+
+async function runWatchedJob(jobId: string, reason: string, changes: WatchChange[]) {
   if (runningWatchJobs.has(jobId)) {
+    const control = jobWatchers.get(jobId);
+    if (control) {
+      for (const change of changes) {
+        control.pendingChanges.set(change.path, change.reason);
+      }
+    }
     queuedWatchJobs.add(jobId);
     return;
   }
 
   runningWatchJobs.add(jobId);
   try {
-    const run = await executeJobAndPersist(jobId, "watch");
+    const run = await executeJobAndPersist(jobId, "watch", { watchChanges: changes });
     app.log.info(
       {
         jobId,
         runId: run.id,
         reason,
-        changedPath,
+        changeCount: changes.length,
         copiedCount: run.copiedCount,
         failedCount: run.failedCount
       },
@@ -2967,7 +3056,7 @@ async function runWatchedJob(jobId: string, reason: string, changedPath?: string
       {
         jobId,
         reason,
-        changedPath,
+        changeCount: changes.length,
         err: error
       },
       "Watch mode backup run failed"
@@ -2975,7 +3064,15 @@ async function runWatchedJob(jobId: string, reason: string, changedPath?: string
   } finally {
     runningWatchJobs.delete(jobId);
     if (queuedWatchJobs.delete(jobId)) {
-      void runWatchedJob(jobId, "queued");
+      const control = jobWatchers.get(jobId);
+      const queuedChanges = control ? [...control.pendingChanges.entries()].map(([path, nextReason]) => ({ path, reason: nextReason })) : [];
+      if (control) {
+        control.pendingChanges.clear();
+        control.pendingSinceMs = null;
+      }
+      if (queuedChanges.length) {
+        void runWatchedJob(jobId, "queued", queuedChanges);
+      }
     }
   }
 }
@@ -2991,8 +3088,7 @@ function scheduleWatchedJob(jobId: string, reason: string, changedPath: string) 
     control.pendingSinceMs = now;
   }
   const { settleDelayMs, maxWaitMs } = resolveWatchBatchWindowMs();
-  control.pendingPath = changedPath;
-  control.pendingReason = reason;
+  control.pendingChanges.set(changedPath, reason);
   if (control.debounceTimer) {
     clearTimeout(control.debounceTimer);
   }
@@ -3001,12 +3097,13 @@ function scheduleWatchedJob(jobId: string, reason: string, changedPath: string) 
   const delayMs = Math.min(settleDelayMs, remainingMaxWaitMs);
   const flush = () => {
     control.debounceTimer = null;
-    const pendingPath = control.pendingPath ?? undefined;
-    const pendingReason = control.pendingReason ?? reason;
-    control.pendingPath = null;
-    control.pendingReason = null;
+    const changes = [...control.pendingChanges.entries()].map(([path, nextReason]) => ({ path, reason: nextReason }));
+    control.pendingChanges.clear();
     control.pendingSinceMs = null;
-    void runWatchedJob(jobId, pendingReason, pendingPath);
+    if (!changes.length) {
+      return;
+    }
+    void runWatchedJob(jobId, "batched", changes);
   };
 
   if (delayMs <= 0) {
@@ -3040,14 +3137,18 @@ async function createJobWatcher(job: BackupJob, sourceRoot: string, usePolling: 
 
   watcher.on("add", (watchPath) => onMediaChange(watchPath, "add"));
   watcher.on("change", (watchPath) => onMediaChange(watchPath, "change"));
-  watcher.on("unlink", (watchPath) => onMediaChange(watchPath, "unlink"));
+  watcher.on("unlink", (watchPath) => {
+    if (!isMediaFile(path.basename(watchPath))) {
+      return;
+    }
+    void invalidateMediaIndexPath(sourceRoot).catch(() => undefined);
+  });
   watcher.on("addDir", (watchPath) => {
     void invalidateMediaIndexPath(sourceRoot).catch(() => undefined);
     scheduleWatchedJob(job.id, "add_dir", watchPath);
   });
   watcher.on("unlinkDir", (watchPath) => {
     void invalidateMediaIndexPath(sourceRoot).catch(() => undefined);
-    scheduleWatchedJob(job.id, "unlink_dir", watchPath);
   });
   watcher.on("error", (error) => {
     const control = jobWatchers.get(job.id);
@@ -3079,8 +3180,7 @@ async function createJobWatcher(job: BackupJob, sourceRoot: string, usePolling: 
     faulted: false,
     lastError: null,
     debounceTimer: null,
-    pendingPath: null,
-    pendingReason: null,
+    pendingChanges: new Map<string, string>(),
     pendingSinceMs: null
   };
 }
