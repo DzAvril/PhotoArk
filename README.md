@@ -46,7 +46,7 @@ cp .env.example .env
 - `WATCH_USE_POLLING`：是否强制轮询监听（默认 `false`，macOS/普通 Linux 推荐）
 - `WATCH_POLLING_INTERVAL_MS`：轮询间隔毫秒（默认 `1000`）
 - `WATCH_RECONCILE_INTERVAL_MS`：监听器自愈重建间隔毫秒（默认 `30000`）
-- `WATCH_SETTLE_DELAY_MS`：监听到变更后静默多久再触发同步（默认 `120000`，即 2 分钟）
+- `WATCH_SETTLE_DELAY_MS`：监听到变更后静默多久再触发同步（默认 `5000`，即 5 秒）
 - `WATCH_BATCH_MAX_WAIT_MS`：单个变更批次最长等待多久必须触发（默认 `600000`，即 10 分钟）
 - `AUTH_SESSION_TTL_HOURS`：登录会话有效期（小时，默认 `168`，即 7 天）
 
@@ -147,11 +147,11 @@ docker compose up -d --build app
 
 ## API 持久化状态
 - 当前 API 使用文件持久化（便于本地调试）：
-  - 状态文件默认：`/Users/xuzhi/Documents/workspace/new_project/apps/api/data/backup-state.json`
+  - 状态文件默认：`./apps/api/data/backup-state.json`
   - 可通过环境变量 `BACKUP_STATE_FILE` 覆盖
 - WebUI 本地目录下拉浏览范围可通过 `FS_BROWSE_ROOT` 限制（默认 `/`）
 - 版本检查相关环境变量：
-  - `APP_VERSION`：当前代码版本（默认 `0.1.10`）
+  - `APP_VERSION`：当前代码版本（默认 `0.1.27`）
   - `VERSION_CHECK_REPO`：用于检查最新版本的 GitHub 仓库（默认 `DzAvril/PhotoArk`）
   - `VERSION_CHECK_TIMEOUT_MS`：版本检查超时毫秒数（默认 `3500`）
   - `GITHUB_TOKEN`：可选，GitHub API 访问令牌（用于提高版本查询稳定性）
