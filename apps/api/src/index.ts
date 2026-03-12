@@ -1258,11 +1258,21 @@ async function buildJobDiff(
   const sourceKeyToPath = new Map<string, string>();
   const sourceLowerKeyToPath = new Map<string, string>();
   const sourceNfdKeyToPath = new Map<string, string>();
+  const sourceBaseKeyToPaths = new Map<string, string[]>();
   for (const row of sourceRows) {
     const key = row.relativePathKey ?? normalizeRelativePathKey(row.relativePath);
     sourceKeyToPath.set(key, row.relativePath);
     sourceLowerKeyToPath.set(key.toLowerCase(), row.relativePath);
     sourceNfdKeyToPath.set(key.normalize("NFD"), row.relativePath);
+
+    const ext = path.posix.extname(row.relativePath);
+    const baseNoExt = ext ? row.relativePath.slice(0, row.relativePath.length - ext.length) : row.relativePath;
+    const baseKey = normalizeRelativePathKey(baseNoExt).toLowerCase();
+    const bucket = sourceBaseKeyToPaths.get(baseKey) ?? [];
+    if (bucket.length < 10) {
+      bucket.push(row.relativePath);
+      sourceBaseKeyToPaths.set(baseKey, bucket);
+    }
   }
   const destinationOnlySamples: Array<Record<string, unknown>> = [];
   // #endregion debug-point
@@ -1323,6 +1333,12 @@ async function buildJobDiff(
       // #region debug-point
       if (destinationOnlySamples.length < 30) {
         const destKey = destinationRow.relativePathKey ?? normalizeRelativePathKey(destinationRow.relativePath);
+        const destExt = path.posix.extname(destinationRow.relativePath);
+        const destBaseNoExt = destExt
+          ? destinationRow.relativePath.slice(0, destinationRow.relativePath.length - destExt.length)
+          : destinationRow.relativePath;
+        const destBaseKey = normalizeRelativePathKey(destBaseNoExt).toLowerCase();
+        const baseCandidates = sourceBaseKeyToPaths.get(destBaseKey) ?? [];
         const lowerMatch = sourceLowerKeyToPath.get(destKey.toLowerCase()) ?? null;
         const nfdMatch = sourceNfdKeyToPath.get(destKey.normalize("NFD")) ?? null;
         const expectedSourcePath = toSystemPathFromPosixRelative(sourceRoot, destinationRow.relativePath);
@@ -1332,6 +1348,9 @@ async function buildJobDiff(
         destinationOnlySamples.push({
           relativePath: destinationRow.relativePath,
           destKey,
+          destBaseNoExt,
+          sourceBaseKeyHit: baseCandidates.length > 0,
+          sourceBaseCandidates: baseCandidates.slice(0, 5),
           sourceExactKeyHit: sourceKeyToPath.has(destKey),
           sourceLowerKeyHit: Boolean(lowerMatch),
           sourceLowerKeyPath: lowerMatch,
