@@ -274,7 +274,7 @@ export function getJobs() {
 export function getJobDiff(
   jobId: string,
   query?: {
-    status?: "all" | "source_only" | "destination_only" | "changed" | "same";
+    status?: "all" | "diff" | "source_only" | "destination_only" | "changed" | "same";
     kind?: "all" | "image" | "video";
     keyword?: string;
     page?: number;

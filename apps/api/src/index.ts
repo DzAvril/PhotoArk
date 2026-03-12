@@ -167,7 +167,7 @@ const mediaIndexRebuildSchema = z.object({
 });
 
 const jobDiffQuerySchema = z.object({
-  status: z.enum(["all", "source_only", "destination_only", "changed", "same"]).optional(),
+  status: z.enum(["all", "diff", "source_only", "destination_only", "changed", "same"]).optional(),
   kind: z.enum(["all", "image", "video"]).optional(),
   keyword: z.string().optional(),
   page: z.coerce.number().int().min(1).optional(),
@@ -1155,7 +1155,7 @@ async function buildJobDiff(
   state: BackupState,
   jobId: string,
   options: {
-    statusFilter: "all" | JobDiffStatus;
+    statusFilter: "all" | "diff" | JobDiffStatus;
     kindFilter: "all" | JobDiffKind;
     keyword: string;
     page: number;
@@ -1205,7 +1205,11 @@ async function buildJobDiff(
   };
 
   const matchFilters = (item: { status: JobDiffStatus; kind: JobDiffKind; relativePath: string }) => {
-    if (options.statusFilter !== "all" && item.status !== options.statusFilter) return false;
+    if (options.statusFilter === "diff") {
+      if (item.status === "same") return false;
+    } else if (options.statusFilter !== "all" && item.status !== options.statusFilter) {
+      return false;
+    }
     if (options.kindFilter !== "all" && item.kind !== options.kindFilter) return false;
     if (normalizedKeyword && !item.relativePath.toLowerCase().includes(normalizedKeyword)) return false;
     return true;
@@ -3716,7 +3720,7 @@ app.get("/api/jobs", async () => {
 app.get<{
   Params: { jobId: string };
   Querystring: {
-    status?: "all" | "source_only" | "destination_only" | "changed" | "same";
+    status?: "all" | "diff" | "source_only" | "destination_only" | "changed" | "same";
     kind?: "all" | "image" | "video";
     keyword?: string;
     page?: string;

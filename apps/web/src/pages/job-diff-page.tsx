@@ -152,7 +152,6 @@ export function JobDiffPage() {
   const [storages, setStorages] = useState<StorageTarget[]>([]);
   const [selectedJobId, setSelectedJobId] = useState("");
   const [kindFilter, setKindFilter] = useState<"all" | JobDiffKind>("all");
-  const [hideSame, setHideSame] = useState(true);
   const [result, setResult] = useState<JobDiffResult | null>(null);
   const [diffItems, setDiffItems] = useState<JobDiffItem[]>([]);
   const [diffPage, setDiffPage] = useState(1);
@@ -201,10 +200,8 @@ export function JobDiffPage() {
   );
 
   const displayItems = useMemo(() => {
-    const rows = diffItems;
-    if (!hideSame) return rows;
-    return rows.filter((item) => item.status !== "same");
-  }, [diffItems, hideSame]);
+    return diffItems.filter((item) => item.status !== "same");
+  }, [diffItems]);
 
   const displayItemById = useMemo(() => new Map(displayItems.map((item) => [item.id, item])), [displayItems]);
   const squareSizePx = useMemo(() => getSquareSizePx(displayItems.length), [displayItems.length]);
@@ -246,7 +243,7 @@ export function JobDiffPage() {
 
       try {
         const res = await getJobDiff(selectedJobId, {
-          status: "all",
+          status: "diff",
           kind: kindFilter,
           refresh: forceRefresh,
           page: 1,
@@ -283,7 +280,7 @@ export function JobDiffPage() {
     try {
       const nextPage = diffPage + 1;
       const res = await getJobDiff(selectedJobId, {
-        status: "all",
+        status: "diff",
         kind: kindFilter,
         page: nextPage,
         pageSize: DIFF_PAGE_SIZE
@@ -438,6 +435,7 @@ export function JobDiffPage() {
   );
 
   useEffect(() => {
+    if (displayItems.length === 0) return;
     const visibleStopIndex = Math.floor((leftGrid.scrollTop + containerSize.height) / cellSize) * columnCount + columnCount;
     if (hasMoreDiff && !loadingMoreDiff && visibleStopIndex >= displayItems.length - 50) {
       void loadMoreDiff();
@@ -654,13 +652,6 @@ export function JobDiffPage() {
           </div>
 
           <div className="mt-2 flex flex-col gap-2 sm:flex-row">
-            <button
-              type="button"
-              className={`mp-btn ${hideSame ? "mp-btn-primary" : ""}`}
-              onClick={() => setHideSame((prev) => !prev)}
-            >
-              {hideSame ? "显示相同项" : "隐藏相同项"}
-            </button>
             {result ? (
               <div className="flex flex-wrap items-center gap-2">
                 <span className="inline-flex items-center rounded-full border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] px-3 py-2 text-sm mp-muted">
