@@ -357,28 +357,6 @@ const MEDIA_INDEX_SAVE_DEBOUNCE_MS = 1_200;
 const MEDIA_INDEX_STAT_CONCURRENCY = 32;
 const JOB_DIFF_MTIME_TOLERANCE_MS = 1_000;
 
-// #region debug-point
-const TRAE_DEBUG_SERVER_URL = process.env.TRAE_DEBUG_SERVER_URL ?? "http://127.0.0.1:7777/event";
-const TRAE_DEBUG_RUN_ID = process.env.TRAE_DEBUG_RUN_ID ?? "pre-fix";
-async function traeDebugEvent(event: string, payload: Record<string, unknown>) {
-  try {
-    app.log.info({ event, runId: TRAE_DEBUG_RUN_ID, ...payload }, "TRAE debug");
-  } catch {
-    // ignore
-  }
-  if (!TRAE_DEBUG_SERVER_URL) return;
-  try {
-    await fetch(TRAE_DEBUG_SERVER_URL, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ ts: new Date().toISOString(), runId: TRAE_DEBUG_RUN_ID, event, ...payload })
-    });
-  } catch {
-    return;
-  }
-}
-// #endregion debug-point
-
 type IndexedMediaFile = {
   relativePath: string;
   relativePathKey?: string;
@@ -1207,19 +1185,6 @@ async function buildJobDiff(
     collectIndexedMediaFiles(sourceRoot, options.forceRefresh),
     collectIndexedMediaFiles(destinationRoot, options.forceRefresh)
   ]);
-
-  // #region debug-point
-  void traeDebugEvent("job.diff.index.stats", {
-    jobId,
-    sourceRoot,
-    destinationRoot,
-    sourceCount: sourceRows.length,
-    destinationCount: destinationRows.length,
-    statusFilter: options.statusFilter,
-    kindFilter: options.kindFilter,
-    keyword: options.keyword
-  });
-  // #endregion debug-point
   const assetSizeByStorageAndPath = new Map<string, number>();
   for (const asset of state.assets) {
     assetSizeByStorageAndPath.set(`${asset.storageTargetId}::${asset.name}`, asset.sizeBytes);
@@ -1253,29 +1218,6 @@ async function buildJobDiff(
   let sourceIndex = 0;
   let destinationIndex = 0;
   let comparedCount = 0;
-
-  // #region debug-point
-  const sourceKeyToPath = new Map<string, string>();
-  const sourceLowerKeyToPath = new Map<string, string>();
-  const sourceNfdKeyToPath = new Map<string, string>();
-  const sourceBaseKeyToPaths = new Map<string, string[]>();
-  for (const row of sourceRows) {
-    const key = row.relativePathKey ?? normalizeRelativePathKey(row.relativePath);
-    sourceKeyToPath.set(key, row.relativePath);
-    sourceLowerKeyToPath.set(key.toLowerCase(), row.relativePath);
-    sourceNfdKeyToPath.set(key.normalize("NFD"), row.relativePath);
-
-    const ext = path.posix.extname(row.relativePath);
-    const baseNoExt = ext ? row.relativePath.slice(0, row.relativePath.length - ext.length) : row.relativePath;
-    const baseKey = normalizeRelativePathKey(baseNoExt).toLowerCase();
-    const bucket = sourceBaseKeyToPaths.get(baseKey) ?? [];
-    if (bucket.length < 10) {
-      bucket.push(row.relativePath);
-      sourceBaseKeyToPaths.set(baseKey, bucket);
-    }
-  }
-  const destinationOnlySamples: Array<Record<string, unknown>> = [];
-  // #endregion debug-point
 
   while (sourceIndex < sourceRows.length || destinationIndex < destinationRows.length) {
     const sourceCandidate = sourceRows[sourceIndex];
@@ -1329,37 +1271,6 @@ async function buildJobDiff(
       status = "destination_only";
       summary.destinationOnlyCount += 1;
       summary.destinationOnlyBytes += destinationRow.sizeBytes;
-
-      // #region debug-point
-      if (destinationOnlySamples.length < 30) {
-        const destKey = destinationRow.relativePathKey ?? normalizeRelativePathKey(destinationRow.relativePath);
-        const destExt = path.posix.extname(destinationRow.relativePath);
-        const destBaseNoExt = destExt
-          ? destinationRow.relativePath.slice(0, destinationRow.relativePath.length - destExt.length)
-          : destinationRow.relativePath;
-        const destBaseKey = normalizeRelativePathKey(destBaseNoExt).toLowerCase();
-        const baseCandidates = sourceBaseKeyToPaths.get(destBaseKey) ?? [];
-        const lowerMatch = sourceLowerKeyToPath.get(destKey.toLowerCase()) ?? null;
-        const nfdMatch = sourceNfdKeyToPath.get(destKey.normalize("NFD")) ?? null;
-        const expectedSourcePath = toSystemPathFromPosixRelative(sourceRoot, destinationRow.relativePath);
-        const statOk = await stat(expectedSourcePath)
-          .then((s) => (s.isFile() ? true : false))
-          .catch((e: unknown) => ({ error: (e as { code?: string })?.code ?? "unknown" }));
-        destinationOnlySamples.push({
-          relativePath: destinationRow.relativePath,
-          destKey,
-          destBaseNoExt,
-          sourceBaseKeyHit: baseCandidates.length > 0,
-          sourceBaseCandidates: baseCandidates.slice(0, 5),
-          sourceExactKeyHit: sourceKeyToPath.has(destKey),
-          sourceLowerKeyHit: Boolean(lowerMatch),
-          sourceLowerKeyPath: lowerMatch,
-          sourceNfdKeyHit: Boolean(nfdMatch),
-          sourceNfdKeyPath: nfdMatch,
-          sourceStatAtSamePath: statOk
-        });
-      }
-      // #endregion debug-point
     } else if (sourceRow && destinationRow) {
       const sourceSize = resolveComparableSize(sourceStorage, relativePath, sourceRow.sizeBytes);
       const destinationSize = resolveComparableSize(destinationStorage, relativePath, destinationRow.sizeBytes);
@@ -1410,15 +1321,6 @@ async function buildJobDiff(
 
   summary.totalComparedCount = comparedCount;
   summary.totalDiffCount = summary.sourceOnlyCount + summary.destinationOnlyCount + summary.changedCount;
-
-  // #region debug-point
-  void traeDebugEvent("job.diff.destination_only.samples", {
-    jobId,
-    destinationOnlyCount: summary.destinationOnlyCount,
-    sampleCount: destinationOnlySamples.length,
-    samples: destinationOnlySamples
-  });
-  // #endregion debug-point
   const filteredItems = statusBuckets.source_only
     .concat(statusBuckets.changed)
     .concat(statusBuckets.destination_only)
@@ -1893,13 +1795,6 @@ async function scanMediaFilesWithStats(dirPath: string): Promise<IndexedMediaFil
   const out: IndexedMediaFile[] = [];
   const dirQueue: string[] = [rootPath];
 
-  // #region debug-point
-  const scanStartedMs = Date.now();
-  const statErrorCounts = new Map<string, number>();
-  const bumpStatError = (code: string) => statErrorCounts.set(code, (statErrorCounts.get(code) ?? 0) + 1);
-  let unknownEntryCount = 0;
-  // #endregion debug-point
-
   while (dirQueue.length > 0) {
     const currentPath = dirQueue.pop();
     if (!currentPath) continue;
@@ -1920,18 +1815,12 @@ async function scanMediaFilesWithStats(dirPath: string): Promise<IndexedMediaFil
       }
     }
 
-    // #region debug-point
-    unknownEntryCount += unknownEntries.length;
-    // #endregion debug-point
 
     for (let idx = 0; idx < unknownEntries.length; idx += MEDIA_INDEX_STAT_CONCURRENCY) {
       const batch = unknownEntries.slice(idx, idx + MEDIA_INDEX_STAT_CONCURRENCY);
       const rows = await Promise.all(
         batch.map(async ({ fullPath, name }) => {
-          const fileStat = await stat(fullPath).catch((e: unknown) => {
-            bumpStatError(((e as { code?: string })?.code ?? "unknown").toString());
-            return null;
-          });
+          const fileStat = await stat(fullPath).catch(() => null);
           return { fullPath, name, fileStat };
         })
       );
@@ -1949,10 +1838,7 @@ async function scanMediaFilesWithStats(dirPath: string): Promise<IndexedMediaFil
       const batch = mediaFilesInDir.slice(idx, idx + MEDIA_INDEX_STAT_CONCURRENCY);
       const rows = await Promise.all(
         batch.map(async (fullPath) => {
-          const fileStat = await stat(fullPath).catch((e: unknown) => {
-            bumpStatError(((e as { code?: string })?.code ?? "unknown").toString());
-            return null;
-          });
+          const fileStat = await stat(fullPath).catch(() => null);
           const relativePath = toPosixPath(path.relative(rootPath, fullPath));
           return {
             relativePath,
@@ -1967,15 +1853,6 @@ async function scanMediaFilesWithStats(dirPath: string): Promise<IndexedMediaFil
     }
   }
 
-  // #region debug-point
-  void traeDebugEvent("media.index.scan.stats", {
-    rootPath,
-    fileCount: out.length,
-    unknownEntryCount,
-    statErrors: Object.fromEntries(statErrorCounts.entries()),
-    tookMs: Date.now() - scanStartedMs
-  });
-  // #endregion debug-point
 
   out.sort((a, b) => compareRelativePathKeys(a.relativePathKey ?? a.relativePath, b.relativePathKey ?? b.relativePath));
   return out;
