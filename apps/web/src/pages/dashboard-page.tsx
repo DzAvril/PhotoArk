@@ -58,6 +58,7 @@ const RELATION_GRAPH_PADDING_X = 148;
 const RELATION_GRAPH_PADDING_Y = 114;
 const DASHBOARD_CACHE_TTL_MS = 60_000;
 const DASHBOARD_ACTIVITY_CACHE_TTL_MS = 120_000;
+const DASHBOARD_ACTIVITY_CACHE_MAX_YEARS = 3;
 
 type SourceActivityCacheEntry = {
   data: SourceMediaActivity;
@@ -89,6 +90,29 @@ const dashboardCache: DashboardCache = {
   selectedActivityYear: new Date().getFullYear(),
   sourceActivityByYear: new Map()
 };
+
+function pruneActivityCache(): void {
+  if (dashboardCache.sourceActivityByYear.size <= DASHBOARD_ACTIVITY_CACHE_MAX_YEARS) return;
+  const sorted = [...dashboardCache.sourceActivityByYear.entries()].sort((a, b) => b[1].updatedAt - a[1].updatedAt);
+  const keep = new Set(sorted.slice(0, DASHBOARD_ACTIVITY_CACHE_MAX_YEARS).map(([year]) => year));
+  for (const year of dashboardCache.sourceActivityByYear.keys()) {
+    if (!keep.has(year)) {
+      dashboardCache.sourceActivityByYear.delete(year);
+    }
+  }
+}
+
+function getExecutionsFingerprint(items: JobExecution[]): string {
+  if (!items.length) return "0|0|0";
+  let latest = 0;
+  let active = 0;
+  for (const execution of items) {
+    const ts = Date.parse(execution.updatedAt);
+    if (ts > latest) latest = ts;
+    if (isExecutionActive(execution)) active += 1;
+  }
+  return `${items.length}|${active}|${latest}`;
+}
 
 function toPercent(value: number): number {
   return Number(value.toFixed(1));
@@ -744,6 +768,7 @@ export function DashboardPage() {
 
   const hadActiveExecutionRef = useRef(false);
   const executionPollTimerRef = useRef<number | null>(null);
+  const executionFingerprintRef = useRef<string>(getExecutionsFingerprint(dashboardCache.executions));
 
   function handleSelectActivityYear(year: number) {
     dashboardCache.selectedActivityYear = year;
@@ -806,6 +831,7 @@ export function DashboardPage() {
     if (executionsRes.status === "fulfilled") {
       setExecutions(executionsRes.value.items);
       dashboardCache.executions = executionsRes.value.items;
+      executionFingerprintRef.current = getExecutionsFingerprint(executionsRes.value.items);
       hasSuccess = true;
     } else {
       failures.push("任务进度");
@@ -848,6 +874,7 @@ export function DashboardPage() {
         if (canceled) return;
         setSourceActivity(res);
         dashboardCache.sourceActivityByYear.set(res.year, { data: res, updatedAt: Date.now() });
+        pruneActivityCache();
         dashboardCache.selectedActivityYear = res.year;
         if (res.year !== selectedActivityYear) {
           setSelectedActivityYear(res.year);
@@ -915,8 +942,12 @@ export function DashboardPage() {
       try {
         const executionsRes = await getJobExecutions();
         if (disposed) return;
-        setExecutions(executionsRes.items);
-        dashboardCache.executions = executionsRes.items;
+        const nextFingerprint = getExecutionsFingerprint(executionsRes.items);
+        if (nextFingerprint !== executionFingerprintRef.current) {
+          executionFingerprintRef.current = nextFingerprint;
+          setExecutions(executionsRes.items);
+          dashboardCache.executions = executionsRes.items;
+        }
         const hasActive = executionsRes.items.some((execution) => isExecutionActive(execution));
         scheduleNextPoll(hasActive ? 1200 : 8000);
       } catch {

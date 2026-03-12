@@ -8,6 +8,8 @@ export type JobDiffCache = {
   page: number;
   hasMore: boolean;
   scrollTop: number;
+  cachedAt?: number;
+  isPartial?: boolean;
 };
 
 export type MediaBrowserCache = {

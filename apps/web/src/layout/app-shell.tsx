@@ -1,4 +1,4 @@
-import { AnimatePresence, motion } from "framer-motion";
+import { motion, useAnimation } from "framer-motion";
 import type { ComponentType } from "react";
 import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
@@ -66,6 +66,7 @@ export function AppShell({ authUser, onLogout }: AppShellProps) {
   const [loggingOut, setLoggingOut] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const pageTransitionControls = useAnimation();
   const location = useLocation();
   const pathname = normalizePathname(location.pathname);
   const pageMeta = getPageMeta(pathname);
@@ -107,6 +108,15 @@ export function AppShell({ authUser, onLogout }: AppShellProps) {
       document.removeEventListener("keydown", handleKeydown);
     };
   }, [menuOpen]);
+
+  useEffect(() => {
+    pageTransitionControls.set({ opacity: 0, y: 8 });
+    void pageTransitionControls.start({
+      opacity: 1,
+      y: 0,
+      transition: { duration: 0.22, ease: "easeOut" },
+    });
+  }, [pageTransitionControls, pathname]);
 
   function toggleTheme() {
     const next: ThemeMode = theme === "light" ? "dark" : "light";
@@ -264,18 +274,9 @@ export function AppShell({ authUser, onLogout }: AppShellProps) {
 
             </motion.header>
 
-            <AnimatePresence mode="wait">
-              <motion.div
-                className="min-h-0 flex-1"
-                key={location.pathname}
-                initial={{ opacity: 0, y: 12 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -8 }}
-                transition={{ duration: 0.22, ease: "easeOut" }}
-              >
-                <Outlet />
-              </motion.div>
-            </AnimatePresence>
+            <motion.div className="min-h-0 flex-1" animate={pageTransitionControls} initial={false}>
+              <Outlet />
+            </motion.div>
           </section>
         </div>
       </div>

@@ -1,10 +1,54 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { browseStorageMedia } from "../../lib/api";
 import type { MediaBrowseResult, StorageTarget } from "../../types/api";
-import type { MediaKindFilter } from "./media-types";
+import type { LivePhotoPair, MediaKindFilter } from "./media-types";
 import { buildDisplayItems, buildMediaSummary, detectLivePhotoPairs } from "./media-utils";
 
 const MAX_CACHED_ITEMS = 2000;
+const MEDIA_CACHE_TTL_MS = 5 * 60 * 1000;
+const MEDIA_CACHE_MAX_ENTRIES = 2;
+const MEDIA_CACHE_INACTIVE_KEEP = 600;
+
+type MediaCacheEntry = {
+  updatedAt: number;
+  media: MediaBrowseResult;
+  livePhotoCache: Map<string, LivePhotoPair>;
+  cachedPaths: Set<string>;
+};
+
+const mediaCache = new Map<string, MediaCacheEntry>();
+
+function getMediaCacheKey(storage: StorageTarget): string {
+  return `${storage.id}:${storage.basePath}`;
+}
+
+function pruneMediaCache(now: number): void {
+  for (const [key, entry] of mediaCache.entries()) {
+    if (now - entry.updatedAt > MEDIA_CACHE_TTL_MS) {
+      mediaCache.delete(key);
+    }
+  }
+
+  if (mediaCache.size <= MEDIA_CACHE_MAX_ENTRIES) return;
+
+  const sorted = [...mediaCache.entries()].sort((a, b) => a[1].updatedAt - b[1].updatedAt);
+  const overflow = sorted.length - MEDIA_CACHE_MAX_ENTRIES;
+  for (let i = 0; i < overflow; i++) {
+    mediaCache.delete(sorted[i][0]);
+  }
+}
+
+function trimMediaCacheEntry(entry: MediaCacheEntry, keepCount: number): void {
+  if (entry.media.files.length <= keepCount) return;
+  const trimmedFiles = entry.media.files.slice(-keepCount);
+  const removedPaths = new Set(entry.media.files.slice(0, entry.media.files.length - keepCount).map((f) => f.path));
+  for (const path of removedPaths) {
+    entry.livePhotoCache.delete(path);
+    entry.cachedPaths.delete(path);
+  }
+  entry.media = { ...entry.media, files: trimmedFiles };
+  entry.updatedAt = Date.now();
+}
 
 export function useMediaBrowser(selectedStorage: StorageTarget | undefined, kindFilter: MediaKindFilter) {
   const [media, setMedia] = useState<MediaBrowseResult | null>(null);
@@ -12,8 +56,9 @@ export function useMediaBrowser(selectedStorage: StorageTarget | undefined, kind
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState("");
   const pageSize = 300;
-  const livePhotoCacheRef = useRef<Map<string, import("./media-types").LivePhotoPair> | null>(null);
+  const livePhotoCacheRef = useRef<Map<string, LivePhotoPair> | null>(null);
   const cachedPathsRef = useRef<Set<string>>(new Set());
+  const cacheKey = selectedStorage ? getMediaCacheKey(selectedStorage) : null;
 
   const refresh = useCallback(async () => {
     if (!selectedStorage) return;
@@ -85,17 +130,56 @@ export function useMediaBrowser(selectedStorage: StorageTarget | undefined, kind
       cachedPathsRef.current.clear();
       return;
     }
+    const now = Date.now();
+    const cached = cacheKey ? mediaCache.get(cacheKey) : null;
+    if (cached) {
+      livePhotoCacheRef.current = cached.livePhotoCache;
+      cachedPathsRef.current = cached.cachedPaths;
+      setMedia(cached.media);
+      setLoadingMedia(false);
+      if (now - cached.updatedAt <= MEDIA_CACHE_TTL_MS) {
+        return;
+      }
+      mediaCache.delete(cacheKey as string);
+    }
     void refresh();
-  }, [selectedStorage?.id, refresh]);
+  }, [cacheKey, refresh, selectedStorage]);
+
+  useEffect(() => {
+    if (!selectedStorage || !media || !cacheKey) return;
+    const livePhotoCache = livePhotoCacheRef.current ?? new Map<string, LivePhotoPair>();
+    if (!livePhotoCacheRef.current) {
+      livePhotoCacheRef.current = livePhotoCache;
+    }
+    const entry: MediaCacheEntry = {
+      updatedAt: Date.now(),
+      media,
+      livePhotoCache,
+      cachedPaths: cachedPathsRef.current,
+    };
+    mediaCache.set(cacheKey, entry);
+    pruneMediaCache(entry.updatedAt);
+  }, [cacheKey, media, selectedStorage]);
+
+  useEffect(() => {
+    if (!selectedStorage || !cacheKey) return;
+    return () => {
+      const entry = mediaCache.get(cacheKey);
+      if (entry) {
+        trimMediaCacheEntry(entry, MEDIA_CACHE_INACTIVE_KEEP);
+        pruneMediaCache(Date.now());
+      }
+    };
+  }, [cacheKey, selectedStorage]);
 
   const allFiles = media?.files ?? [];
   const livePhotoPairByPath = useMemo(() => {
     if (!media) {
       livePhotoCacheRef.current = null;
       cachedPathsRef.current.clear();
-      return new Map<string, import("./media-types").LivePhotoPair>();
+      return new Map<string, LivePhotoPair>();
     }
-    const cache = livePhotoCacheRef.current ?? new Map<string, import("./media-types").LivePhotoPair>();
+    const cache = livePhotoCacheRef.current ?? new Map<string, LivePhotoPair>();
     const cachedPaths = cachedPathsRef.current;
     const newFiles = media.files.filter(f => !cachedPaths.has(f.path));
     if (newFiles.length > 0) {
@@ -124,7 +208,10 @@ export function useMediaBrowser(selectedStorage: StorageTarget | undefined, kind
   const clearCache = useCallback(() => {
     livePhotoCacheRef.current = null;
     cachedPathsRef.current.clear();
-  }, []);
+    if (cacheKey) {
+      mediaCache.delete(cacheKey);
+    }
+  }, [cacheKey]);
 
   const releaseOldItems = useCallback((keepCount: number = 500) => {
     setMedia((prev) => {

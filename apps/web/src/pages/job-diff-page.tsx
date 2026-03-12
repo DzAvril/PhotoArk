@@ -96,6 +96,8 @@ function getSquareSizePx(itemCount: number): number {
 
 const DIFF_PAGE_SIZE = 300;
 const MAX_DIFF_ITEMS = 3000;
+const DIFF_CACHE_TTL_MS = 3 * 60 * 1000;
+const DIFF_CACHE_TRIM_COUNT = 1200;
 
 function DiffFileMeta({
   title,
@@ -136,6 +138,21 @@ function DiffFileMeta({
   );
 }
 
+function SizeObserver({
+  width,
+  height,
+  onSize,
+}: {
+  width: number;
+  height: number;
+  onSize: (width: number, height: number) => void;
+}) {
+  useEffect(() => {
+    onSize(width, height);
+  }, [height, onSize, width]);
+  return null;
+}
+
 
 
 export function JobDiffPage() {
@@ -147,6 +164,17 @@ export function JobDiffPage() {
   const rightContainerRef = useRef<HTMLDivElement | null>(null);
   const savedScrollPositionRef = useRef<{ scrollLeft: number; scrollTop: number }>({ scrollLeft: 0, scrollTop: 0 });
   const previewVideoRef = useRef<HTMLVideoElement>(null);
+  const cacheMetaRef = useRef<{ cachedAt: number; isPartial: boolean }>({ cachedAt: 0, isPartial: false });
+  const diffCacheSnapshotRef = useRef<{
+    selectedJobId: string;
+    result: JobDiffResult | null;
+    items: JobDiffItem[];
+    page: number;
+    hasMore: boolean;
+    scrollTop: number;
+    cachedAt: number;
+    isPartial: boolean;
+  } | null>(null);
 
   const [jobs, setJobs] = useState<BackupJob[]>([]);
   const [storages, setStorages] = useState<StorageTarget[]>([]);
@@ -170,14 +198,24 @@ export function JobDiffPage() {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
+  const updateContainerSize = useCallback((width: number, height: number) => {
+    setContainerSize((prev) => {
+      if (prev.width === width && prev.height === height) return prev;
+      return { width, height };
+    });
+  }, []);
 
   // Restore from cache on mount
   useEffect(() => {
     const cached = cache.current.jobDiff;
     if (cached && cached.selectedJobId) {
+      cacheMetaRef.current = {
+        cachedAt: cached.cachedAt ?? 0,
+        isPartial: cached.isPartial ?? false,
+      };
       setSelectedJobId(cached.selectedJobId);
       if (cached.result) {
-        setResult(cached.result);
+        setResult({ ...cached.result, items: [] });
         setDiffItems(cached.items);
         setDiffPage(cached.page);
         setHasMoreDiff(cached.hasMore);
@@ -228,14 +266,18 @@ export function JobDiffPage() {
         return;
       }
 
-      // If we have cached result and it matches current job, skip loading unless forceRefresh
-      if (!forceRefresh && result && result.job.id === selectedJobId && diffItems.length > 0) {
+      const cacheAgeMs = Date.now() - cacheMetaRef.current.cachedAt;
+      const hasCachedData = Boolean(result && diffItems.length > 0);
+      const cacheValid = hasCachedData && !cacheMetaRef.current.isPartial && cacheAgeMs < DIFF_CACHE_TTL_MS;
+
+      // If we have cached result and it matches current job, skip loading unless forceRefresh or cache is stale/partial
+      if (!forceRefresh && cacheValid && result && result.job.id === selectedJobId) {
         return;
       }
 
       const reqSeq = requestSeqRef.current + 1;
       requestSeqRef.current = reqSeq;
-      if (forceRefresh) {
+      if (forceRefresh || hasCachedData) {
         setRefreshingDiff(true);
       } else {
         setLoadingDiff(true);
@@ -250,10 +292,11 @@ export function JobDiffPage() {
           pageSize: DIFF_PAGE_SIZE
         });
         if (requestSeqRef.current !== reqSeq) return;
-        setResult(res);
+        setResult({ ...res, items: [] });
         setDiffItems(res.items);
         setDiffPage(res.page);
         setHasMoreDiff(res.page < res.totalPages);
+        cacheMetaRef.current = { cachedAt: Date.now(), isPartial: false };
       } catch (err) {
         if (requestSeqRef.current !== reqSeq) return;
         setResult(null);
@@ -295,7 +338,7 @@ export function JobDiffPage() {
       });
       setDiffPage(res.page);
       setHasMoreDiff(res.page < res.totalPages);
-      setResult((prev) => (prev ? { ...prev, ...res, items: prev.items } : res));
+      setResult((prev) => (prev ? { ...prev, ...res, items: [] } : { ...res, items: [] }));
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -444,16 +487,40 @@ export function JobDiffPage() {
 
   useEffect(() => {
     if (selectedJobId) {
-      cache.current.jobDiff = {
+      const snapshot = {
         selectedJobId,
         result,
         items: diffItems,
         page: diffPage,
         hasMore: hasMoreDiff,
         scrollTop: savedScrollPositionRef.current.scrollTop,
+        cachedAt: Date.now(),
+        isPartial: false,
       };
+      cache.current.jobDiff = snapshot;
+      diffCacheSnapshotRef.current = snapshot;
+      cacheMetaRef.current = { cachedAt: snapshot.cachedAt, isPartial: false };
     }
   }, [selectedJobId, result, diffItems, diffPage, hasMoreDiff]);
+
+  useEffect(() => {
+    return () => {
+      const snapshot = diffCacheSnapshotRef.current;
+      if (!snapshot || !snapshot.selectedJobId) return;
+      const trimmedItems =
+        snapshot.items.length > DIFF_CACHE_TRIM_COUNT
+          ? snapshot.items.slice(-DIFF_CACHE_TRIM_COUNT)
+          : snapshot.items;
+      const nextSnapshot = {
+        ...snapshot,
+        items: trimmedItems,
+        cachedAt: Date.now(),
+        isPartial: trimmedItems.length < snapshot.items.length,
+      };
+      cache.current.jobDiff = nextSnapshot;
+      cacheMetaRef.current = { cachedAt: nextSnapshot.cachedAt, isPartial: nextSnapshot.isPartial };
+    };
+  }, [cache]);
 
   async function handleRunSync() {
     if (!selectedJobId) return;
@@ -683,51 +750,51 @@ export function JobDiffPage() {
               <div className="h-[46vh] min-h-[280px] overflow-hidden rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface)] p-2 md:h-auto md:min-h-0 md:flex-1">
                 <AutoSizer>
                   {({ height, width }: { height: number; width: number }) => {
-                    if (containerSize.width !== width || containerSize.height !== height) {
-                      setTimeout(() => setContainerSize({ width, height }), 0);
-                    }
                     return (
-                      <div
-                        ref={(el) => {
-                          leftContainerRef.current = el;
-                          (leftGrid.containerRef as React.MutableRefObject<HTMLDivElement | null>).current = el;
-                        }}
-                        onScroll={handleLeftPaneScroll}
-                        style={{
-                          position: "relative",
-                          overflow: "auto",
-                          width,
-                          height,
-                        }}
-                      >
+                      <>
+                        <SizeObserver width={width} height={height} onSize={updateContainerSize} />
                         <div
+                          ref={(el) => {
+                            leftContainerRef.current = el;
+                            (leftGrid.containerRef as React.MutableRefObject<HTMLDivElement | null>).current = el;
+                          }}
+                          onScroll={handleLeftPaneScroll}
                           style={{
                             position: "relative",
-                            width: leftGrid.totalWidth,
-                            height: leftGrid.totalHeight,
+                            overflow: "auto",
+                            width,
+                            height,
                           }}
                         >
-                          {leftGrid.virtualCells.map((cell) => {
-                            const index = cell.rowIndex * columnCount + cell.columnIndex;
-                            if (index >= displayItems.length) return null;
-                            const item = displayItems[index];
-                            const active = selectedItemId === item.id;
-                            return (
-                              <button
-                                key={`${cell.rowIndex}-${cell.columnIndex}`}
-                                type="button"
-                                className={`rounded-sm transition-transform ${getCellColorClass(item, "source")} ${active ? "ring-2 ring-[var(--ark-primary)]" : ""}`}
-                                style={{
-                                  ...cell.style,
-                                  width: squareSizePx,
-                                  height: squareSizePx,
-                                }}
-                                onClick={() => setSelectedItemId(item.id)}
-                              />
-                            );
-                          })}
+                          <div
+                            style={{
+                              position: "relative",
+                              width: leftGrid.totalWidth,
+                              height: leftGrid.totalHeight,
+                            }}
+                          >
+                            {leftGrid.virtualCells.map((cell) => {
+                              const index = cell.rowIndex * columnCount + cell.columnIndex;
+                              if (index >= displayItems.length) return null;
+                              const item = displayItems[index];
+                              const active = selectedItemId === item.id;
+                              return (
+                                <button
+                                  key={`${cell.rowIndex}-${cell.columnIndex}`}
+                                  type="button"
+                                  className={`rounded-sm transition-transform ${getCellColorClass(item, "source")} ${active ? "ring-2 ring-[var(--ark-primary)]" : ""}`}
+                                  style={{
+                                    ...cell.style,
+                                    width: squareSizePx,
+                                    height: squareSizePx,
+                                  }}
+                                  onClick={() => setSelectedItemId(item.id)}
+                                />
+                              );
+                            })}
+                          </div>
                         </div>
-                      </div>
+                      </>
                     );
                   }}
                 </AutoSizer>
