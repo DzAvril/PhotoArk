@@ -587,26 +587,6 @@ const SourceActivityHeatmap = memo(function SourceActivityHeatmap({
   onSelectYear
 }: SourceActivityHeatmapProps) {
   const [hoveredDate, setHoveredDate] = useState<SourceMediaActivity["days"][number] | null>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [isVisible, setIsVisible] = useState(false);
-
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) {
-          setIsVisible(true);
-          observer.disconnect();
-        }
-      },
-      { rootMargin: "100px" }
-    );
-
-    observer.observe(container);
-    return () => observer.disconnect();
-  }, []);
 
   const columns = useMemo(() => {
     if (!data || !data.days.length) return [];
@@ -630,12 +610,16 @@ const SourceActivityHeatmap = memo(function SourceActivityHeatmap({
     return map;
   }, [data]);
 
-  if (!data || !data.days.length) {
+  if (!data) {
+    return <p className="text-sm mp-muted">{loading ? "加载中..." : "暂无媒体日期分布数据"}</p>;
+  }
+
+  if (!data.days.length) {
     return <p className="text-sm mp-muted">暂无媒体日期分布数据</p>;
   }
 
   return (
-    <div ref={containerRef} className="rounded-2xl border border-[var(--ark-line)] bg-[var(--ark-surface)] p-3">
+    <div className="rounded-2xl border border-[var(--ark-line)] bg-[var(--ark-surface)] p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-lg font-semibold text-[var(--ark-ink)]">
           {data.year} 年媒体文件分布（共 {data.totalAddedCount} 个）
@@ -663,51 +647,47 @@ const SourceActivityHeatmap = memo(function SourceActivityHeatmap({
                     <span key={`month:${month}`}>{month}</span>
                   ))}
                 </div>
-                {isVisible ? (
-                  <div className="inline-flex gap-1.5">
-                    <div className="grid grid-rows-7 gap-1 text-[11px] mp-muted">
-                      <span className="h-3 leading-3">一</span>
-                      <span className="h-3 leading-3 opacity-0">二</span>
-                      <span className="h-3 leading-3">三</span>
-                      <span className="h-3 leading-3 opacity-0">四</span>
-                      <span className="h-3 leading-3">五</span>
-                      <span className="h-3 leading-3 opacity-0">六</span>
-                      <span className="h-3 leading-3 opacity-0">日</span>
-                    </div>
-                    <div className="inline-flex gap-1">
-                      {columns.map((column, columnIndex) => (
-                        <div key={`col:${columnIndex}`} className="grid grid-rows-7 gap-1">
-                          {column.map((cell, rowIndex) => {
-                            if (!cell) {
-                              return <span key={`empty:${columnIndex}:${rowIndex}`} className="h-3 w-3 rounded-[2px] bg-transparent" />;
-                            }
-                            const level = cellLevelMap.get(cell.date) ?? 0;
-                            return (
-                              <button
-                                key={`day:${cell.date}`}
-                                type="button"
-                                className="h-3 w-3 rounded-[2px] border border-black/10 transition-transform hover:scale-[1.12] focus:scale-[1.12]"
-                                style={{ backgroundColor: ACTIVITY_LEVEL_COLORS[level] }}
-                                onMouseEnter={() => setHoveredDate(cell)}
-                                onMouseLeave={() => setHoveredDate((prev) => (prev?.date === cell.date ? null : prev))}
-                                onFocus={() => setHoveredDate(cell)}
-                                onBlur={() => setHoveredDate((prev) => (prev?.date === cell.date ? null : prev))}
-                                aria-label={`${cell.date} 文件 ${cell.count}`}
-                              />
-                            );
-                          })}
-                        </div>
-                      ))}
-                    </div>
+                <div className="inline-flex gap-1.5">
+                  <div className="grid grid-rows-7 gap-1 text-[11px] mp-muted">
+                    <span className="h-3 leading-3">一</span>
+                    <span className="h-3 leading-3 opacity-0">二</span>
+                    <span className="h-3 leading-3">三</span>
+                    <span className="h-3 leading-3 opacity-0">四</span>
+                    <span className="h-3 leading-3">五</span>
+                    <span className="h-3 leading-3 opacity-0">六</span>
+                    <span className="h-3 leading-3 opacity-0">日</span>
                   </div>
-                ) : (
-                  <div className="h-[130px]" />
-                )}
+                  <div className="inline-flex gap-1">
+                    {columns.map((column, columnIndex) => (
+                      <div key={`col:${columnIndex}`} className="grid grid-rows-7 gap-1">
+                        {column.map((cell, rowIndex) => {
+                          if (!cell) {
+                            return <span key={`empty:${columnIndex}:${rowIndex}`} className="h-3 w-3 rounded-[2px] bg-transparent" />;
+                          }
+                          const level = cellLevelMap.get(cell.date) ?? 0;
+                          return (
+                            <button
+                              key={`day:${cell.date}`}
+                              type="button"
+                              className="h-3 w-3 rounded-[2px] border border-black/10 transition-transform hover:scale-[1.12] focus:scale-[1.12]"
+                              style={{ backgroundColor: ACTIVITY_LEVEL_COLORS[level] }}
+                              onMouseEnter={() => setHoveredDate(cell)}
+                              onMouseLeave={() => setHoveredDate((prev) => (prev?.date === cell.date ? null : prev))}
+                              onFocus={() => setHoveredDate(cell)}
+                              onBlur={() => setHoveredDate((prev) => (prev?.date === cell.date ? null : prev))}
+                              aria-label={`${cell.date} 文件 ${cell.count}`}
+                            />
+                          );
+                        })}
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
             </div>
 
             <div>
-              {isVisible ? <SourceActivityPieChart data={data} /> : <div className="h-[150px]" />}
+              <SourceActivityPieChart data={data} />
             </div>
           </div>
 

@@ -1,6 +1,6 @@
 {
   "name": "@photoark/api",
-  "version": "0.1.25",
+  "version": "0.1.26",
   "private": true,
   "type": "module",
   "main": "dist/index.js",
@@ -14,7 +14,7 @@
   "dependencies": {
     "@fastify/cors": "^11.0.0",
     "@fastify/static": "^8.0.0",
-    "@photoark/shared": "0.1.25",
+    "@photoark/shared": "0.1.26",
     "chokidar": "^4.0.3",
     "dotenv": "^16.4.5",
     "exifr": "^7.1.3",
