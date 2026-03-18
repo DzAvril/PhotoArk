@@ -369,7 +369,6 @@ export function DiffPage() {
                 )}
               </tbody>
             </table>
-              </table>
             </div>
           </div>
         </SectionCard>
