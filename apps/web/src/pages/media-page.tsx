@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "../components/ui/button";
+import { EmptyState } from "../components/ui/empty-state";
+import { SectionCard } from "../components/ui/section-card";
 import { useLocalStorageState } from "../hooks/use-local-storage-state";
 import { getStorages } from "../lib/api";
 import type { StorageTarget } from "../types/api";
@@ -22,6 +24,8 @@ function MediaPane({ storages }: MediaPaneProps) {
   const [storageId, setStorageId] = useLocalStorageState("ark-last-media-storage-id", "");
   const [thumbSize, setThumbSize] = useLocalStorageState("ark-media-thumb-size", 170);
   const [kindFilter, setKindFilter] = useState<MediaKindFilter>("all");
+  const [searchTerm, setSearchTerm] = useState("");
+  const [dateRange, setDateRange] = useState<"all" | "7d" | "30d" | "365d">("all");
   const [activePath, setActivePath] = useState<string | null>(null);
   const [playingLiveVideo, setPlayingLiveVideo] = useState(false);
   const [showMediaInfo, setShowMediaInfo] = useState(false);
@@ -148,6 +152,34 @@ function MediaPane({ storages }: MediaPaneProps) {
 
   const normalizedThumbSize = Math.max(110, Math.min(260, Number(thumbSize) || 170));
 
+  const filteredItems = useMemo(() => {
+    let items = displayItems;
+    if (searchTerm.trim()) {
+      const keyword = searchTerm.trim().toLowerCase();
+      items = items.filter((item) => {
+        const path = item.file.path.toLowerCase();
+        const name = item.file.name.toLowerCase();
+        return path.includes(keyword) || name.includes(keyword);
+      });
+    }
+
+    if (dateRange !== "all") {
+      const now = Date.now();
+      const dayMs = 24 * 60 * 60 * 1000;
+      const rangeDays = dateRange === "7d" ? 7 : dateRange === "30d" ? 30 : 365;
+      const threshold = now - rangeDays * dayMs;
+      items = items.filter((item) => {
+        const dateValue = item.file.capturedAt ?? item.file.modifiedAt;
+        if (!dateValue) return false;
+        const ts = Date.parse(dateValue);
+        if (Number.isNaN(ts)) return false;
+        return ts >= threshold;
+      });
+    }
+
+    return items;
+  }, [displayItems, searchTerm, dateRange]);
+
   const upsertViewerMeta = useCallback((pathKey: string, next: ViewerRuntimeMeta) => {
     setViewerMetaByPath((prev) => {
       const updated = { ...prev, [pathKey]: { ...prev[pathKey], ...next } };
@@ -202,19 +234,19 @@ function MediaPane({ storages }: MediaPaneProps) {
   );
 
   return (
-    <article className="mp-panel flex min-h-[calc(100vh-12rem)] flex-col p-4 md:min-h-0 md:flex-1">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h3 className="text-sm font-semibold">存储媒体</h3>
-          <p className="mt-1 text-xs mp-muted">按存储浏览媒体，支持 Live Photo 动态预览与元数据查看</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2 text-xs sm:text-sm">
-          <span className="mp-chip">总计 {mediaSummary.total}</span>
-          <span className="mp-chip">图片 {mediaSummary.imageCount}</span>
-          <span className="mp-chip">视频 {mediaSummary.videoCount}</span>
-          <span className="mp-chip mp-chip-success">Live Photo {mediaSummary.liveCount}</span>
+    <SectionCard
+      title="存储媒体"
+      description="按存储浏览媒体，支持 Live Photo 动态预览与元数据查看"
+      className="md:min-h-0 md:flex-1"
+      right={
+        <div className="flex w-full items-center gap-2 overflow-x-auto pb-1 text-xs sm:text-sm">
+          <span className="mp-chip shrink-0">总计 {mediaSummary.total}</span>
+          <span className="mp-chip shrink-0">图片 {mediaSummary.imageCount}</span>
+          <span className="mp-chip shrink-0">视频 {mediaSummary.videoCount}</span>
+          <span className="mp-chip mp-chip-success shrink-0">Live Photo {mediaSummary.liveCount}</span>
+          <span className="mp-chip shrink-0">筛选后 {filteredItems.length}</span>
           {media ? (
-            <span className="mp-chip">
+            <span className="mp-chip shrink-0">
               已加载 {media.files.length}/{media.total}
             </span>
           ) : null}
@@ -224,8 +256,9 @@ function MediaPane({ storages }: MediaPaneProps) {
             </Button>
           ) : null}
         </div>
-      </div>
-      {error ? <p className="mp-error mt-3">{error}</p> : null}
+      }
+    >
+      {error ? <p className="mp-error">{error}</p> : null}
 
       <div className="mt-3 grid gap-3 lg:grid-cols-[340px_minmax(0,1fr)]">
         <MediaSidebar
@@ -233,16 +266,20 @@ function MediaPane({ storages }: MediaPaneProps) {
           storageId={storageId}
           selectedStorage={selectedStorage}
           loadingMedia={loadingMedia}
-          displayCount={displayItems.length}
+          displayCount={filteredItems.length}
           kindFilter={kindFilter}
           normalizedThumbSize={normalizedThumbSize}
+          searchTerm={searchTerm}
+          dateRange={dateRange}
           onStorageChange={handleStorageChange}
           onRefresh={handleRefresh}
           onKindFilterChange={setKindFilter}
           onThumbSizeChange={setThumbSize}
+          onSearchChange={setSearchTerm}
+          onDateRangeChange={setDateRange}
         />
 
-        <section className="flex min-h-[56vh] min-w-0 flex-col rounded-xl border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-2.5">
+        <section className="flex min-h-[56vh] min-w-0 flex-col rounded-2xl border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-2.5">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--ark-line)] pb-2">
             <p className="text-sm">
               {selectedStorage ? (
@@ -260,9 +297,14 @@ function MediaPane({ storages }: MediaPaneProps) {
             </div>
           </div>
 
+          {!selectedStorage && !loadingMedia ? (
+            <div className="flex min-h-[40vh] items-center justify-center p-4">
+              <EmptyState title="请先选择存储" description="选择左侧存储后即可浏览媒体内容。" />
+            </div>
+          ) : (
           <MediaGrid
             selectedStorage={selectedStorage}
-            displayItems={displayItems}
+            displayItems={filteredItems}
             activePath={activePath}
             loadingMedia={loadingMedia}
             normalizedThumbSize={normalizedThumbSize}
@@ -271,7 +313,9 @@ function MediaPane({ storages }: MediaPaneProps) {
             onOpen={(path) => openByPath(path)}
             onThumbImageError={handleThumbImageError}
             onThumbVideoError={handleThumbVideoError}
+            emptyHint={searchTerm || dateRange !== "all" ? "当前筛选无结果，尝试调整搜索或时间范围。" : undefined}
           />
+          )}
         </section>
       </div>
 
@@ -299,7 +343,7 @@ function MediaPane({ storages }: MediaPaneProps) {
           pointerHandlers={longPress}
         />
       ) : null}
-    </article>
+    </SectionCard>
   );
 }
 

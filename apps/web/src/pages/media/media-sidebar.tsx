@@ -10,10 +10,14 @@ type MediaSidebarProps = {
   displayCount: number;
   kindFilter: MediaKindFilter;
   normalizedThumbSize: number;
+  searchTerm: string;
+  dateRange: "all" | "7d" | "30d" | "365d";
   onStorageChange: (nextId: string) => void;
   onRefresh: () => void;
   onKindFilterChange: (next: MediaKindFilter) => void;
   onThumbSizeChange: (next: number) => void;
+  onSearchChange: (next: string) => void;
+  onDateRangeChange: (next: "all" | "7d" | "30d" | "365d") => void;
 };
 
 export function MediaSidebar(props: MediaSidebarProps) {
@@ -25,10 +29,14 @@ export function MediaSidebar(props: MediaSidebarProps) {
     displayCount,
     kindFilter,
     normalizedThumbSize,
+    searchTerm,
+    dateRange,
     onStorageChange,
     onRefresh,
     onKindFilterChange,
-    onThumbSizeChange
+    onThumbSizeChange,
+    onSearchChange,
+    onDateRangeChange
   } = props;
 
   return (
@@ -64,7 +72,7 @@ export function MediaSidebar(props: MediaSidebarProps) {
         {selectedStorage ? `${selectedStorage.name} · ${selectedStorage.basePath}` : "选择存储后可浏览媒体内容"}
       </p>
       <div className="mp-subtle-card mt-3 p-3">
-        <p className="text-xs font-semibold uppercase tracking-[0.08em] mp-muted">当前视图</p>
+        <p className="mp-kicker">当前视图</p>
         <p className="mt-1 text-sm font-medium">
           {selectedStorage ? `${selectedStorage.name} · ${getStorageTypeLabel(selectedStorage.type)}` : "未选择存储"}
         </p>
@@ -76,7 +84,7 @@ export function MediaSidebar(props: MediaSidebarProps) {
       </div>
 
       <div className="mt-4">
-        <p className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] mp-muted">筛选类型</p>
+        <p className="mb-2 mp-kicker">筛选类型</p>
         <div className="mp-segment">
           <button
             type="button"
@@ -110,6 +118,41 @@ export function MediaSidebar(props: MediaSidebarProps) {
           >
             Live Photo
           </button>
+        </div>
+      </div>
+
+      <div className="mt-4">
+        <label htmlFor="media-search" className="block text-sm font-medium">
+          快速搜索
+        </label>
+        <input
+          id="media-search"
+          className="mp-input mt-1.5"
+          placeholder="输入文件名或路径关键词"
+          value={searchTerm}
+          onChange={(e) => onSearchChange(e.target.value)}
+        />
+      </div>
+
+      <div className="mt-4">
+        <p className="mb-2 mp-kicker">时间范围</p>
+        <div className="mp-segment">
+          {[
+            { value: "all", label: "全部" },
+            { value: "7d", label: "近 7 天" },
+            { value: "30d", label: "近 30 天" },
+            { value: "365d", label: "近一年" }
+          ].map((item) => (
+            <button
+              key={item.value}
+              type="button"
+              className="mp-segment-item"
+              aria-pressed={dateRange === item.value}
+              onClick={() => onDateRangeChange(item.value as "all" | "7d" | "30d" | "365d")}
+            >
+              {item.label}
+            </button>
+          ))}
         </div>
       </div>
 

@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { InlineAlert } from "../components/inline-alert";
+import { SectionCard } from "../components/ui/section-card";
 import { getSettings, sendTelegramTest, updateSettings } from "../lib/api";
 import type { AppSettings } from "../types/api";
 
@@ -69,18 +70,18 @@ export function SettingsPage() {
   }
 
   return (
-    <div className="mp-panel mp-panel-soft p-4 md:flex md:h-full md:flex-col">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h3 className="text-base font-semibold">Telegram 通知</h3>
-          <p className="mt-1 text-sm mp-muted">用于接收备份摘要、异常提醒与测试消息。</p>
-        </div>
+    <SectionCard
+      title="Telegram 通知"
+      description="用于接收备份摘要、异常提醒与测试消息。"
+      right={
         <span className={`mp-chip ${form.telegram.enabled ? "mp-chip-success" : ""}`}>
           {form.telegram.enabled ? "已启用" : "未启用"}
         </span>
-      </div>
-
-      {loading ? <p className="mt-3 text-sm mp-muted">加载中...</p> : null}
+      }
+      className="md:flex md:h-full md:flex-col"
+      variant="panelSoft"
+    >
+      {loading ? <p className="text-sm mp-muted">加载中...</p> : null}
       {error ? (
         <InlineAlert tone="error" className="mt-3" onClose={() => setError("")}>
           {error}
@@ -201,6 +202,6 @@ export function SettingsPage() {
           </button>
         </div>
       </form>
-    </div>
+    </SectionCard>
   );
 }

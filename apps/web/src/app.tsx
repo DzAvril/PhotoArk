@@ -40,7 +40,7 @@ function PageLoading() {
     <div className="flex min-h-[400px] items-center justify-center">
       <div className="flex flex-col items-center gap-4">
         <div className="h-8 w-8 animate-spin rounded-full border-4 border-[var(--ark-primary)] border-t-transparent" />
-        <p className="text-sm text-[var(--ark-ink-muted)]">加载中...</p>
+        <p className="text-sm text-[var(--ark-ink-soft)]">加载中...</p>
       </div>
     </div>
   );
@@ -110,7 +110,7 @@ export function App() {
         <div className="min-h-screen bg-[var(--ark-bg)] px-3 py-10 text-[var(--ark-ink)] md:px-6">
           <div className="mx-auto max-w-md">
             <section className="mp-panel p-6">
-              <p className="text-sm uppercase tracking-[0.2em] text-[var(--ark-primary)]">PhotoArk</p>
+              <p className="mp-kicker mp-kicker-primary">PhotoArk</p>
               <h1 className="mt-2 text-2xl font-bold">正在检查登录状态...</h1>
             </section>
           </div>

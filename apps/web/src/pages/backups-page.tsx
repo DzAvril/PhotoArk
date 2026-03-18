@@ -171,10 +171,28 @@ export function BackupsPage() {
   const failedCount = runs.length - successCount - canceledCount;
 
   return (
-    <section className="space-y-3 md:flex md:h-full md:flex-col">
+    <section className="space-y-4 md:flex md:h-full md:flex-col">
+      <div className="grid gap-3 md:grid-cols-3">
+        <div className="mp-panel p-4">
+          <p className="mp-kicker">总执行</p>
+          <p className="mt-2 text-2xl font-semibold">{runs.length}</p>
+          <p className="mt-1 text-xs mp-muted">包含所有任务的执行历史</p>
+        </div>
+        <div className="mp-panel p-4">
+          <p className="mp-kicker">成功与取消</p>
+          <p className="mt-2 text-2xl font-semibold">{successCount}</p>
+          <p className="mt-1 text-xs mp-muted">已取消 {canceledCount}</p>
+        </div>
+        <div className="mp-panel p-4">
+          <p className="mp-kicker">失败记录</p>
+          <p className="mt-2 text-2xl font-semibold">{failedCount}</p>
+          <p className="mt-1 text-xs mp-muted">需要关注的异常执行</p>
+        </div>
+      </div>
+
       <SectionCard
         title="执行记录"
-        description="可通过 / 快捷键聚焦搜索，Esc 清空搜索"
+        description="支持搜索与排序，可通过 / 快捷键聚焦搜索，Esc 清空搜索"
         right={
           <>
             <span className="mp-chip">总记录 {runs.length}</span>
@@ -198,18 +216,15 @@ export function BackupsPage() {
           </div>
         ) : null}
 
-        <div className={message || error ? "mt-3" : ""}>
+        <div className={`${message || error ? "mt-3" : ""} mp-toolbar`}>
           <TableToolbar
-            title=""
+            title="执行记录"
             search={search}
             onSearchChange={setSearch}
             pageSize={table.pageSize}
             onPageSizeChange={table.setPageSize}
             totalItems={table.totalItems}
           />
-        </div>
-
-        <div className="mb-2 flex justify-end">
           <Button
             variant="danger"
             disabled={!selected.size}
@@ -305,7 +320,8 @@ export function BackupsPage() {
         </div>
 
         <div className="hidden md:block md:min-h-0 md:flex-1 md:overflow-auto">
-          <table className="mp-data-table min-w-full text-sm">
+          <div className="mp-table-shell">
+            <table className="mp-data-table min-w-full text-sm">
             <thead>
               <tr className="border-b border-[var(--ark-line)] text-left text-sm mp-muted">
                 <th className="px-2 py-2">
@@ -409,7 +425,8 @@ export function BackupsPage() {
                 </tr>
               ) : null}
             </tbody>
-          </table>
+            </table>
+          </div>
         </div>
 
         <TablePagination page={table.page} totalPages={table.totalPages} onChange={table.setPage} />

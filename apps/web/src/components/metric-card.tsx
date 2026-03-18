@@ -10,24 +10,24 @@ interface MetricCardProps {
 
 const toneClassMap: Record<NonNullable<MetricCardProps["tone"]>, { icon: string; glow: string; text: string }> = {
   blue: {
-    icon: "bg-blue-500/14 text-blue-600 dark:text-blue-300",
-    glow: "from-blue-500/30 to-cyan-400/0",
-    text: "text-blue-700 dark:text-blue-200"
+    icon: "bg-[color-mix(in_oklab,var(--ark-primary)_16%,transparent)] text-[var(--ark-primary)]",
+    glow: "from-[color-mix(in_oklab,var(--ark-primary)_35%,transparent)] to-transparent",
+    text: "text-[var(--ark-primary)]"
   },
   emerald: {
-    icon: "bg-emerald-500/14 text-emerald-700 dark:text-emerald-300",
-    glow: "from-emerald-500/30 to-lime-400/0",
-    text: "text-emerald-700 dark:text-emerald-200"
+    icon: "bg-[color-mix(in_oklab,var(--ark-success)_16%,transparent)] text-[var(--ark-success)]",
+    glow: "from-[color-mix(in_oklab,var(--ark-success)_35%,transparent)] to-transparent",
+    text: "text-[var(--ark-success)]"
   },
   amber: {
-    icon: "bg-amber-500/14 text-amber-700 dark:text-amber-300",
-    glow: "from-amber-500/30 to-orange-400/0",
-    text: "text-amber-700 dark:text-amber-200"
+    icon: "bg-[color-mix(in_oklab,var(--ark-warning)_16%,transparent)] text-[var(--ark-warning)]",
+    glow: "from-[color-mix(in_oklab,var(--ark-warning)_35%,transparent)] to-transparent",
+    text: "text-[var(--ark-warning)]"
   },
   violet: {
-    icon: "bg-violet-500/14 text-violet-700 dark:text-violet-300",
-    glow: "from-violet-500/30 to-fuchsia-400/0",
-    text: "text-violet-700 dark:text-violet-200"
+    icon: "bg-[color-mix(in_oklab,var(--ark-accent)_16%,transparent)] text-[var(--ark-accent)]",
+    glow: "from-[color-mix(in_oklab,var(--ark-accent)_35%,transparent)] to-transparent",
+    text: "text-[var(--ark-accent)]"
   }
 };
 
@@ -37,11 +37,11 @@ export function MetricCard({ title, value, meta, icon, tone = "blue" }: MetricCa
     <article className="mp-panel relative overflow-hidden p-4">
       <div className={`pointer-events-none absolute inset-x-0 top-0 h-1.5 bg-gradient-to-r ${toneClass.glow}`} />
       <div
-        className={`mb-4 inline-flex h-11 w-11 items-center justify-center rounded-xl border border-white/35 shadow-sm ${toneClass.icon}`}
+        className={`mb-4 inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-white/40 shadow-sm ${toneClass.icon}`}
       >
         {icon}
       </div>
-      <p className="text-[11px] font-semibold tracking-[0.08em] uppercase mp-muted">{title}</p>
+      <p className="mp-kicker">{title}</p>
       <p className="mt-1 text-2xl font-bold tracking-tight">{value}</p>
       <p className={`mt-1 text-xs font-medium ${toneClass.text}`}>{meta}</p>
     </article>

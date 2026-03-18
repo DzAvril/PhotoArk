@@ -6,8 +6,8 @@ import { VitePWA } from "vite-plugin-pwa";
 export default defineConfig({
   server: {
     proxy: {
-      "/api": "http://localhost:8081",
-      "/healthz": "http://localhost:8081"
+      "/api": "http://localhost:8080",
+      "/healthz": "http://localhost:8080"
     }
   },
   build: {

@@ -275,27 +275,27 @@ export function MediaPreviewDialog(props: MediaPreviewDialogProps) {
         {showMediaInfo ? (
           <dl className="mt-3 grid gap-2 text-sm md:grid-cols-2">
             <div className="rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-2.5">
-              <dt className="text-xs font-semibold uppercase tracking-[0.08em] mp-muted">路径</dt>
+              <dt className="mp-kicker">路径</dt>
               <dd className="mt-1 break-all">{activeItem.file.path}</dd>
             </div>
             <div className="rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-2.5">
-              <dt className="text-xs font-semibold uppercase tracking-[0.08em] mp-muted">类型</dt>
+              <dt className="mp-kicker">类型</dt>
               <dd className="mt-1">{activeKindLabel}</dd>
             </div>
             <div className="rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-2.5">
-              <dt className="text-xs font-semibold uppercase tracking-[0.08em] mp-muted">文件大小</dt>
+              <dt className="mp-kicker">文件大小</dt>
               <dd className="mt-1">{formatBytes(activeItem.file.sizeBytes)}</dd>
             </div>
             <div className="rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-2.5">
-              <dt className="text-xs font-semibold uppercase tracking-[0.08em] mp-muted">拍摄时间</dt>
+              <dt className="mp-kicker">拍摄时间</dt>
               <dd className="mt-1">{formatDateTime(activeItem.file.capturedAt ?? activeItem.file.modifiedAt)}</dd>
             </div>
             <div className="rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-2.5">
-              <dt className="text-xs font-semibold uppercase tracking-[0.08em] mp-muted">文件时间</dt>
+              <dt className="mp-kicker">文件时间</dt>
               <dd className="mt-1">{formatDateTime(activeItem.file.modifiedAt)}</dd>
             </div>
             <div className="rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-2.5">
-              <dt className="text-xs font-semibold uppercase tracking-[0.08em] mp-muted">分辨率</dt>
+              <dt className="mp-kicker">分辨率</dt>
               <dd className="mt-1">
                 {activeViewerMeta?.width && activeViewerMeta?.height
                   ? `${activeViewerMeta.width} × ${activeViewerMeta.height}`
@@ -303,7 +303,7 @@ export function MediaPreviewDialog(props: MediaPreviewDialogProps) {
               </dd>
             </div>
             <div className="rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-2.5">
-              <dt className="text-xs font-semibold uppercase tracking-[0.08em] mp-muted">视频时长</dt>
+              <dt className="mp-kicker">视频时长</dt>
               <dd className="mt-1">
                 {activeKindLabel === "视频" || shouldShowVideoViewer
                   ? formatDuration(activeViewerMeta?.durationSeconds)
@@ -311,7 +311,7 @@ export function MediaPreviewDialog(props: MediaPreviewDialogProps) {
               </dd>
             </div>
             <div className="rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-2.5">
-              <dt className="text-xs font-semibold uppercase tracking-[0.08em] mp-muted">拍摄地点</dt>
+              <dt className="mp-kicker">拍摄地点</dt>
               <dd className="mt-1">{activeLocationLabel}</dd>
             </div>
           </dl>

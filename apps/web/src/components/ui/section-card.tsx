@@ -14,15 +14,15 @@ type SectionCardProps = {
 
 export function SectionCard({ variant = "panel", title, description, right, children, className, headerClassName }: SectionCardProps) {
   return (
-    <Card variant={variant} className={`p-4 ${className ?? ""}`}>
+    <Card variant={variant} className={`p-4 md:p-5 ${className ?? ""}`}>
       <div className={`flex flex-wrap items-start justify-between gap-3 ${headerClassName ?? ""}`}>
         <div className="min-w-0">
-          <h3 className="text-base font-semibold">{title}</h3>
-          {description ? <p className="mt-1 text-sm mp-muted">{description}</p> : null}
+          <h3 className="mp-h3 font-semibold">{title}</h3>
+          {description ? <p className="mt-1 text-sm leading-6 mp-muted">{description}</p> : null}
         </div>
-        {right ? <div className="flex flex-wrap items-center gap-2 text-sm">{right}</div> : null}
+        {right ? <div className="mp-section-actions">{right}</div> : null}
       </div>
-      <div className="mt-3">{children}</div>
+      <div className="mt-4">{children}</div>
     </Card>
   );
 }

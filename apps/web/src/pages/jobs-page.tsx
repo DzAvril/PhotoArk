@@ -1,4 +1,3 @@
-import * as Collapsible from "@radix-ui/react-collapsible";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useSearchParams } from "react-router-dom";
 import { ConfirmDialog } from "../components/confirm-dialog";
@@ -114,7 +113,6 @@ export function JobsPage() {
   const [editingJobId, setEditingJobId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
-  const [formOpen, setFormOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("name");
   const [sortAsc, setSortAsc] = useState(true);
@@ -489,7 +487,7 @@ export function JobsPage() {
   const allCurrentPageSelected = table.paged.length > 0 && table.paged.every((j) => selected.has(j.id));
 
   return (
-    <section className="space-y-3 md:flex md:h-full md:flex-col">
+    <section className="space-y-3">
       {message ? (
         <InlineAlert tone="success" autoCloseMs={5200} onClose={() => setMessage("")}>
           {message}
@@ -501,19 +499,15 @@ export function JobsPage() {
         </InlineAlert>
       ) : null}
 
-      <Collapsible.Root open={formOpen} onOpenChange={setFormOpen} className="mp-panel mp-panel-soft p-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className="text-base font-semibold">备份任务</h3>
-            <p className="mt-1 text-sm mp-muted">配置源存储、目标存储、计划时间和监听模式。</p>
-          </div>
-          <Collapsible.Trigger className={formOpen ? "mp-btn" : "mp-btn mp-btn-primary"}>
-            {formOpen ? "收起" : "新增任务"}
-          </Collapsible.Trigger>
-        </div>
-
-        <Collapsible.Content>
-          <form onSubmit={(e) => void onSubmit(e)} className="mt-4 grid gap-3 sm:grid-cols-2">
+      <div className="grid gap-4 md:grid-cols-[360px_minmax(0,1fr)]">
+        <SectionCard
+          title={editingJobId ? "编辑任务" : "新增任务"}
+          description="配置源存储、目标存储、计划时间和监听模式。"
+          className="md:sticky md:top-4 md:self-start"
+          variant="panelSoft"
+          right={editingJobId ? <span className="mp-chip mp-chip-warning">编辑中</span> : undefined}
+        >
+          <form id="job-form" onSubmit={(e) => void onSubmit(e)} className="mt-4 grid gap-3 sm:grid-cols-2">
             <div className="space-y-1 sm:col-span-2">
               <label htmlFor="job-name" className="text-sm font-medium">
                 任务名称
@@ -615,12 +609,12 @@ export function JobsPage() {
 
             <div className="mp-subtle-card grid gap-3 p-3 sm:col-span-2 sm:grid-cols-2">
               <div className="min-w-0">
-                <p className="text-xs font-semibold uppercase tracking-[0.08em] mp-muted">源存储预览</p>
+                <p className="mp-kicker">源存储预览</p>
                 <p className="mt-1 text-sm font-medium">{sourceStorage?.name ?? "未选择"}</p>
                 <p className="mt-1 break-all text-xs mp-muted">{sourceStorage?.basePath ?? "请选择源存储"}</p>
               </div>
               <div className="min-w-0">
-                <p className="text-xs font-semibold uppercase tracking-[0.08em] mp-muted">目标存储预览</p>
+                <p className="mp-kicker">目标存储预览</p>
                 <p className="mt-1 text-sm font-medium">{destinationStorage?.name ?? "未选择"}</p>
                 <p className="mt-1 break-all text-xs mp-muted">{destinationStorage?.basePath ?? "请选择目标存储"}</p>
               </div>
@@ -637,8 +631,7 @@ export function JobsPage() {
               ) : null}
             </div>
           </form>
-        </Collapsible.Content>
-      </Collapsible.Root>
+        </SectionCard>
 
       <SectionCard
         title="任务列表"
@@ -655,15 +648,14 @@ export function JobsPage() {
         }
         className="md:min-h-0 md:flex-1 md:flex md:flex-col"
       >
-        <TableToolbar
-          search={search}
-          onSearchChange={setSearch}
-          pageSize={table.pageSize}
-          onPageSizeChange={table.setPageSize}
-          totalItems={table.totalItems}
-        />
-
-        <div className="mb-2 flex justify-end">
+        <div className="mp-toolbar">
+          <TableToolbar
+            search={search}
+            onSearchChange={setSearch}
+            pageSize={table.pageSize}
+            onPageSizeChange={table.setPageSize}
+            totalItems={table.totalItems}
+          />
           <Button
             variant="danger"
             disabled={!selected.size}
@@ -685,7 +677,12 @@ export function JobsPage() {
             title="暂无任务"
             description="先创建一个备份任务（定时或实时监听），然后可在这里查看状态与历史。"
             action={
-              <Button variant="primary" onClick={() => setFormOpen(true)}>
+              <Button
+                variant="primary"
+                onClick={() => {
+                  document.getElementById("job-form")?.scrollIntoView({ behavior: "smooth", block: "start" });
+                }}
+              >
                 去新增任务
               </Button>
             }
@@ -811,7 +808,8 @@ export function JobsPage() {
         </div>
 
         <div className="hidden md:block md:min-h-0 md:flex-1 md:overflow-auto">
-          <table className="mp-data-table min-w-full text-sm">
+          <div className="mp-table-shell">
+            <table className="mp-data-table min-w-full text-sm">
             <thead>
               <tr className="border-b border-[var(--ark-line)] text-left text-sm mp-muted">
                 <th className="px-2 py-2">
@@ -973,13 +971,15 @@ export function JobsPage() {
                 </tr>
               ) : null}
             </tbody>
-          </table>
+            </table>
+          </div>
         </div>
 
             <TablePagination page={table.page} totalPages={table.totalPages} onChange={table.setPage} />
           </>
         )}
       </SectionCard>
+      </div>
 
       {progressExecution ? (
         <div

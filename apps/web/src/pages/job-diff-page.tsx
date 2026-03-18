@@ -180,6 +180,8 @@ export function JobDiffPage() {
   const [storages, setStorages] = useState<StorageTarget[]>([]);
   const [selectedJobId, setSelectedJobId] = useState("");
   const [kindFilter, setKindFilter] = useState<"all" | JobDiffKind>("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | JobDiffStatus>("all");
+  const [searchTerm, setSearchTerm] = useState("");
   const [result, setResult] = useState<JobDiffResult | null>(null);
   const [diffItems, setDiffItems] = useState<JobDiffItem[]>([]);
   const [diffPage, setDiffPage] = useState(1);
@@ -192,6 +194,7 @@ export function JobDiffPage() {
   const [runningSync, setRunningSync] = useState(false);
   const [syncingFile, setSyncingFile] = useState(false);
   const [deletingFile, setDeletingFile] = useState(false);
+  const [showLoadingHint, setShowLoadingHint] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewSide, setPreviewSide] = useState<"source" | "destination">("source");
   const [previewFailed, setPreviewFailed] = useState(false);
@@ -237,11 +240,37 @@ export function JobDiffPage() {
     [jobs, storageById]
   );
 
+  const isLongLoading = loadingSetup || loadingDiff || loadingMoreDiff || refreshingDiff;
+
+  useEffect(() => {
+    if (!isLongLoading) {
+      setShowLoadingHint(false);
+      return;
+    }
+    const timer = window.setTimeout(() => setShowLoadingHint(true), 2000);
+    return () => window.clearTimeout(timer);
+  }, [isLongLoading]);
+
   const displayItems = useMemo(() => {
-    return diffItems.filter((item) => item.status !== "same");
-  }, [diffItems]);
+    const base = diffItems.filter((item) => item.status !== "same");
+    const filteredByStatus = statusFilter === "all" ? base : base.filter((item) => item.status === statusFilter);
+    if (!searchTerm.trim()) return filteredByStatus;
+    const keyword = searchTerm.trim().toLowerCase();
+    return filteredByStatus.filter((item) => item.relativePath.toLowerCase().includes(keyword));
+  }, [diffItems, statusFilter, searchTerm]);
 
   const displayItemById = useMemo(() => new Map(displayItems.map((item) => [item.id, item])), [displayItems]);
+  const statusCounts = useMemo(() => {
+    const counts = { all: 0, changed: 0, source_only: 0, destination_only: 0 };
+    for (const item of diffItems) {
+      if (item.status === "same") continue;
+      counts.all += 1;
+      if (item.status === "changed") counts.changed += 1;
+      if (item.status === "source_only") counts.source_only += 1;
+      if (item.status === "destination_only") counts.destination_only += 1;
+    }
+    return counts;
+  }, [diffItems]);
   const squareSizePx = useMemo(() => getSquareSizePx(displayItems.length), [displayItems.length]);
   const gapPx = 6;
   const cellSize = squareSizePx + gapPx;
@@ -620,15 +649,20 @@ export function JobDiffPage() {
           {error}
         </InlineAlert>
       ) : null}
+      {showLoadingHint ? (
+        <InlineAlert tone="info">
+          差异数据正在加载或计算中，文件数量较大时会需要更长时间，请稍候。
+        </InlineAlert>
+      ) : null}
 
       <SectionCard
         variant="panelSoft"
         title="目录差异"
         description="按任务对比源目录和目标目录，支持单文件同步、预览与删除。"
       >
-        <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto_auto_auto]">
+        <div className="mp-toolbar">
           <select
-            className="mp-select"
+            className="mp-select min-w-[260px]"
             value={selectedJobId}
             onChange={(event) => setSelectedJobId(event.target.value)}
             disabled={loadingSetup || !diffableJobs.length}
@@ -646,15 +680,17 @@ export function JobDiffPage() {
               );
             })}
           </select>
-          <Button busy={refreshingDiff} disabled={!selectedJobId} onClick={() => void loadDiff(true)}>
-            {refreshingDiff ? "刷新中..." : "刷新差异"}
-          </Button>
-          <Button disabled={!selectedJobId} onClick={() => navigate(`/settings/jobs?editJobId=${selectedJobId}`)}>
-            编辑任务
-          </Button>
-          <Button variant="primary" busy={runningSync} disabled={!selectedJobId} onClick={() => void handleRunSync()}>
-            {runningSync ? "启动中..." : "立即同步"}
-          </Button>
+          <div className="mp-toolbar-group">
+            <Button busy={refreshingDiff} disabled={!selectedJobId} onClick={() => void loadDiff(true)}>
+              {refreshingDiff ? "刷新中..." : "刷新差异"}
+            </Button>
+            <Button disabled={!selectedJobId} onClick={() => navigate(`/settings/jobs?editJobId=${selectedJobId}`)}>
+              编辑任务
+            </Button>
+            <Button variant="primary" busy={runningSync} disabled={!selectedJobId} onClick={() => void handleRunSync()}>
+              {runningSync ? "启动中..." : "立即同步"}
+            </Button>
+          </div>
         </div>
 
         <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
@@ -676,13 +712,31 @@ export function JobDiffPage() {
           </span>
         </div>
         {result ? (
-          <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
-            <span className="mp-chip">总对比 {result.summary.totalComparedCount}</span>
-            <span className="mp-chip mp-chip-warning">差异 {result.summary.totalDiffCount}</span>
-            <span className="mp-chip mp-chip-success">一致 {result.summary.sameCount}</span>
-            <span className="mp-chip">仅源目录 {result.summary.sourceOnlyCount}</span>
-            <span className="mp-chip">仅目标目录 {result.summary.destinationOnlyCount}</span>
-            <span className="mp-chip">内容变更 {result.summary.changedCount}</span>
+          <div className="mt-4 mp-stat-grid">
+            <div className="mp-stat-card">
+              <h4>总对比</h4>
+              <p className="text-2xl font-semibold">{result.summary.totalComparedCount}</p>
+            </div>
+            <div className="mp-stat-card">
+              <h4>差异</h4>
+              <p className="text-2xl font-semibold text-amber-600">{result.summary.totalDiffCount}</p>
+            </div>
+            <div className="mp-stat-card">
+              <h4>一致</h4>
+              <p className="text-2xl font-semibold text-emerald-600">{result.summary.sameCount}</p>
+            </div>
+            <div className="mp-stat-card">
+              <h4>仅源目录</h4>
+              <p className="text-2xl font-semibold">{result.summary.sourceOnlyCount}</p>
+            </div>
+            <div className="mp-stat-card">
+              <h4>仅目标目录</h4>
+              <p className="text-2xl font-semibold">{result.summary.destinationOnlyCount}</p>
+            </div>
+            <div className="mp-stat-card">
+              <h4>内容变更</h4>
+              <p className="text-2xl font-semibold">{result.summary.changedCount}</p>
+            </div>
           </div>
         ) : null}
       </SectionCard>
@@ -718,6 +772,41 @@ export function JobDiffPage() {
             </div>
           </div>
 
+          <div className="mt-2 mp-toolbar">
+            <div className="mp-toolbar-group">
+              <div className="mp-segment">
+                {[
+                  { value: "all", label: `全部 (${statusCounts.all})` },
+                  { value: "changed", label: `差异 (${statusCounts.changed})` },
+                  { value: "source_only", label: `仅源目录 (${statusCounts.source_only})` },
+                  { value: "destination_only", label: `仅目标目录 (${statusCounts.destination_only})` }
+                ].map((item) => (
+                  <button
+                    key={item.value}
+                    type="button"
+                    className="mp-segment-item"
+                    aria-pressed={statusFilter === item.value}
+                    onClick={() => setStatusFilter(item.value as "all" | JobDiffStatus)}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="mp-toolbar-group">
+              <label className="text-sm font-medium">
+                搜索
+                <input
+                  type="text"
+                  className="mp-input ml-2 h-8 min-h-0 py-1 text-sm"
+                  placeholder="输入路径关键词"
+                  value={searchTerm}
+                  onChange={(event) => setSearchTerm(event.target.value)}
+                />
+              </label>
+            </div>
+          </div>
+
           <div className="mt-2 flex flex-col gap-2 sm:flex-row">
             {result ? (
               <div className="flex flex-wrap items-center gap-2">
@@ -748,6 +837,11 @@ export function JobDiffPage() {
                 <span className="text-[11px] mp-muted">{result ? result.job.sourceStorageName : "-"}</span>
               </div>
               <div className="h-[46vh] min-h-[280px] overflow-hidden rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface)] p-2 md:h-auto md:min-h-0 md:flex-1">
+                {displayItems.length === 0 ? (
+                  <div className="flex h-full items-center justify-center">
+                    <EmptyState title="当前筛选无结果" description="调整状态筛选或搜索关键词后重试。" />
+                  </div>
+                ) : (
                 <AutoSizer>
                   {({ height, width }: { height: number; width: number }) => {
                     return (
@@ -798,6 +892,7 @@ export function JobDiffPage() {
                     );
                   }}
                 </AutoSizer>
+                )}
               </div>
             </div>
 
@@ -807,53 +902,59 @@ export function JobDiffPage() {
                 <span className="text-[11px] mp-muted">{result ? result.job.destinationStorageName : "-"}</span>
               </div>
               <div className="h-[46vh] min-h-[280px] overflow-hidden rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface)] p-2 md:h-auto md:min-h-0 md:flex-1">
-                <AutoSizer>
-                  {({ height, width }: { height: number; width: number }) => {
-                    return (
-                      <div
-                        ref={(el) => {
-                          rightContainerRef.current = el;
-                          (rightGrid.containerRef as React.MutableRefObject<HTMLDivElement | null>).current = el;
-                        }}
-                        onScroll={handleRightPaneScroll}
-                        style={{
-                          position: "relative",
-                          overflow: "auto",
-                          width,
-                          height,
-                        }}
-                      >
+                {displayItems.length === 0 ? (
+                  <div className="flex h-full items-center justify-center">
+                    <EmptyState title="当前筛选无结果" description="调整状态筛选或搜索关键词后重试。" />
+                  </div>
+                ) : (
+                  <AutoSizer>
+                    {({ height, width }: { height: number; width: number }) => {
+                      return (
                         <div
+                          ref={(el) => {
+                            rightContainerRef.current = el;
+                            (rightGrid.containerRef as React.MutableRefObject<HTMLDivElement | null>).current = el;
+                          }}
+                          onScroll={handleRightPaneScroll}
                           style={{
                             position: "relative",
-                            width: rightGrid.totalWidth,
-                            height: rightGrid.totalHeight,
+                            overflow: "auto",
+                            width,
+                            height,
                           }}
                         >
-                          {rightGrid.virtualCells.map((cell) => {
-                            const index = cell.rowIndex * columnCount + cell.columnIndex;
-                            if (index >= displayItems.length) return null;
-                            const item = displayItems[index];
-                            const active = selectedItemId === item.id;
-                            return (
-                              <button
-                                key={`${cell.rowIndex}-${cell.columnIndex}`}
-                                type="button"
-                                className={`rounded-sm transition-transform ${getCellColorClass(item, "destination")} ${active ? "ring-2 ring-[var(--ark-primary)]" : ""}`}
-                                style={{
-                                  ...cell.style,
-                                  width: squareSizePx,
-                                  height: squareSizePx,
-                                }}
-                                onClick={() => setSelectedItemId(item.id)}
-                              />
-                            );
-                          })}
+                          <div
+                            style={{
+                              position: "relative",
+                              width: rightGrid.totalWidth,
+                              height: rightGrid.totalHeight,
+                            }}
+                          >
+                            {rightGrid.virtualCells.map((cell) => {
+                              const index = cell.rowIndex * columnCount + cell.columnIndex;
+                              if (index >= displayItems.length) return null;
+                              const item = displayItems[index];
+                              const active = selectedItemId === item.id;
+                              return (
+                                <button
+                                  key={`${cell.rowIndex}-${cell.columnIndex}`}
+                                  type="button"
+                                  className={`rounded-sm transition-transform ${getCellColorClass(item, "destination")} ${active ? "ring-2 ring-[var(--ark-primary)]" : ""}`}
+                                  style={{
+                                    ...cell.style,
+                                    width: squareSizePx,
+                                    height: squareSizePx,
+                                  }}
+                                  onClick={() => setSelectedItemId(item.id)}
+                                />
+                              );
+                            })}
+                          </div>
                         </div>
-                      </div>
-                    );
-                  }}
-                </AutoSizer>
+                      );
+                    }}
+                  </AutoSizer>
+                )}
               </div>
             </div>
           </div>

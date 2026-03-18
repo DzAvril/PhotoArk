@@ -3,6 +3,7 @@ import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ConfirmDialog } from "../components/confirm-dialog";
 import { InlineAlert } from "../components/inline-alert";
+import { SectionCard } from "../components/ui/section-card";
 import {
   getJobExecutions,
   getJobs,
@@ -763,6 +764,13 @@ export function DashboardPage() {
   const [pendingSyncEdgeId, setPendingSyncEdgeId] = useState<string | null>(null);
   const [progressDialogEdgeId, setProgressDialogEdgeId] = useState<string | null>(null);
   const [startingSync, setStartingSync] = useState(false);
+  const [refreshingAll, setRefreshingAll] = useState(false);
+  const [loadingPrimary, setLoadingPrimary] = useState(false);
+  const [loadingRelation, setLoadingRelation] = useState(false);
+  const [showLoadingHint, setShowLoadingHint] = useState(false);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(
+    dashboardCache.primaryUpdatedAt ? new Date(dashboardCache.primaryUpdatedAt) : null
+  );
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
 
@@ -781,6 +789,7 @@ export function DashboardPage() {
       return;
     }
     try {
+      setLoadingRelation(true);
       const relationRes = await getStorageRelations();
       setRelationNodes(relationRes.nodes);
       setRelationEdges(relationRes.edges);
@@ -789,6 +798,8 @@ export function DashboardPage() {
       dashboardCache.relationUpdatedAt = Date.now();
     } catch (err) {
       setError((err as Error).message);
+    } finally {
+      setLoadingRelation(false);
     }
   }
 
@@ -797,63 +808,90 @@ export function DashboardPage() {
     if (!force && dashboardCache.primaryUpdatedAt > 0 && now - dashboardCache.primaryUpdatedAt < DASHBOARD_CACHE_TTL_MS) {
       return;
     }
-    const results = await Promise.allSettled([
-      getStorageCapacities(),
-      getStorageMediaSummary(),
-      getJobs(),
-      getJobExecutions()
-    ]);
-    const failures: string[] = [];
-    let hasSuccess = false;
+    setLoadingPrimary(true);
+    try {
+      const results = await Promise.allSettled([
+        getStorageCapacities(),
+        getStorageMediaSummary(),
+        getJobs(),
+        getJobExecutions()
+      ]);
+      const failures: string[] = [];
+      let hasSuccess = false;
 
-    const [capacityRes, mediaRes, jobsRes, executionsRes] = results;
-    if (capacityRes.status === "fulfilled") {
-      setCapacities(capacityRes.value.items);
-      dashboardCache.capacities = capacityRes.value.items;
-      hasSuccess = true;
-    } else {
-      failures.push("存储容量");
-    }
-    if (mediaRes.status === "fulfilled") {
-      setStorageMediaSummary(mediaRes.value.items);
-      dashboardCache.storageMediaSummary = mediaRes.value.items;
-      hasSuccess = true;
-    } else {
-      failures.push("媒体分布");
-    }
-    if (jobsRes.status === "fulfilled") {
-      setJobs(jobsRes.value.items);
-      dashboardCache.jobs = jobsRes.value.items;
-      hasSuccess = true;
-    } else {
-      failures.push("任务列表");
-    }
-    if (executionsRes.status === "fulfilled") {
-      setExecutions(executionsRes.value.items);
-      dashboardCache.executions = executionsRes.value.items;
-      executionFingerprintRef.current = getExecutionsFingerprint(executionsRes.value.items);
-      hasSuccess = true;
-    } else {
-      failures.push("任务进度");
-    }
+      const [capacityRes, mediaRes, jobsRes, executionsRes] = results;
+      if (capacityRes.status === "fulfilled") {
+        setCapacities(capacityRes.value.items);
+        dashboardCache.capacities = capacityRes.value.items;
+        hasSuccess = true;
+      } else {
+        failures.push("存储容量");
+      }
+      if (mediaRes.status === "fulfilled") {
+        setStorageMediaSummary(mediaRes.value.items);
+        dashboardCache.storageMediaSummary = mediaRes.value.items;
+        hasSuccess = true;
+      } else {
+        failures.push("媒体分布");
+      }
+      if (jobsRes.status === "fulfilled") {
+        setJobs(jobsRes.value.items);
+        dashboardCache.jobs = jobsRes.value.items;
+        hasSuccess = true;
+      } else {
+        failures.push("任务列表");
+      }
+      if (executionsRes.status === "fulfilled") {
+        setExecutions(executionsRes.value.items);
+        dashboardCache.executions = executionsRes.value.items;
+        executionFingerprintRef.current = getExecutionsFingerprint(executionsRes.value.items);
+        hasSuccess = true;
+      } else {
+        failures.push("任务进度");
+      }
 
-    if (hasSuccess) {
-      dashboardCache.primaryUpdatedAt = Date.now();
-    }
+      if (hasSuccess) {
+        dashboardCache.primaryUpdatedAt = Date.now();
+      }
 
-    if (failures.length === results.length) {
-      setError(`首页数据加载失败：${failures.join("、")}`);
-    } else if (failures.length) {
-      setError(`部分数据加载失败：${failures.join("、")}`);
-    } else {
-      setError("");
+      if (failures.length === results.length) {
+        setError(`首页数据加载失败：${failures.join("、")}`);
+      } else if (failures.length) {
+        setError(`部分数据加载失败：${failures.join("、")}`);
+      } else {
+        setError("");
+      }
+    } finally {
+      setLoadingPrimary(false);
     }
+  }
+
+  async function handleRefreshAll() {
+    if (refreshingAll) return;
+    setRefreshingAll(true);
+    setError("");
+    await Promise.all([refreshPrimaryData(true), refreshRelationGraph(true)]);
+    if (dashboardCache.primaryUpdatedAt) {
+      setLastUpdatedAt(new Date(dashboardCache.primaryUpdatedAt));
+    }
+    setRefreshingAll(false);
   }
 
   useEffect(() => {
     void refreshPrimaryData();
     void refreshRelationGraph();
   }, []);
+
+  const isLongLoading = refreshingAll || loadingPrimary || loadingRelation || loadingActivity;
+
+  useEffect(() => {
+    if (!isLongLoading) {
+      setShowLoadingHint(false);
+      return;
+    }
+    const timer = window.setTimeout(() => setShowLoadingHint(true), 2000);
+    return () => window.clearTimeout(timer);
+  }, [isLongLoading]);
 
   useEffect(() => {
     let canceled = false;
@@ -919,6 +957,12 @@ export function DashboardPage() {
     }
     return map;
   }, [executions]);
+
+  const latestExecutions = useMemo(() => {
+    const list = [...latestExecutionByJobId.values()];
+    list.sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+    return list.slice(0, 5);
+  }, [latestExecutionByJobId]);
 
   const hasAnyActiveExecution = activeExecutionByJobId.size > 0;
 
@@ -1140,6 +1184,25 @@ export function DashboardPage() {
   const progressDialogCanBackground = Boolean(progressDialogExecution && isExecutionActive(progressDialogExecution));
 
   const summaryTone = getCapacityTone(capacitySummary.freePercent);
+  const activeExecutionCount = activeExecutionByJobId.size;
+  const storageNodeCount = relationNodes.length;
+  const pendingEdgeCount = relationSummary.attentionEdgeCount;
+  const syncedEdgeCount = relationSummary.syncedEdgeCount;
+  const capacitySummaryText = capacitySummary.freePercent ? `${capacitySummary.freePercent}%` : "未知";
+  const lowCapacityItems = useMemo(() => {
+    return capacities
+      .map((item) => ({ item, remainingPercent: getRemainingPercent(item.totalBytes, item.freeBytes) }))
+      .filter((entry) => entry.remainingPercent !== null && entry.remainingPercent <= 20)
+      .sort((a, b) => (a.remainingPercent ?? 0) - (b.remainingPercent ?? 0));
+  }, [capacities]);
+  const unreadableCapacities = useMemo(() => capacities.filter((item) => !item.available), [capacities]);
+  const attentionEdges = useMemo(() => relationEdges.filter((edge) => edge.status !== "synced"), [relationEdges]);
+  const recentFailedExecutions = useMemo(() => latestExecutions.filter((execution) => execution.status === "failed"), [latestExecutions]);
+  const quickSyncEdge = useMemo(
+    () => attentionEdges.find((edge) => getRunnableManualJobIds(edge).length > 0),
+    [attentionEdges, getRunnableManualJobIds, jobById]
+  );
+  const hasAlertItems = Boolean(lowCapacityItems.length || unreadableCapacities.length || attentionEdges.length || recentFailedExecutions.length);
 
   function handleRelationEdgeClick(edgeId: string) {
     const edge = edgeById.get(edgeId);
@@ -1232,332 +1295,582 @@ export function DashboardPage() {
           {error}
         </InlineAlert>
       ) : null}
+      {showLoadingHint ? (
+        <InlineAlert tone="info">
+          正在加载首页数据，若数据量较大需要稍候，请勿关闭页面。
+        </InlineAlert>
+      ) : null}
 
-      <motion.article
-        className="mp-panel p-4"
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.03, duration: 0.2, ease: "easeOut" }}
-      >
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h3 className="text-base font-semibold">存储同步关系图</h3>
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,360px)_minmax(0,1fr)]">
+        <div className="space-y-4 xl:sticky xl:top-4 xl:self-start">
+          <SectionCard
+            title="快捷操作"
+            description="快速刷新数据或进入关键页面。"
+            right={lastUpdatedAt ? <span className="mp-chip">更新于 {lastUpdatedAt.toLocaleString()}</span> : undefined}
+          >
+            <div className="flex flex-wrap items-center gap-2">
+              <button type="button" className="mp-btn mp-btn-primary" onClick={() => void handleRefreshAll()} disabled={refreshingAll}>
+                {refreshingAll ? "刷新中..." : "刷新首页数据"}
+              </button>
+              <button type="button" className="mp-btn" onClick={() => navigate("/settings/jobs")}>
+                任务配置
+              </button>
+              <button type="button" className="mp-btn" onClick={() => navigate("/diff")}>
+                差异检查
+              </button>
+              <button type="button" className="mp-btn" onClick={() => navigate("/media")}>
+                媒体浏览
+              </button>
+              <button type="button" className="mp-btn" onClick={() => navigate("/records")}>
+                执行记录
+              </button>
+            </div>
+          </SectionCard>
+
+          <div className="mp-stat-grid">
+            <div className="mp-stat-card">
+              <h4>活跃任务</h4>
+              <p className="text-2xl font-semibold">{activeExecutionCount}</p>
+              <p className="mt-1 text-xs mp-muted">共 {jobs.length} 个任务</p>
+            </div>
+            <div className="mp-stat-card">
+              <h4>同步关系</h4>
+              <p className="text-2xl font-semibold">{relationEdges.length}</p>
+              <p className="mt-1 text-xs mp-muted">
+                已同步 {syncedEdgeCount} · 待处理 {pendingEdgeCount}
+              </p>
+            </div>
+            <div className="mp-stat-card">
+              <h4>存储节点</h4>
+              <p className="text-2xl font-semibold">{storageNodeCount}</p>
+              <p className="mt-1 text-xs mp-muted">孤立 {relationSummary.isolatedNodeCount}</p>
+            </div>
+            <div className="mp-stat-card">
+              <h4>容量健康度</h4>
+              <p className="text-2xl font-semibold">{capacitySummaryText}</p>
+              <p className={`mt-1 text-xs ${summaryTone.chipClass}`}>整体剩余 {capacitySummaryText}</p>
+            </div>
           </div>
-          <div className="flex flex-wrap items-center gap-2 text-sm">
-            <span className="mp-chip">存储节点 {relationNodes.length}</span>
-            <span className="mp-chip">同步关系 {relationEdges.length}</span>
-            <span className="mp-chip mp-chip-success">已同步 {relationSummary.syncedEdgeCount}</span>
-            <span className="mp-chip mp-chip-warning">待处理 {relationSummary.attentionEdgeCount}</span>
-            <span className="mp-chip">孤立节点 {relationSummary.isolatedNodeCount}</span>
-          </div>
+
+          <SectionCard title="待处理事项" description="系统监控到的风险与建议，优先处理高风险项。">
+            {hasAlertItems ? (
+              <div className="space-y-3">
+                {lowCapacityItems.length ? (
+                  <div className="rounded-xl border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <p className="text-sm font-semibold">容量告急</p>
+                        <p className="mt-1 text-xs mp-muted">剩余空间低于 20% 的存储需要尽快处理。</p>
+                      </div>
+                      <span className="mp-chip mp-chip-warning">高风险</span>
+                    </div>
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {lowCapacityItems.slice(0, 3).map(({ item, remainingPercent }) => (
+                        <span key={`low:${item.id}`} className="mp-chip">
+                          {item.storageNames.join("、")} · 剩余 {remainingPercent}%
+                        </span>
+                      ))}
+                      {lowCapacityItems.length > 3 ? <span className="text-xs mp-muted">+{lowCapacityItems.length - 3} 个</span> : null}
+                    </div>
+                    <div className="mt-3">
+                      <button type="button" className="mp-btn mp-btn-sm" onClick={() => navigate("/settings/storages")}>
+                        查看存储配置
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+
+                {unreadableCapacities.length ? (
+                  <div className="rounded-xl border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <p className="text-sm font-semibold">容量读取失败</p>
+                        <p className="mt-1 text-xs mp-muted">有存储容量无法读取，建议检查挂载或授权。</p>
+                      </div>
+                      <span className="mp-chip mp-chip-warning">需要检查</span>
+                    </div>
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {unreadableCapacities.slice(0, 3).map((item) => (
+                        <span key={`unreadable:${item.id}`} className="mp-chip">
+                          {item.storageNames.join("、")}
+                        </span>
+                      ))}
+                      {unreadableCapacities.length > 3 ? <span className="text-xs mp-muted">+{unreadableCapacities.length - 3} 个</span> : null}
+                    </div>
+                    <div className="mt-3">
+                      <button type="button" className="mp-btn mp-btn-sm" onClick={() => navigate("/settings/storages")}>
+                        排查存储状态
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+
+                {attentionEdges.length ? (
+                  <div className="rounded-xl border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <p className="text-sm font-semibold">待同步关系</p>
+                        <p className="mt-1 text-xs mp-muted">有同步关系处于待同步状态，建议优先处理。</p>
+                      </div>
+                      <span className="mp-chip mp-chip-warning">待处理 {attentionEdges.length}</span>
+                    </div>
+                    <div className="mt-2 space-y-1 text-xs mp-muted">
+                      {attentionEdges.slice(0, 2).map((edge) => (
+                        <div key={`edge-attention:${edge.id}`} className="flex items-center justify-between gap-2">
+                          <span className="min-w-0 truncate">
+                            {edge.sourceStorageName} → {edge.destinationStorageName}
+                          </span>
+                          <span className="mp-chip">任务 {edge.jobCount}</span>
+                        </div>
+                      ))}
+                      {attentionEdges.length > 2 ? <span className="text-[11px]">+{attentionEdges.length - 2} 条关系</span> : null}
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {quickSyncEdge ? (
+                        <button type="button" className="mp-btn mp-btn-sm mp-btn-primary" onClick={() => setPendingSyncEdgeId(quickSyncEdge.id)}>
+                          一键启动同步
+                        </button>
+                      ) : null}
+                      <button type="button" className="mp-btn mp-btn-sm" onClick={() => navigate("/diff")}>
+                        查看差异
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+
+                {recentFailedExecutions.length ? (
+                  <div className="rounded-xl border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <p className="text-sm font-semibold">近期失败任务</p>
+                        <p className="mt-1 text-xs mp-muted">最近任务执行失败，请尽快查看日志。</p>
+                      </div>
+                      <span className="mp-chip mp-chip-danger">失败 {recentFailedExecutions.length}</span>
+                    </div>
+                    <div className="mt-2 space-y-1 text-xs mp-muted">
+                      {recentFailedExecutions.slice(0, 2).map((execution) => (
+                        <div key={`failed:${execution.id}`} className="flex items-center justify-between gap-2">
+                          <span className="min-w-0 truncate">{jobById.get(execution.jobId)?.name ?? execution.jobId}</span>
+                          <span className="mp-chip">失败</span>
+                        </div>
+                      ))}
+                      {recentFailedExecutions.length > 2 ? <span className="text-[11px]">+{recentFailedExecutions.length - 2} 条失败记录</span> : null}
+                    </div>
+                    <div className="mt-3">
+                      <button type="button" className="mp-btn mp-btn-sm" onClick={() => navigate("/records")}>
+                        查看执行记录
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            ) : (
+              <p className="text-sm mp-muted">暂无待处理事项，系统状态良好。</p>
+            )}
+          </SectionCard>
+
+          <SectionCard
+            title="任务执行概览"
+            description="最近 5 条任务执行记录，便于快速掌握当前状态。"
+            right={
+              <button type="button" className="mp-btn" onClick={() => navigate("/records")}>
+                查看全部记录
+              </button>
+            }
+          >
+            {!latestExecutions.length ? (
+              <p className="text-sm mp-muted">暂无任务执行记录</p>
+            ) : (
+              <>
+                <div className="space-y-2 md:hidden">
+                  {latestExecutions.map((execution) => {
+                    const job = jobById.get(execution.jobId);
+                    const statusLabel = getExecutionStatusLabel(execution);
+                    const statusClass =
+                      execution.status === "failed"
+                        ? "mp-status-danger"
+                        : execution.status === "success"
+                          ? "mp-status-success"
+                          : "mp-status-warning";
+                    return (
+                      <article key={execution.id} className="mp-mobile-card">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <h4 className="truncate text-sm font-semibold">{job?.name ?? execution.jobId}</h4>
+                            <p className="mt-1 text-xs mp-muted">{new Date(execution.updatedAt).toLocaleString()}</p>
+                          </div>
+                          <span className={`text-sm ${statusClass}`}>{statusLabel}</span>
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+
+                <div className="hidden md:block">
+                  <div className="mp-table-shell">
+                    <table className="mp-data-table min-w-full text-sm">
+                      <thead>
+                        <tr className="text-left text-xs mp-muted">
+                          <th className="px-2 py-2">任务</th>
+                          <th className="px-2 py-2">状态</th>
+                          <th className="px-2 py-2">更新时间</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {latestExecutions.map((execution) => {
+                          const job = jobById.get(execution.jobId);
+                          const statusLabel = getExecutionStatusLabel(execution);
+                          const statusClass =
+                            execution.status === "failed"
+                              ? "mp-status-danger"
+                              : execution.status === "success"
+                                ? "mp-status-success"
+                                : "mp-status-warning";
+                          return (
+                            <tr key={execution.id} className="border-b border-[var(--ark-line)]/70">
+                              <td className="px-2 py-2 font-medium">{job?.name ?? execution.jobId}</td>
+                              <td className={`px-2 py-2 ${statusClass}`}>{statusLabel}</td>
+                              <td className="px-2 py-2 text-sm mp-muted">{new Date(execution.updatedAt).toLocaleString()}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </>
+            )}
+          </SectionCard>
         </div>
 
-        <div className="relative mt-3 overflow-hidden rounded-2xl border border-[var(--ark-line)] p-3 sm:p-4 mp-relation-graph-surface">
-          <div className="pointer-events-none absolute right-3 top-3 z-10 flex flex-wrap items-center gap-2 rounded-full bg-white/70 px-2.5 py-1 text-[11px] text-slate-600 backdrop-blur">
-            <span className="inline-flex items-center gap-1">
-              <span className="h-2 w-2 rounded-full bg-emerald-500" />
-              已同步
-            </span>
-            <span className="inline-flex items-center gap-1">
-              <span className="h-2 w-2 rounded-full bg-amber-500" />
-              待同步
-            </span>
-            <span className="inline-flex items-center gap-1">
-              <span className="h-2 w-2 rounded-full bg-cyan-500" />
-              同步中
-            </span>
-            <span className="inline-flex items-center gap-1">
-              <span className="h-2 w-2 rounded-full bg-slate-400" />
-              孤立
-            </span>
-          </div>
-          {relationNodes.length ? (
-            <div className="mx-auto w-full max-w-[1320px]" style={{ aspectRatio: `${RELATION_GRAPH_WIDTH} / ${relationGraphHeight}` }}>
-              <svg viewBox={`0 0 ${RELATION_GRAPH_WIDTH} ${relationGraphHeight}`} className="h-full w-full" role="img" aria-label="存储同步关系图">
-                <defs>
-                  <marker id="relation-arrow-synced" markerWidth="12" markerHeight="12" refX="8.8" refY="6" orient="auto">
-                    <path d="M0,0 L0,12 L9,6 z" fill="#22c55e" />
-                  </marker>
-                  <marker id="relation-arrow-attention" markerWidth="12" markerHeight="12" refX="8.8" refY="6" orient="auto">
-                    <path d="M0,0 L0,12 L9,6 z" fill="#f59e0b" />
-                  </marker>
-                  <linearGradient id="relation-node-connected" x1="0%" y1="0%" x2="100%" y2="100%">
-                    <stop offset="0%" stopColor="#ecfeff" />
-                    <stop offset="100%" stopColor="#bfdbfe" />
-                  </linearGradient>
-                  <linearGradient id="relation-node-isolated" x1="0%" y1="0%" x2="100%" y2="100%">
-                    <stop offset="0%" stopColor="#f8fafc" />
-                    <stop offset="100%" stopColor="#e2e8f0" />
-                  </linearGradient>
-                  <pattern id="relation-grid" width="40" height="40" patternUnits="userSpaceOnUse">
-                    <path d="M 40 0 L 0 0 0 40" fill="none" stroke="rgba(148,163,184,0.18)" strokeWidth="1" />
-                  </pattern>
-                  <filter id="relation-node-shadow" x="-30%" y="-30%" width="160%" height="180%">
-                    <feDropShadow dx="0" dy="9" stdDeviation="6.5" floodColor="#0f172a" floodOpacity="0.15" />
-                  </filter>
-                </defs>
+        <div className="space-y-4">
+          <motion.article
+            className="mp-panel p-4"
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.03, duration: 0.2, ease: "easeOut" }}
+          >
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h3 className="text-base font-semibold">存储同步关系图</h3>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 text-sm">
+                <span className="mp-chip">存储节点 {relationNodes.length}</span>
+                <span className="mp-chip">同步关系 {relationEdges.length}</span>
+                <span className="mp-chip mp-chip-success">已同步 {relationSummary.syncedEdgeCount}</span>
+                <span className="mp-chip mp-chip-warning">待处理 {relationSummary.attentionEdgeCount}</span>
+                <span className="mp-chip">孤立节点 {relationSummary.isolatedNodeCount}</span>
+              </div>
+            </div>
 
-                <rect x={0} y={0} width={RELATION_GRAPH_WIDTH} height={relationGraphHeight} fill="url(#relation-grid)" opacity={0.68} />
-                <ellipse cx={RELATION_GRAPH_WIDTH * 0.2} cy={relationGraphHeight * 0.16} rx={RELATION_GRAPH_WIDTH * 0.19} ry={relationGraphHeight * 0.32} fill="rgba(56,189,248,0.08)" />
-                <ellipse cx={RELATION_GRAPH_WIDTH * 0.82} cy={relationGraphHeight * 0.84} rx={RELATION_GRAPH_WIDTH * 0.24} ry={relationGraphHeight * 0.34} fill="rgba(14,165,233,0.06)" />
+            <div className="relative mt-3 overflow-hidden rounded-2xl border border-[var(--ark-line)] p-3 sm:p-4 mp-relation-graph-surface">
+              <div className="pointer-events-none absolute right-3 top-3 z-10 flex flex-wrap items-center gap-2 rounded-full bg-white/70 px-2.5 py-1 text-[11px] text-slate-600 backdrop-blur">
+                <span className="inline-flex items-center gap-1">
+                  <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                  已同步
+                </span>
+                <span className="inline-flex items-center gap-1">
+                  <span className="h-2 w-2 rounded-full bg-amber-500" />
+                  待同步
+                </span>
+                <span className="inline-flex items-center gap-1">
+                  <span className="h-2 w-2 rounded-full bg-cyan-500" />
+                  同步中
+                </span>
+                <span className="inline-flex items-center gap-1">
+                  <span className="h-2 w-2 rounded-full bg-slate-400" />
+                  孤立
+                </span>
+              </div>
+              {relationNodes.length ? (
+                <div className="mx-auto w-full max-w-[1320px]" style={{ aspectRatio: `${RELATION_GRAPH_WIDTH} / ${relationGraphHeight}` }}>
+                  <svg viewBox={`0 0 ${RELATION_GRAPH_WIDTH} ${relationGraphHeight}`} className="h-full w-full" role="img" aria-label="存储同步关系图">
+                    <defs>
+                      <marker id="relation-arrow-synced" markerWidth="12" markerHeight="12" refX="8.8" refY="6" orient="auto">
+                        <path d="M0,0 L0,12 L9,6 z" fill="#22c55e" />
+                      </marker>
+                      <marker id="relation-arrow-attention" markerWidth="12" markerHeight="12" refX="8.8" refY="6" orient="auto">
+                        <path d="M0,0 L0,12 L9,6 z" fill="#f59e0b" />
+                      </marker>
+                      <linearGradient id="relation-node-connected" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" stopColor="#ecfeff" />
+                        <stop offset="100%" stopColor="#bfdbfe" />
+                      </linearGradient>
+                      <linearGradient id="relation-node-isolated" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" stopColor="#f8fafc" />
+                        <stop offset="100%" stopColor="#e2e8f0" />
+                      </linearGradient>
+                      <pattern id="relation-grid" width="40" height="40" patternUnits="userSpaceOnUse">
+                        <path d="M 40 0 L 0 0 0 40" fill="none" stroke="rgba(148,163,184,0.18)" strokeWidth="1" />
+                      </pattern>
+                      <filter id="relation-node-shadow" x="-30%" y="-30%" width="160%" height="180%">
+                        <feDropShadow dx="0" dy="9" stdDeviation="6.5" floodColor="#0f172a" floodOpacity="0.15" />
+                      </filter>
+                    </defs>
 
-                {renderedRelationEdges.map((edge) => (
-                  <g key={`edge:${edge.id}`}>
-                    <path
-                      d={edge.d}
-                      fill="none"
-                      stroke={edge.strokeColor}
-                      strokeWidth={3.2}
-                      strokeLinecap="round"
-                      markerEnd={`url(#${edge.markerId})`}
-                      strokeDasharray={edge.strokeDasharray}
-                      opacity={0.96}
-                    >
-                      <title>{edge.description}</title>
-                    </path>
+                    <rect x={0} y={0} width={RELATION_GRAPH_WIDTH} height={relationGraphHeight} fill="url(#relation-grid)" opacity={0.68} />
+                    <ellipse cx={RELATION_GRAPH_WIDTH * 0.2} cy={relationGraphHeight * 0.16} rx={RELATION_GRAPH_WIDTH * 0.19} ry={relationGraphHeight * 0.32} fill="rgba(56,189,248,0.08)" />
+                    <ellipse cx={RELATION_GRAPH_WIDTH * 0.82} cy={relationGraphHeight * 0.84} rx={RELATION_GRAPH_WIDTH * 0.24} ry={relationGraphHeight * 0.34} fill="rgba(14,165,233,0.06)" />
 
-                    {edge.isRunning ? (
-                      <>
+                    {renderedRelationEdges.map((edge) => (
+                      <g key={`edge:${edge.id}`}>
                         <path
                           d={edge.d}
                           fill="none"
-                          stroke="#22d3ee"
-                          strokeWidth={6.2}
+                          stroke={edge.strokeColor}
+                          strokeWidth={3.2}
                           strokeLinecap="round"
-                          className="mp-relation-edge-flow"
+                          markerEnd={`url(#${edge.markerId})`}
+                          strokeDasharray={edge.strokeDasharray}
                           opacity={0.96}
-                        />
-                        <circle r={4.2} fill="#22d3ee" className="mp-relation-energy" opacity={0.95}>
-                          <animateMotion dur="1.4s" repeatCount="indefinite" path={edge.d} />
-                        </circle>
-                        <circle r={3.3} fill="#67e8f9" className="mp-relation-energy" opacity={0.85}>
-                          <animateMotion dur="1.8s" begin="-0.9s" repeatCount="indefinite" path={edge.d} />
-                        </circle>
-                      </>
-                    ) : null}
+                        >
+                          <title>{edge.description}</title>
+                        </path>
 
-                    {edge.isInteractive ? (
-                      <path
-                        d={edge.d}
-                        fill="none"
-                        stroke="transparent"
-                        strokeWidth={18}
-                        className="mp-relation-edge-hit"
-                        onClick={() => handleRelationEdgeClick(edge.id)}
-                      />
-                    ) : null}
-                  </g>
-                ))}
+                        {edge.isRunning ? (
+                          <>
+                            <path
+                              d={edge.d}
+                              fill="none"
+                              stroke="#22d3ee"
+                              strokeWidth={6.2}
+                              strokeLinecap="round"
+                              className="mp-relation-edge-flow"
+                              opacity={0.96}
+                            />
+                            <circle r={4.2} fill="#22d3ee" className="mp-relation-energy" opacity={0.95}>
+                              <animateMotion dur="1.4s" repeatCount="indefinite" path={edge.d} />
+                            </circle>
+                            <circle r={3.3} fill="#67e8f9" className="mp-relation-energy" opacity={0.85}>
+                              <animateMotion dur="1.8s" begin="-0.9s" repeatCount="indefinite" path={edge.d} />
+                            </circle>
+                          </>
+                        ) : null}
 
-                {relationNodes.map((node) => {
-                  const pos = nodePositions.get(node.storageId);
-                  if (!pos) return null;
-                  const connected = relationSummary.connectedNodeIds.has(node.storageId);
-                  const fill = connected ? "url(#relation-node-connected)" : "url(#relation-node-isolated)";
-                  const stroke = connected ? "#0284c7" : "#94a3b8";
-                  const halo = connected ? "rgba(56,189,248,0.2)" : "rgba(148,163,184,0.16)";
-                  const statusDot = connected ? "#10b981" : "#94a3b8";
-
-                  return (
-                    <g key={`node:${node.storageId}`} transform={`translate(${pos.x}, ${pos.y})`} className="mp-relation-node">
-                      <g filter="url(#relation-node-shadow)">
-                        <circle r={RELATION_NODE_RADIUS + 4} fill={halo} />
-                        <circle r={RELATION_NODE_RADIUS} fill={fill} stroke={stroke} strokeWidth={2.8} />
-                        <circle r={RELATION_NODE_RADIUS - 10} fill="rgba(255,255,255,0.86)" stroke="rgba(148,163,184,0.34)" strokeWidth={1.2} />
-                        <circle cx={RELATION_NODE_RADIUS - 8} cy={-RELATION_NODE_RADIUS + 8} r={4.4} fill={statusDot} stroke="#ffffff" strokeWidth={1.4} />
+                        {edge.isInteractive ? (
+                          <path
+                            d={edge.d}
+                            fill="none"
+                            stroke="transparent"
+                            strokeWidth={18}
+                            className="mp-relation-edge-hit"
+                            onClick={() => handleRelationEdgeClick(edge.id)}
+                          />
+                        ) : null}
                       </g>
+                    ))}
 
-                      <text y={-6} textAnchor="middle" dominantBaseline="central" fontSize="10.5" fontWeight={600} fill="#475569" letterSpacing={0.2}>
-                        {getStorageTypeLabel(node.type)}
-                      </text>
+                    {relationNodes.map((node) => {
+                      const pos = nodePositions.get(node.storageId);
+                      if (!pos) return null;
+                      const connected = relationSummary.connectedNodeIds.has(node.storageId);
+                      const fill = connected ? "url(#relation-node-connected)" : "url(#relation-node-isolated)";
+                      const stroke = connected ? "#0284c7" : "#94a3b8";
+                      const halo = connected ? "rgba(56,189,248,0.2)" : "rgba(148,163,184,0.16)";
+                      const statusDot = connected ? "#10b981" : "#94a3b8";
 
-                      <text y={13} textAnchor="middle" fontSize="12" fontWeight={700} fill="#0f172a">
-                        {clipLabel(node.storageName, 12)}
-                      </text>
+                      return (
+                        <g key={`node:${node.storageId}`} transform={`translate(${pos.x}, ${pos.y})`} className="mp-relation-node">
+                          <g filter="url(#relation-node-shadow)">
+                            <circle r={RELATION_NODE_RADIUS + 4} fill={halo} />
+                            <circle r={RELATION_NODE_RADIUS} fill={fill} stroke={stroke} strokeWidth={2.8} />
+                            <circle r={RELATION_NODE_RADIUS - 10} fill="rgba(255,255,255,0.86)" stroke="rgba(148,163,184,0.34)" strokeWidth={1.2} />
+                            <circle cx={RELATION_NODE_RADIUS - 8} cy={-RELATION_NODE_RADIUS + 8} r={4.4} fill={statusDot} stroke="#ffffff" strokeWidth={1.4} />
+                          </g>
 
-                      <text
-                        y={RELATION_NODE_RADIUS + 22}
-                        textAnchor="middle"
-                        fontSize="10.5"
-                        fontWeight={600}
-                        fill="#334155"
-                        className="mp-relation-node-path"
-                        paintOrder="stroke"
-                        stroke="rgba(255,255,255,0.92)"
-                        strokeWidth={3.4}
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
-                        {clipLabel(node.basePath, 22)}
-                      </text>
+                          <text y={-6} textAnchor="middle" dominantBaseline="central" fontSize="10.5" fontWeight={600} fill="#475569" letterSpacing={0.2}>
+                            {getStorageTypeLabel(node.type)}
+                          </text>
 
-                      <title>{`${node.storageName}\n${node.basePath}`}</title>
-                    </g>
-                  );
-                })}
-              </svg>
+                          <text y={13} textAnchor="middle" fontSize="12" fontWeight={700} fill="#0f172a">
+                            {clipLabel(node.storageName, 12)}
+                          </text>
+
+                          <text
+                            y={RELATION_NODE_RADIUS + 22}
+                            textAnchor="middle"
+                            fontSize="10.5"
+                            fontWeight={600}
+                            fill="#334155"
+                            className="mp-relation-node-path"
+                            paintOrder="stroke"
+                            stroke="rgba(255,255,255,0.92)"
+                            strokeWidth={3.4}
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          >
+                            {clipLabel(node.basePath, 22)}
+                          </text>
+
+                          <title>{`${node.storageName}\n${node.basePath}`}</title>
+                        </g>
+                      );
+                    })}
+                  </svg>
+                </div>
+              ) : (
+                <p className="px-3 py-12 text-center text-sm mp-muted">暂无存储配置</p>
+              )}
             </div>
-          ) : (
-            <p className="px-3 py-12 text-center text-sm mp-muted">暂无存储配置</p>
-          )}
-        </div>
 
-      </motion.article>
+          </motion.article>
 
-      <motion.article
-        className="mp-panel p-4"
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.06, duration: 0.2, ease: "easeOut" }}
-      >
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h3 className="text-base font-semibold">媒体日期分布热力图</h3>
-          </div>
-        </div>
+          <motion.article
+            className="mp-panel p-4"
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.06, duration: 0.2, ease: "easeOut" }}
+          >
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h3 className="text-base font-semibold">媒体日期分布热力图</h3>
+              </div>
+            </div>
 
-        <div className="mt-3">
-          <SourceActivityHeatmap
-            data={sourceActivity}
-            selectedYear={selectedActivityYear}
-            loading={loadingActivity}
-            years={activityYears}
-            onSelectYear={handleSelectActivityYear}
-          />
-        </div>
-      </motion.article>
+            <div className="mt-3">
+              <SourceActivityHeatmap
+                data={sourceActivity}
+                selectedYear={selectedActivityYear}
+                loading={loadingActivity}
+                years={activityYears}
+                onSelectYear={handleSelectActivityYear}
+              />
+            </div>
+          </motion.article>
 
-      <motion.article
-        className="mp-panel p-4"
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.05, duration: 0.2, ease: "easeOut" }}
-      >
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h3 className="text-base font-semibold">存储盘容量</h3>
-            <p className="mt-1 text-sm mp-muted">
-              已读取 {capacitySummary.readable}/{capacitySummary.groups} 组
-              {capacitySummary.unreadable ? `，${capacitySummary.unreadable} 组不可读取` : ""}
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2 text-sm">
-            <span className="mp-chip">总容量 {formatBytes(capacitySummary.totalBytes)}</span>
-            <span className="mp-chip">已用 {formatBytes(capacitySummary.usedBytes)}</span>
-            <span className={summaryTone.chipClass}>整体剩余 {capacitySummary.freePercent}%</span>
-          </div>
-        </div>
+          <motion.article
+            className="mp-panel p-4"
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.05, duration: 0.2, ease: "easeOut" }}
+          >
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h3 className="text-base font-semibold">存储盘容量</h3>
+                <p className="mt-1 text-sm mp-muted">
+                  已读取 {capacitySummary.readable}/{capacitySummary.groups} 组
+                  {capacitySummary.unreadable ? `，${capacitySummary.unreadable} 组不可读取` : ""}
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 text-sm">
+                <span className="mp-chip">总容量 {formatBytes(capacitySummary.totalBytes)}</span>
+                <span className="mp-chip">已用 {formatBytes(capacitySummary.usedBytes)}</span>
+                <span className={summaryTone.chipClass}>整体剩余 {capacitySummary.freePercent}%</span>
+              </div>
+            </div>
 
-        <div className="mt-3 grid gap-3 lg:grid-cols-2">
-          {capacities.map((item) => {
-            const remainingPercent = getRemainingPercent(item.totalBytes, item.freeBytes);
-            const tone = getCapacityTone(remainingPercent);
-            return (
-              <div
-                key={item.id}
-                className="rounded-xl border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-3 transition-all hover:border-[var(--ark-line-strong)] hover:shadow-md"
-              >
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <p className="text-sm font-semibold break-all">{item.storageNames.join("、")}</p>
-                    <p className="text-xs mp-muted">{item.storageNames.length} 个配置存储</p>
-                  </div>
-                  {item.available ? (
-                    <span className={tone.chipClass}>
-                      剩余 {remainingPercent}% · {tone.statusText}
-                    </span>
-                  ) : (
-                    <span className="mp-chip mp-chip-warning">不可读取</span>
-                  )}
-                </div>
-
-                {item.available ? (
-                  <>
-                    <div className="mt-2 h-2.5 overflow-hidden rounded-full bg-[var(--ark-line)]">
-                      <div
-                        className={`h-full rounded-full ${tone.barClass}`}
-                        style={{ width: `${Math.min(100, Math.max(0, item.usedPercent ?? 0))}%` }}
-                      />
+            <div className="mt-3 grid gap-3 lg:grid-cols-2">
+              {capacities.map((item) => {
+                const remainingPercent = getRemainingPercent(item.totalBytes, item.freeBytes);
+                const tone = getCapacityTone(remainingPercent);
+                return (
+                  <div
+                    key={item.id}
+                    className="rounded-xl border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-3 transition-all hover:border-[var(--ark-line-strong)] hover:shadow-md"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <p className="text-sm font-semibold break-all">{item.storageNames.join("、")}</p>
+                        <p className="text-xs mp-muted">{item.storageNames.length} 个配置存储</p>
+                      </div>
+                      {item.available ? (
+                        <span className={tone.chipClass}>
+                          剩余 {remainingPercent}% · {tone.statusText}
+                        </span>
+                      ) : (
+                        <span className="mp-chip mp-chip-warning">不可读取</span>
+                      )}
                     </div>
-                    <p className="mt-2 text-sm mp-muted">
-                      已用 {formatBytes(item.usedBytes)} / 总量 {formatBytes(item.totalBytes)} · 可用 {formatBytes(item.freeBytes)}
-                    </p>
-                  </>
-                ) : (
-                  <p className="mt-2 text-sm mp-muted">{item.reason ?? "无法读取该存储容量"}</p>
-                )}
-              </div>
-            );
-          })}
-          {!capacities.length ? <p className="text-sm mp-muted">暂无存储容量数据</p> : null}
-        </div>
-      </motion.article>
 
-      <motion.article
-        className="mp-panel p-4"
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.08, duration: 0.2, ease: "easeOut" }}
-      >
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h3 className="text-base font-semibold">媒体分布（按存储目录）</h3>
-          </div>
-          <div className="flex flex-wrap items-center gap-2 text-sm">
-            <span className="mp-chip">
-              有媒体的存储 {mediaSummary.storagesWithMedia}/{mediaSummary.totalStorages}
-            </span>
-            <span className="mp-chip">总数量 {mediaSummary.totalCount}</span>
-            <span className="mp-chip">总体积 {formatBytes(mediaSummary.totalBytes)}</span>
-          </div>
-        </div>
-
-        <div className="mt-3 grid gap-3 xl:grid-cols-2">
-          {storageMediaSummary.map((item) => {
-            const countSlices: PieSlice[] = [
-              { label: "视频", value: item.counts.video, color: mediaColors.video, formattedValue: String(item.counts.video) },
-              { label: "图片", value: item.counts.image, color: mediaColors.image, formattedValue: String(item.counts.image) },
-              {
-                label: "Live Photo",
-                value: item.counts.livePhoto,
-                color: mediaColors.livePhoto,
-                formattedValue: String(item.counts.livePhoto)
-              }
-            ];
-            const sizeSlices: PieSlice[] = [
-              { label: "视频", value: item.bytes.video, color: mediaColors.video, formattedValue: formatBytes(item.bytes.video) },
-              { label: "图片", value: item.bytes.image, color: mediaColors.image, formattedValue: formatBytes(item.bytes.image) },
-              {
-                label: "Live Photo",
-                value: item.bytes.livePhoto,
-                color: mediaColors.livePhoto,
-                formattedValue: formatBytes(item.bytes.livePhoto)
-              }
-            ];
-            return (
-              <div
-                key={item.storageId}
-                className="rounded-xl border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-3 transition-all hover:border-[var(--ark-line-strong)] hover:shadow-md"
-              >
-                <div className="flex flex-wrap items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold break-all">{item.storageName}</p>
-                    <p className="text-xs mp-muted break-all">{item.basePath}</p>
+                    {item.available ? (
+                      <>
+                        <div className="mt-2 h-2.5 overflow-hidden rounded-full bg-[var(--ark-line)]">
+                          <div
+                            className={`h-full rounded-full ${tone.barClass}`}
+                            style={{ width: `${Math.min(100, Math.max(0, item.usedPercent ?? 0))}%` }}
+                          />
+                        </div>
+                        <p className="mt-2 text-sm mp-muted">
+                          已用 {formatBytes(item.usedBytes)} / 总量 {formatBytes(item.totalBytes)} · 可用 {formatBytes(item.freeBytes)}
+                        </p>
+                      </>
+                    ) : (
+                      <p className="mt-2 text-sm mp-muted">{item.reason ?? "无法读取该存储容量"}</p>
+                    )}
                   </div>
-                  <span className="mp-chip">
-                    {item.totalCount} 项 · {formatBytes(item.totalBytes)}
-                  </span>
-                </div>
-                <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                  <PieStatCard title="数量分布" totalLabel={`${item.totalCount} 项`} emptyLabel="暂无数据" slices={countSlices} />
-                  <PieStatCard title="体积分布" totalLabel={formatBytes(item.totalBytes)} emptyLabel="暂无数据" slices={sizeSlices} />
-                </div>
+                );
+              })}
+              {!capacities.length ? <p className="text-sm mp-muted">暂无存储容量数据</p> : null}
+            </div>
+          </motion.article>
+
+          <motion.article
+            className="mp-panel p-4"
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.08, duration: 0.2, ease: "easeOut" }}
+          >
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h3 className="text-base font-semibold">媒体分布（按存储目录）</h3>
               </div>
-            );
-          })}
-          {!storageMediaSummary.length ? <p className="text-sm mp-muted">暂无媒体统计数据</p> : null}
+              <div className="flex flex-wrap items-center gap-2 text-sm">
+                <span className="mp-chip">
+                  有媒体的存储 {mediaSummary.storagesWithMedia}/{mediaSummary.totalStorages}
+                </span>
+                <span className="mp-chip">总数量 {mediaSummary.totalCount}</span>
+                <span className="mp-chip">总体积 {formatBytes(mediaSummary.totalBytes)}</span>
+              </div>
+            </div>
+
+            <div className="mt-3 grid gap-3 xl:grid-cols-2">
+              {storageMediaSummary.map((item) => {
+                const countSlices: PieSlice[] = [
+                  { label: "视频", value: item.counts.video, color: mediaColors.video, formattedValue: String(item.counts.video) },
+                  { label: "图片", value: item.counts.image, color: mediaColors.image, formattedValue: String(item.counts.image) },
+                  {
+                    label: "Live Photo",
+                    value: item.counts.livePhoto,
+                    color: mediaColors.livePhoto,
+                    formattedValue: String(item.counts.livePhoto)
+                  }
+                ];
+                const sizeSlices: PieSlice[] = [
+                  { label: "视频", value: item.bytes.video, color: mediaColors.video, formattedValue: formatBytes(item.bytes.video) },
+                  { label: "图片", value: item.bytes.image, color: mediaColors.image, formattedValue: formatBytes(item.bytes.image) },
+                  {
+                    label: "Live Photo",
+                    value: item.bytes.livePhoto,
+                    color: mediaColors.livePhoto,
+                    formattedValue: formatBytes(item.bytes.livePhoto)
+                  }
+                ];
+                return (
+                  <div
+                    key={item.storageId}
+                    className="rounded-xl border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-3 transition-all hover:border-[var(--ark-line-strong)] hover:shadow-md"
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold break-all">{item.storageName}</p>
+                        <p className="text-xs mp-muted break-all">{item.basePath}</p>
+                      </div>
+                      <span className="mp-chip">
+                        {item.totalCount} 项 · {formatBytes(item.totalBytes)}
+                      </span>
+                    </div>
+                    <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                      <PieStatCard title="数量分布" totalLabel={`${item.totalCount} 项`} emptyLabel="暂无数据" slices={countSlices} />
+                      <PieStatCard title="体积分布" totalLabel={formatBytes(item.totalBytes)} emptyLabel="暂无数据" slices={sizeSlices} />
+                    </div>
+                  </div>
+                );
+              })}
+              {!storageMediaSummary.length ? <p className="text-sm mp-muted">暂无媒体统计数据</p> : null}
+            </div>
+          </motion.article>
         </div>
-      </motion.article>
+      </div>
 
       {edgeActionEdge ? (
         <div

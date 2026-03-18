@@ -1,4 +1,3 @@
-import * as Collapsible from "@radix-ui/react-collapsible";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { ConfirmDialog } from "../components/confirm-dialog";
 import { InlineAlert } from "../components/inline-alert";
@@ -7,6 +6,7 @@ import { TablePagination } from "../components/table/table-pagination";
 import { SortableHeader } from "../components/table/sortable-header";
 import { TableToolbar } from "../components/table/table-toolbar";
 import { useTablePagination } from "../components/table/use-table-pagination";
+import { SectionCard } from "../components/ui/section-card";
 import { useLocalStorageState } from "../hooks/use-local-storage-state";
 import { browseDirectories, createStorage, deleteStorage, getStorages } from "../lib/api";
 import type { StorageTarget } from "../types/api";
@@ -42,7 +42,6 @@ export function StoragesPage() {
   const [form, setForm] = useState<Omit<StorageTarget, "id">>(() => createInitialForm(lastStorageType));
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
-  const [formOpen, setFormOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("name");
   const [sortAsc, setSortAsc] = useState(true);
@@ -148,15 +147,13 @@ export function StoragesPage() {
   const localCount = items.filter((item) => item.type !== "cloud_115").length;
 
   return (
-    <section className="space-y-3 md:flex md:h-full md:flex-col">
-      <Collapsible.Root open={formOpen} onOpenChange={setFormOpen} className="mp-panel mp-panel-soft p-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className="text-base font-semibold">目标存储</h3>
-            <p className="mt-1 text-sm mp-muted">管理本地 NAS、外接 SSD 和 115 云盘等备份目标。</p>
-          </div>
-          <Collapsible.Trigger className="mp-btn">{formOpen ? "收起" : "新增存储"}</Collapsible.Trigger>
-        </div>
+    <section className="grid gap-4 md:grid-cols-[360px_minmax(0,1fr)]">
+      <SectionCard
+        title="新增存储"
+        description="管理本地 NAS、外接 SSD 和 115 云盘等备份目标。"
+        className="md:sticky md:top-4 md:self-start"
+        variant="panelSoft"
+      >
         {message ? (
           <InlineAlert tone="success" className="mt-3" autoCloseMs={5200} onClose={() => setMessage("")}>
             {message}
@@ -168,93 +165,86 @@ export function StoragesPage() {
           </InlineAlert>
         ) : null}
 
-        <Collapsible.Content>
-          <form onSubmit={(e) => void onSubmit(e)} className="mt-4 grid gap-3 sm:grid-cols-2">
-            <div className="space-y-1">
-              <label htmlFor="storage-name" className="text-sm font-medium">
-                名称
-              </label>
-              <input
-                id="storage-name"
-                className="mp-input"
-                placeholder="例如：NAS-主盘"
-                value={form.name}
-                onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
+        <form id="storage-form" onSubmit={(e) => void onSubmit(e)} className="mt-4 grid gap-3 sm:grid-cols-2">
+          <div className="space-y-1">
+            <label htmlFor="storage-name" className="text-sm font-medium">
+              名称
+            </label>
+            <input
+              id="storage-name"
+              className="mp-input"
+              placeholder="例如：NAS-主盘"
+              value={form.name}
+              onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
+              required
+            />
+            <p className="text-xs mp-muted">建议带上设备角色，例如“NAS-照片库”或“移动 SSD”。</p>
+          </div>
+          <div className="space-y-1">
+            <label htmlFor="storage-type" className="text-sm font-medium">
+              类型
+            </label>
+            <select
+              id="storage-type"
+              className="mp-select"
+              value={form.type}
+              onChange={(e) => {
+                const nextType = e.target.value as StorageTarget["type"];
+                setForm((p) => ({ ...p, type: nextType }));
+                setLastStorageType(nextType);
+              }}
+            >
+              <option value="local_fs">NAS</option>
+              <option value="external_ssd">SSD</option>
+              <option value="cloud_115">115 云盘</option>
+            </select>
+          </div>
+          <div className="sm:col-span-2">
+            <label className="mb-1 block text-sm font-medium">路径</label>
+            {isLocalType ? (
+              <PathPicker
+                value={form.basePath}
+                onChange={(basePath) => setForm((p) => ({ ...p, basePath }))}
+                placeholder="输入本地目录路径，或点右侧选择路径"
+                browse={browseDirectories}
                 required
               />
-              <p className="text-xs mp-muted">建议带上设备角色，例如“NAS-照片库”或“移动 SSD”。</p>
-            </div>
-            <div className="space-y-1">
-              <label htmlFor="storage-type" className="text-sm font-medium">
-                类型
-              </label>
-              <select
-                id="storage-type"
-                className="mp-select"
-                value={form.type}
-                onChange={(e) => {
-                  const nextType = e.target.value as StorageTarget["type"];
-                  setForm((p) => ({ ...p, type: nextType }));
-                  setLastStorageType(nextType);
-                }}
-              >
-                <option value="local_fs">NAS</option>
-                <option value="external_ssd">SSD</option>
-                <option value="cloud_115">115 云盘</option>
-              </select>
-            </div>
-            <div className="sm:col-span-2">
-              <label className="mb-1 block text-sm font-medium">路径</label>
-              {isLocalType ? (
-                <PathPicker
-                  value={form.basePath}
-                  onChange={(basePath) => setForm((p) => ({ ...p, basePath }))}
-                  placeholder="输入本地目录路径，或点右侧选择路径"
-                  browse={browseDirectories}
-                  required
-                />
-              ) : (
-                <input
-                  className="mp-input"
-                  placeholder="115://photoark 或其他 URI"
-                  value={form.basePath}
-                  onChange={(e) => setForm((p) => ({ ...p, basePath: e.target.value }))}
-                  required
-                />
-              )}
-              <p className="mt-1 text-xs mp-muted">
-                {isLocalType ? "本地存储请选择实际挂载目录；建议为单一根目录，避免和其他存储重叠。" : "云存储请填写标准 URI，例如 115://photoark。"}
-              </p>
-            </div>
-
-            <label className="mp-subtle-card flex items-center gap-2 p-3 text-sm sm:col-span-2">
+            ) : (
               <input
-                type="checkbox"
-                checked={form.encrypted}
-                onChange={(e) => setForm((p) => ({ ...p, encrypted: e.target.checked }))}
+                className="mp-input"
+                placeholder="115://photoark 或其他 URI"
+                value={form.basePath}
+                onChange={(e) => setForm((p) => ({ ...p, basePath: e.target.value }))}
+                required
               />
-              加密存储
-            </label>
-            <button type="submit" className="mp-btn mp-btn-primary sm:col-span-2">新增存储</button>
-          </form>
-        </Collapsible.Content>
-      </Collapsible.Root>
+            )}
+            <p className="mt-1 text-xs mp-muted">
+              {isLocalType ? "本地存储请选择实际挂载目录；建议为单一根目录，避免和其他存储重叠。" : "云存储请填写标准 URI，例如 115://photoark。"}
+            </p>
+          </div>
+
+          <label className="mp-subtle-card flex items-center gap-2 p-3 text-sm sm:col-span-2">
+            <input
+              type="checkbox"
+              checked={form.encrypted}
+              onChange={(e) => setForm((p) => ({ ...p, encrypted: e.target.checked }))}
+            />
+            加密存储
+          </label>
+          <button type="submit" className="mp-btn mp-btn-primary sm:col-span-2">新增存储</button>
+        </form>
+      </SectionCard>
 
       <div className="mp-panel p-4 md:flex md:min-h-0 md:flex-1 md:flex-col">
-        <TableToolbar
-          title="存储列表"
-          search={search}
-          onSearchChange={setSearch}
-          pageSize={table.pageSize}
-          onPageSizeChange={table.setPageSize}
-          totalItems={table.totalItems}
-        />
-        <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
-          <span className="mp-chip">总存储 {items.length}</span>
-          <span className="mp-chip">本地存储 {localCount}</span>
-          <span className="mp-chip mp-chip-success">加密存储 {encryptedCount}</span>
-        </div>
-        <div className="mb-2 flex justify-end">
+        <div className="mp-toolbar">
+          <TableToolbar
+            title="存储列表"
+            search={search}
+            onSearchChange={setSearch}
+            pageSize={table.pageSize}
+            onPageSizeChange={table.setPageSize}
+            totalItems={table.totalItems}
+          />
           <button
             className="mp-btn"
             type="button"
@@ -264,7 +254,11 @@ export function StoragesPage() {
             {deletingSelected ? "删除中..." : `批量删除 (${selected.size})`}
           </button>
         </div>
-
+        <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
+          <span className="mp-chip">总存储 {items.length}</span>
+          <span className="mp-chip">本地存储 {localCount}</span>
+          <span className="mp-chip mp-chip-success">加密存储 {encryptedCount}</span>
+        </div>
         <div className="space-y-2 md:hidden">
           {table.paged.map((s) => (
             <article key={s.id} className="mp-mobile-card">
@@ -298,7 +292,8 @@ export function StoragesPage() {
         </div>
 
         <div className="hidden md:block md:min-h-0 md:flex-1 md:overflow-auto">
-          <table className="mp-data-table min-w-full text-sm">
+          <div className="mp-table-shell">
+            <table className="mp-data-table min-w-full text-sm">
             <thead>
               <tr className="border-b border-[var(--ark-line)] text-left text-sm mp-muted">
                 <th className="px-2 py-2">
@@ -366,13 +361,20 @@ export function StoragesPage() {
                 </tr>
               ) : null}
             </tbody>
-          </table>
+            </table>
+          </div>
         </div>
 
         <TablePagination page={table.page} totalPages={table.totalPages} onChange={table.setPage} />
         {!table.totalItems ? (
           <div className="mt-3 flex justify-center md:justify-end">
-            <button type="button" className="mp-btn" onClick={() => setFormOpen(true)}>
+            <button
+              type="button"
+              className="mp-btn"
+              onClick={() => {
+                document.getElementById("storage-form")?.scrollIntoView({ behavior: "smooth", block: "start" });
+              }}
+            >
               去新增存储
             </button>
           </div>

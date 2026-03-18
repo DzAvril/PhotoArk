@@ -10,7 +10,7 @@ type EmptyStateProps = {
 
 export function EmptyState({ title, description, icon, action, className }: EmptyStateProps) {
   return (
-    <div className={`rounded-2xl border border-[var(--ark-line)] bg-[var(--ark-surface)] p-4 ${className ?? ""}`}>
+    <div className={`mp-panel mp-panel-soft p-4 ${className ?? ""}`}>
       <div className="flex items-start gap-3">
         {icon ? (
           <div className="mt-0.5 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] text-[var(--ark-ink-soft)]">
@@ -26,4 +26,3 @@ export function EmptyState({ title, description, icon, action, className }: Empt
     </div>
   );
 }
-

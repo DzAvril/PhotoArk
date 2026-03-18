@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { InlineAlert } from "../components/inline-alert";
+import { EmptyState } from "../components/ui/empty-state";
+import { SectionCard } from "../components/ui/section-card";
 import { compareStorages, getStorages } from "../lib/api";
 import type { StorageTarget } from "../types/api";
 import type { DiffItem, DiffResult, DiffFilters, DiffFilterStatus, DiffFilterKind } from "../types/diff";
@@ -122,54 +124,51 @@ export function DiffPage() {
   const summary = result?.summary;
 
   return (
-    <section className="space-y-3 md:flex md:h-full md:flex-col">
-      <div className="mp-panel p-4">
-        <div className="mb-4">
-          <h3 className="text-base font-semibold">存储对比</h3>
-          <p className="mt-1 text-sm mp-muted">用于按目录比较两个存储的文件差异，适合人工核对，不会直接执行同步。</p>
-        </div>
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-end">
-          <div className="grid flex-1 gap-4 md:grid-cols-2">
-            <div className="space-y-1">
-              <label className="text-sm font-medium">左侧存储</label>
-              <select
-                className="mp-select"
-                value={leftStorageId}
-                onChange={(e) => setLeftStorageId(e.target.value)}
-              >
-                <option value="">选择存储</option>
-                {storages.map((s) => (
-                  <option key={s.id} value={s.id} disabled={s.id === rightStorageId}>
-                    {s.name} ({getStorageTypeLabel(s.type)})
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="space-y-1">
-              <label className="text-sm font-medium">右侧存储</label>
-              <select
-                className="mp-select"
-                value={rightStorageId}
-                onChange={(e) => setRightStorageId(e.target.value)}
-              >
-                <option value="">选择存储</option>
-                {storages.map((s) => (
-                  <option key={s.id} value={s.id} disabled={s.id === leftStorageId}>
-                    {s.name} ({getStorageTypeLabel(s.type)})
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-          <div className="flex gap-2">
-            <button
-              type="button"
-              className="mp-btn mp-btn-primary"
-              onClick={() => void handleCompare()}
-              disabled={loading || !leftStorageId || !rightStorageId}
+    <section className="space-y-4 md:flex md:h-full md:flex-col">
+      <SectionCard
+        title="存储对比"
+        description="用于按目录比较两个存储的文件差异，适合人工核对，不会直接执行同步。"
+        right={
+          <button
+            type="button"
+            className="mp-btn mp-btn-primary"
+            onClick={() => void handleCompare()}
+            disabled={loading || !leftStorageId || !rightStorageId}
+          >
+            {loading ? "对比中..." : "开始对比"}
+          </button>
+        }
+      >
+        <div className="grid gap-3 md:grid-cols-2">
+          <div className="space-y-1">
+            <label className="text-sm font-medium">左侧存储</label>
+            <select
+              className="mp-select"
+              value={leftStorageId}
+              onChange={(e) => setLeftStorageId(e.target.value)}
             >
-              {loading ? "对比中..." : "开始对比"}
-            </button>
+              <option value="">选择存储</option>
+              {storages.map((s) => (
+                <option key={s.id} value={s.id} disabled={s.id === rightStorageId}>
+                  {s.name} ({getStorageTypeLabel(s.type)})
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="space-y-1">
+            <label className="text-sm font-medium">右侧存储</label>
+            <select
+              className="mp-select"
+              value={rightStorageId}
+              onChange={(e) => setRightStorageId(e.target.value)}
+            >
+              <option value="">选择存储</option>
+              {storages.map((s) => (
+                <option key={s.id} value={s.id} disabled={s.id === leftStorageId}>
+                  {s.name} ({getStorageTypeLabel(s.type)})
+                </option>
+              ))}
+            </select>
           </div>
         </div>
 
@@ -180,89 +179,99 @@ export function DiffPage() {
         ) : null}
 
         {summary ? (
-          <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-8">
-            <div className="rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface)] p-2 text-center">
-              <div className="text-lg font-bold">{summary.totalCount}</div>
-              <div className="text-xs mp-muted">总文件数</div>
+          <div className="mt-4 mp-stat-grid">
+            <div className="mp-stat-card">
+              <h4>总文件数</h4>
+              <p className="text-2xl font-semibold">{summary.totalCount}</p>
             </div>
-            <div className="rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface)] p-2 text-center">
-              <div className="text-lg font-bold text-amber-600">{summary.leftOnlyCount}</div>
-              <div className="text-xs mp-muted">仅左侧</div>
+            <div className="mp-stat-card">
+              <h4>仅左侧</h4>
+              <p className="text-2xl font-semibold text-amber-600">{summary.leftOnlyCount}</p>
             </div>
-            <div className="rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface)] p-2 text-center">
-              <div className="text-lg font-bold text-amber-600">{summary.rightOnlyCount}</div>
-              <div className="text-xs mp-muted">仅右侧</div>
+            <div className="mp-stat-card">
+              <h4>仅右侧</h4>
+              <p className="text-2xl font-semibold text-amber-600">{summary.rightOnlyCount}</p>
             </div>
-            <div className="rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface)] p-2 text-center">
-              <div className="text-lg font-bold text-emerald-600">{summary.bothSameCount}</div>
-              <div className="text-xs mp-muted">完全相同</div>
+            <div className="mp-stat-card">
+              <h4>完全相同</h4>
+              <p className="text-2xl font-semibold text-emerald-600">{summary.bothSameCount}</p>
             </div>
-            <div className="rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface)] p-2 text-center">
-              <div className="text-lg font-bold text-red-600">{summary.bothDifferentCount}</div>
-              <div className="text-xs mp-muted">存在差异</div>
+            <div className="mp-stat-card">
+              <h4>存在差异</h4>
+              <p className="text-2xl font-semibold text-red-600">{summary.bothDifferentCount}</p>
             </div>
-            <div className="rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface)] p-2 text-center">
-              <div className="text-lg font-bold">{summary.imageCount}</div>
-              <div className="text-xs mp-muted">图片</div>
+            <div className="mp-stat-card">
+              <h4>图片</h4>
+              <p className="text-2xl font-semibold">{summary.imageCount}</p>
             </div>
-            <div className="rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface)] p-2 text-center">
-              <div className="text-lg font-bold">{summary.videoCount}</div>
-              <div className="text-xs mp-muted">视频</div>
+            <div className="mp-stat-card">
+              <h4>视频</h4>
+              <p className="text-2xl font-semibold">{summary.videoCount}</p>
             </div>
           </div>
         ) : null}
-      </div>
+      </SectionCard>
 
       {result ? (
-        <div className="mp-panel flex min-h-0 flex-1 flex-col p-4">
-          <div className="mb-3 flex flex-wrap items-center gap-3">
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-medium">状态:</span>
-              <select
-                className="mp-select h-8 min-h-0 py-1 text-sm"
-                value={filters.status}
-                onChange={(e) => setFilters((f) => ({ ...f, status: e.target.value as DiffFilterStatus }))}
-              >
-                <option value="all">全部 ({summary?.totalCount ?? 0})</option>
-                <option value="left_only">仅左侧 ({summary?.leftOnlyCount ?? 0})</option>
-                <option value="right_only">仅右侧 ({summary?.rightOnlyCount ?? 0})</option>
-                <option value="different">有差异 ({summary?.bothDifferentCount ?? 0})</option>
-                <option value="same">完全相同 ({summary?.bothSameCount ?? 0})</option>
-              </select>
+        <SectionCard
+          title="差异明细"
+          description="支持状态、类型与关键字过滤，可快速定位差异文件。"
+          className="md:min-h-0 md:flex-1 md:flex md:flex-col"
+          right={
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <span className="mp-chip">显示 {filteredItems.length} / {result.items.length}</span>
+              <span className="mp-chip">{statusLabels[filters.status]}</span>
+              <span className="mp-chip">{kindLabels[filters.kind]}</span>
             </div>
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-medium">类型:</span>
-              <select
-                className="mp-select h-8 min-h-0 py-1 text-sm"
-                value={filters.kind}
-                onChange={(e) => setFilters((f) => ({ ...f, kind: e.target.value as DiffFilterKind }))}
-              >
-                <option value="all">全部</option>
-                <option value="image">图片</option>
-                <option value="video">视频</option>
-                <option value="other">其他</option>
-              </select>
+          }
+        >
+          <div className="mp-toolbar">
+            <div className="mp-toolbar-group">
+              <label className="text-sm font-medium">
+                状态
+                <select
+                  className="mp-select ml-2 h-8 min-h-0 py-1 text-sm"
+                  value={filters.status}
+                  onChange={(e) => setFilters((f) => ({ ...f, status: e.target.value as DiffFilterStatus }))}
+                >
+                  <option value="all">全部 ({summary?.totalCount ?? 0})</option>
+                  <option value="left_only">仅左侧 ({summary?.leftOnlyCount ?? 0})</option>
+                  <option value="right_only">仅右侧 ({summary?.rightOnlyCount ?? 0})</option>
+                  <option value="different">有差异 ({summary?.bothDifferentCount ?? 0})</option>
+                  <option value="same">完全相同 ({summary?.bothSameCount ?? 0})</option>
+                </select>
+              </label>
+              <label className="text-sm font-medium">
+                类型
+                <select
+                  className="mp-select ml-2 h-8 min-h-0 py-1 text-sm"
+                  value={filters.kind}
+                  onChange={(e) => setFilters((f) => ({ ...f, kind: e.target.value as DiffFilterKind }))}
+                >
+                  <option value="all">全部</option>
+                  <option value="image">图片</option>
+                  <option value="video">视频</option>
+                  <option value="other">其他</option>
+                </select>
+              </label>
             </div>
-            <div className="flex flex-1 items-center gap-2">
-              <span className="text-sm font-medium">搜索:</span>
-              <input
-                type="text"
-                className="mp-input h-8 min-h-0 py-1 text-sm"
-                placeholder="输入文件路径关键词..."
-                value={filters.search}
-                onChange={(e) => setFilters((f) => ({ ...f, search: e.target.value }))}
-              />
+            <div className="mp-toolbar-group">
+              <label className="text-sm font-medium">
+                搜索
+                <input
+                  type="text"
+                  className="mp-input ml-2 h-8 min-h-0 py-1 text-sm"
+                  placeholder="输入文件路径关键词..."
+                  value={filters.search}
+                  onChange={(e) => setFilters((f) => ({ ...f, search: e.target.value }))}
+                />
+              </label>
             </div>
           </div>
 
-          <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
-            <span className="mp-chip">显示 {filteredItems.length} / {result.items.length}</span>
-            <span className="mp-chip">{statusLabels[filters.status]}</span>
-            <span className="mp-chip">{kindLabels[filters.kind]}</span>
-          </div>
-
-          <div className="min-h-0 flex-1 overflow-auto">
-            <table className="mp-data-table min-w-full text-sm">
+          <div className="mt-3 min-h-0 flex-1 overflow-auto">
+            <div className="mp-table-shell">
+              <table className="mp-data-table min-w-full text-sm">
               <thead>
                 <tr className="border-b border-[var(--ark-line)] text-left">
                   <th className="px-2 py-2 text-xs font-semibold">相对路径</th>
@@ -360,9 +369,13 @@ export function DiffPage() {
                 )}
               </tbody>
             </table>
+              </table>
+            </div>
           </div>
-        </div>
-      ) : null}
+        </SectionCard>
+      ) : (
+        <EmptyState title="暂无对比结果" description="选择两个存储并开始对比后，这里会展示差异明细。" />
+      )}
 
       <DiffPreviewModal
         isOpen={!!previewItem}

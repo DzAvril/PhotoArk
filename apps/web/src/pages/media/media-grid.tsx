@@ -18,6 +18,7 @@ type MediaGridProps = {
   onOpen: (path: string) => void;
   onThumbImageError: (path: string) => void;
   onThumbVideoError: (path: string) => void;
+  emptyHint?: string;
 };
 
 type GridItemData = {
@@ -87,7 +88,8 @@ export function MediaGrid(props: MediaGridProps) {
     brokenThumbVideoPaths,
     onOpen,
     onThumbImageError,
-    onThumbVideoError
+    onThumbVideoError,
+    emptyHint
   } = props;
 
   return (
@@ -135,8 +137,9 @@ export function MediaGrid(props: MediaGridProps) {
             </AutoSizer>
           ) : (
             <div className="overflow-auto h-full">
-               <p className="py-5 text-center text-sm mp-muted">
-                {selectedStorage ? "该位置暂无可浏览媒体，可尝试切换筛选类型。" : "请先选择存储后再浏览媒体。"}
+              <p className="py-5 text-center text-sm mp-muted">
+                {emptyHint ??
+                  (selectedStorage ? "该位置暂无可浏览媒体，可尝试切换筛选类型。" : "请先选择存储后再浏览媒体。")}
               </p>
             </div>
           )}
