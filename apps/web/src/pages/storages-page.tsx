@@ -71,7 +71,6 @@ export function StoragesPage() {
       await createStorage(form);
       setLastStorageType(form.type);
       setForm(createInitialForm(form.type));
-      setFormOpen(false);
       await load();
     } catch (err) {
       setError((err as Error).message);

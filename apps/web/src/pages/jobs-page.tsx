@@ -198,7 +198,6 @@ export function JobsPage() {
       setLastDestinationTargetId(form.destinationTargetId);
       setForm(createInitialForm(form.sourceTargetId, form.destinationTargetId));
       setEditingJobId(null);
-      setFormOpen(false);
       await load();
       setMessage(editingJobId ? "任务已更新。" : "任务已创建。");
     } catch (err) {
@@ -216,7 +215,6 @@ export function JobsPage() {
       watchMode: job.watchMode,
       enabled: job.enabled
     });
-    setFormOpen(true);
   }
 
   useEffect(() => {
