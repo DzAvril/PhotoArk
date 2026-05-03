@@ -15,10 +15,15 @@ export type FieldProps = {
 export function Field({ id, label, help, error, children }: FieldProps) {
   const helpId = help ? `${id}-help` : undefined;
   const errorId = error ? `${id}-error` : undefined;
+  const describedByIds =
+    React.isValidElement<FieldControlProps>(children)
+      ? [children.props["aria-describedby"], helpId, errorId].filter(Boolean).join(" ")
+      : undefined;
   const control =
-    helpId && React.isValidElement<FieldControlProps>(children)
+    React.isValidElement<FieldControlProps>(children)
       ? React.cloneElement(children, {
-          "aria-describedby": [children.props["aria-describedby"], helpId].filter(Boolean).join(" ")
+          ...(describedByIds ? { "aria-describedby": describedByIds } : {}),
+          ...(error ? { "aria-invalid": true } : {})
         })
       : children;
 
