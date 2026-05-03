@@ -1,5 +1,5 @@
-import { forwardRef } from "react";
-import type { ButtonHTMLAttributes, ReactNode } from "react";
+import React, { forwardRef } from "react";
+import type { ButtonHTMLAttributes } from "react";
 
 type ButtonVariant = "default" | "primary" | "danger";
 type ButtonSize = "sm" | "md";
@@ -8,7 +8,6 @@ export type ButtonProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, "classNa
   variant?: ButtonVariant;
   size?: ButtonSize;
   busy?: boolean;
-  icon?: ReactNode;
   className?: string;
 };
 
@@ -25,20 +24,19 @@ const variantClass: Record<ButtonVariant, string> = {
 };
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
-  { variant = "default", size = "md", busy = false, icon, disabled, children, className, ...props },
+  { variant = "default", size = "md", busy = false, disabled, children, className, type = "button", ...props },
   ref
 ) {
   const isDisabled = Boolean(disabled || busy);
   return (
     <button
       ref={ref}
-      type="button"
+      type={type}
       aria-busy={busy || undefined}
       disabled={isDisabled}
       className={`${baseClass} ${sizeClass[size]} ${variantClass[variant]} ${className ?? ""}`}
       {...props}
     >
-      {icon ? <span className="inline-flex h-4 w-4 items-center justify-center">{icon}</span> : null}
       {children}
     </button>
   );

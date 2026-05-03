@@ -1,4 +1,4 @@
-import { forwardRef } from "react";
+import React, { forwardRef } from "react";
 import type { HTMLAttributes, ReactNode } from "react";
 
 type CardVariant = "panel" | "panelSoft" | "panelHero" | "subtle" | "plain";

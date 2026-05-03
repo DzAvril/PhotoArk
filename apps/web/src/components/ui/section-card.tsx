@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import React, { type ReactNode } from "react";
 import { Card } from "./card";
 import type { CardVariant } from "./card";
 
@@ -14,7 +14,7 @@ type SectionCardProps = {
 
 export function SectionCard({ variant = "panel", title, description, right, children, className, headerClassName }: SectionCardProps) {
   return (
-    <Card variant={variant} className={`p-4 md:p-5 ${className ?? ""}`}>
+    <Card variant={variant} className={`p-4 ${className ?? ""}`}>
       <div className={`flex flex-wrap items-start justify-between gap-3 ${headerClassName ?? ""}`}>
         <div className="min-w-0">
           <h3 className="mp-h3 font-semibold">{title}</h3>
@@ -22,7 +22,7 @@ export function SectionCard({ variant = "panel", title, description, right, chil
         </div>
         {right ? <div className="mp-section-actions">{right}</div> : null}
       </div>
-      <div className="mt-4">{children}</div>
+      <div className="mt-4 min-w-0">{children}</div>
     </Card>
   );
 }
