@@ -9,7 +9,7 @@
     "preview": "vite preview --host 0.0.0.0 --port 4173",
     "lint": "echo 'lint placeholder'",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "tsx --test src/components/ui/design-tokens.test.ts src/components/ui/primitives-render.test.tsx src/navigation/navigation-model.test.ts src/pages/jobs-page-model.test.ts"
+    "test": "tsx --test src/components/ui/design-tokens.test.ts src/components/ui/primitives-render.test.tsx src/components/data/data-components-render.test.tsx src/navigation/navigation-model.test.ts src/pages/jobs-page-model.test.ts"
   },
   "dependencies": {
     "@radix-ui/react-collapsible": "^1.1.12",

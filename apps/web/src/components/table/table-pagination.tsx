@@ -7,13 +7,13 @@ interface TablePaginationProps {
 export function TablePagination({ page, totalPages, onChange }: TablePaginationProps) {
   return (
     <div className="mt-3 flex items-center justify-center gap-2 text-sm md:justify-end">
-      <button className="mp-btn" type="button" disabled={page <= 1} onClick={() => onChange(page - 1)}>
+      <button className="mp-btn mp-btn-sm" type="button" disabled={page <= 1} onClick={() => onChange(page - 1)}>
         上一页
       </button>
-      <span className="mp-chip mp-muted">
+      <span className="mp-tabular text-sm mp-muted">
         {page} / {totalPages}
       </span>
-      <button className="mp-btn" type="button" disabled={page >= totalPages} onClick={() => onChange(page + 1)}>
+      <button className="mp-btn mp-btn-sm" type="button" disabled={page >= totalPages} onClick={() => onChange(page + 1)}>
         下一页
       </button>
     </div>

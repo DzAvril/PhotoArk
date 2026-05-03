@@ -44,23 +44,23 @@ export function TableToolbar({ title, search, onSearchChange, pageSize, onPageSi
   }, [onSearchChange, search]);
 
   return (
-    <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+    <div className="mb-3 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
       {title && title.trim() ? (
         <div>
           <h3 className="text-base font-semibold">{title}</h3>
           <p className="text-sm mp-muted">{search.trim() ? `筛选结果 ${totalItems} 条` : `共 ${totalItems} 条`}</p>
         </div>
       ) : (
-        <div className="hidden sm:block" />
+        <div className="hidden md:block" />
       )}
-      <div className="flex w-full flex-col gap-2 sm:w-auto sm:min-w-[320px] sm:flex-row sm:items-center">
-        <label className="relative block w-full sm:min-w-[220px]">
+      <div className="flex w-full flex-col gap-2 md:w-auto md:min-w-[320px] md:flex-row md:items-center">
+        <label className="relative block w-full md:min-w-[220px]">
           <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--ark-ink-soft)]">
             <Search className="h-4 w-4" aria-hidden="true" />
           </span>
           <input
             ref={searchInputRef}
-            className="mp-input mp-input-with-icon w-full pr-10"
+            className="mp-input mp-input-sm mp-input-with-icon w-full pr-10"
             placeholder="搜索名称或关键字"
             aria-label="搜索"
             value={search}
@@ -80,7 +80,7 @@ export function TableToolbar({ title, search, onSearchChange, pageSize, onPageSi
         <label className="flex items-center gap-2 text-sm mp-muted">
           <span className="shrink-0">每页</span>
           <select
-            className="mp-select w-full sm:w-[96px]"
+            className="mp-select mp-select-sm w-full md:w-[84px]"
             aria-label="每页条数"
             value={pageSize}
             onChange={(e) => onPageSizeChange(Number(e.target.value))}
@@ -91,7 +91,6 @@ export function TableToolbar({ title, search, onSearchChange, pageSize, onPageSi
           </select>
         </label>
       </div>
-      <p className="text-xs mp-muted sm:hidden">快捷键: `/` 聚焦搜索，`Esc` 清空</p>
     </div>
   );
 }

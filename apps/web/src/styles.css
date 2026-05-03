@@ -368,6 +368,14 @@ textarea:focus-visible {
   font-size: 13px;
 }
 
+.mp-input-sm,
+.mp-select-sm {
+  min-height: 36px;
+  padding-top: 7px;
+  padding-bottom: 7px;
+  font-size: 13px;
+}
+
 .mp-btn-md {
   min-height: 40px;
   padding: 9px 12px;
@@ -665,6 +673,91 @@ textarea:focus-visible {
   border-color: var(--ark-danger-line);
   background: var(--ark-danger-bg);
   color: var(--ark-danger-text);
+}
+
+.mp-chip-info {
+  border-color: color-mix(in oklab, var(--ark-info) 34%, var(--ark-line));
+  background: color-mix(in oklab, var(--ark-info) 10%, var(--ark-surface));
+  color: var(--ark-info);
+}
+
+.mp-metric-tile {
+  border: 1px solid var(--ark-line);
+  border-radius: var(--ark-radius-card);
+  background: var(--ark-surface);
+  padding: 14px;
+}
+
+.mp-metric-label,
+.mp-metric-description {
+  margin: 0;
+  color: var(--ark-ink-soft);
+}
+
+.mp-metric-label {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.mp-metric-value {
+  margin-top: 6px;
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.15;
+  color: var(--ark-ink);
+}
+
+.mp-metric-description {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.mp-metric-success {
+  border-color: color-mix(in oklab, var(--ark-success) 34%, var(--ark-line));
+}
+
+.mp-metric-warning {
+  border-color: color-mix(in oklab, var(--ark-warning) 34%, var(--ark-line));
+}
+
+.mp-metric-danger {
+  border-color: color-mix(in oklab, var(--ark-danger-text) 34%, var(--ark-line));
+}
+
+.mp-metric-info {
+  border-color: color-mix(in oklab, var(--ark-info) 34%, var(--ark-line));
+}
+
+.mp-progress {
+  height: 7px;
+  width: 100%;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--ark-surface-soft);
+}
+
+.mp-progress-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--ark-info);
+}
+
+.mp-progress-fill-success {
+  background: var(--ark-success);
+}
+
+.mp-progress-fill-warning {
+  background: var(--ark-warning);
+}
+
+.mp-progress-fill-danger {
+  background: var(--ark-danger-text);
+}
+
+.mp-progress-fill-info {
+  background: var(--ark-info);
 }
 
 .mp-status-success {
