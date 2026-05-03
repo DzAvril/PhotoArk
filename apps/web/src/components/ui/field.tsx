@@ -1,5 +1,9 @@
 import React, { type ReactNode } from "react";
 
+type FieldControlProps = {
+  "aria-describedby"?: string;
+};
+
 export type FieldProps = {
   id: string;
   label: string;
@@ -11,12 +15,19 @@ export type FieldProps = {
 export function Field({ id, label, help, error, children }: FieldProps) {
   const helpId = help ? `${id}-help` : undefined;
   const errorId = error ? `${id}-error` : undefined;
+  const control =
+    helpId && React.isValidElement<FieldControlProps>(children)
+      ? React.cloneElement(children, {
+          "aria-describedby": [children.props["aria-describedby"], helpId].filter(Boolean).join(" ")
+        })
+      : children;
+
   return (
     <div className="mp-field">
       <label htmlFor={id} className="mp-field-label">
         {label}
       </label>
-      <div className="mt-1.5">{children}</div>
+      <div className="mt-1.5">{control}</div>
       {help ? (
         <p id={helpId} className="mt-1 text-xs leading-5 mp-muted">
           {help}

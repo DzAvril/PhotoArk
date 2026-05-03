@@ -34,6 +34,7 @@ test("PageHeader renders title, description, actions, and chips", () => {
   assert.match(html, /概览/);
   assert.match(html, /容量、媒体分布/);
   assert.match(html, /刷新/);
+  assert.match(html, /健康/);
 });
 
 test("SegmentedControl marks the selected item", () => {
@@ -59,7 +60,17 @@ test("Field connects label and help text", () => {
     </Field>
   );
   assert.match(html, /for="job-name"/);
+  assert.match(html, /aria-describedby="job-name-help"/);
   assert.match(html, /用于记录和筛选/);
+});
+
+test("Field preserves existing describedby values", () => {
+  const html = renderToStaticMarkup(
+    <Field id="job-filter" label="筛选名称" help="帮助文本">
+      <input id="job-filter" aria-describedby="external-hint" />
+    </Field>
+  );
+  assert.match(html, /aria-describedby="external-hint job-filter-help"/);
 });
 
 test("StateBlock renders an action when supplied", () => {
