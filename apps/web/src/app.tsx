@@ -166,7 +166,6 @@ export function App() {
               <Route index element={<SettingsPage />} />
               <Route path="notifications" element={<SettingsPage />} />
               <Route path="storages" element={<StoragesPage />} />
-              <Route path="jobs" element={<Navigate to="/sync?tab=jobs" replace />} />
               <Route path="diff" element={<Navigate to="/diff" replace />} />
               <Route path="advanced" element={<AdvancedSettingsPage />} />
             </Route>

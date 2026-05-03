@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import * as React from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import {
   getLegacyRedirectTarget,
   getPageMeta,
@@ -7,6 +10,9 @@ import {
   settingsNavItems,
   syncTabs
 } from "./navigation-model";
+import { SettingsLayoutPage } from "../pages/settings-layout-page";
+
+(globalThis as typeof globalThis & { React: typeof React }).React = React;
 
 test("primary navigation uses the approved workflow IA", () => {
   assert.deepEqual(
@@ -37,6 +43,30 @@ test("settings no longer contains jobs", () => {
     settingsNavItems.map((item) => item.to),
     ["/settings", "/settings/storages", "/settings/advanced"]
   );
+});
+
+test("settings layout does not expose jobs navigation", () => {
+  const markup = renderToStaticMarkup(
+    React.createElement(
+      MemoryRouter,
+      { initialEntries: ["/settings"] },
+      React.createElement(
+        Routes,
+        null,
+        React.createElement(
+          Route,
+          { path: "/settings/*", element: React.createElement(SettingsLayoutPage) },
+          React.createElement(Route, { index: true, element: React.createElement("div", null, "settings") })
+        )
+      )
+    )
+  );
+
+  assert.match(markup, /通知/);
+  assert.match(markup, /存储/);
+  assert.match(markup, /高级/);
+  assert.doesNotMatch(markup, /任务/);
+  assert.doesNotMatch(markup, /\/settings\/jobs/);
 });
 
 test("legacy paths redirect to current workflows", () => {
