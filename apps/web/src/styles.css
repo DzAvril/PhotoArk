@@ -230,6 +230,13 @@ textarea:focus-visible {
   transition: border-color 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
 }
 
+.mp-mobile-nav {
+  border: 1px solid var(--ark-line);
+  border-radius: 10px;
+  background: var(--ark-surface);
+  box-shadow: var(--ark-shadow-md);
+}
+
 .mp-panel-hero {
   border-color: var(--ark-line);
   background: var(--ark-surface);

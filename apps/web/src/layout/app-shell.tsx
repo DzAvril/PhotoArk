@@ -109,16 +109,11 @@ export function AppShell({ authUser, onLogout }: AppShellProps) {
   }
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-[var(--ark-bg)] text-[var(--ark-ink)]">
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(circle_at_8%_2%,color-mix(in_oklab,var(--ark-primary)_18%,transparent)_0%,transparent_38%),radial-gradient(circle_at_94%_18%,color-mix(in_oklab,var(--ark-accent)_14%,transparent)_0%,transparent_32%)]"
-      />
-
-      <div className="mx-auto min-h-screen w-full max-w-[1400px] px-3 pb-24 pt-4 md:h-[calc(100vh-2rem)] md:px-6 md:pb-6 md:overflow-hidden">
-        <div className="mp-shell md:h-full md:overflow-hidden">
+    <div className="min-h-screen bg-[var(--ark-bg)] text-[var(--ark-ink)]">
+      <div className="mx-auto flex min-h-screen w-full max-w-[1480px] px-3 pb-24 pt-3 md:h-screen md:px-4 md:pb-4 md:pt-4">
+        <div className="grid w-full gap-3 md:grid-cols-[232px_minmax(0,1fr)] md:overflow-hidden">
           <motion.aside
-            className="mp-sidebar hidden md:flex md:h-full md:flex-col md:overflow-auto"
+            className="mp-sidebar hidden md:flex md:min-h-0 md:flex-col md:overflow-auto"
             initial={{ opacity: 0, x: -12 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ duration: 0.25, ease: "easeOut" }}
@@ -145,14 +140,14 @@ export function AppShell({ authUser, onLogout }: AppShellProps) {
                     to={item.to}
                     end={item.to === "/"}
                     className={({ isActive }) =>
-                      `flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition-all ${
+                      `flex items-center gap-2 rounded-md px-2.5 py-2 text-sm font-semibold transition-colors ${
                         isActive
-                          ? "bg-[var(--ark-primary)] text-white shadow-[0_12px_24px_color-mix(in_oklab,var(--ark-primary)_32%,transparent)]"
-                          : "border border-transparent text-[var(--ark-ink)] hover:border-[var(--ark-line)] hover:bg-[var(--ark-surface-soft)]"
+                          ? "bg-[var(--ark-primary)] text-white"
+                          : "text-[var(--ark-ink-soft)] hover:bg-[var(--ark-surface-soft)] hover:text-[var(--ark-ink)]"
                       }`
                     }
                   >
-                    <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-current/10 bg-white/10">
+                    <span className="inline-flex h-7 w-7 items-center justify-center rounded-md">
                       <Icon className="h-4 w-4" aria-hidden={true} />
                     </span>
                     <span>{item.label}</span>
@@ -173,10 +168,10 @@ export function AppShell({ authUser, onLogout }: AppShellProps) {
             </div>
           </motion.aside>
 
-          <section className="mp-shell-main min-w-0 md:h-full md:overflow-hidden">
+          <section className="min-w-0 md:flex md:min-h-0 md:flex-col md:overflow-hidden">
             <motion.header
               key={`page-header:${pathname}`}
-              className="mp-topbar sticky top-3 z-30 p-4 md:static md:top-auto md:z-auto md:p-5"
+              className="mp-topbar p-4"
               initial={{ opacity: 0, y: -10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.24, ease: "easeOut" }}
@@ -234,7 +229,7 @@ export function AppShell({ authUser, onLogout }: AppShellProps) {
               </div>
             </motion.header>
 
-            <motion.div className="mt-4 min-h-0 flex-1 md:overflow-auto" animate={pageTransitionControls} initial={false}>
+            <motion.div className="mt-3 min-h-0 flex-1 md:overflow-auto" animate={pageTransitionControls} initial={false}>
               <Outlet />
             </motion.div>
           </section>
@@ -242,7 +237,7 @@ export function AppShell({ authUser, onLogout }: AppShellProps) {
       </div>
 
       <nav className="fixed inset-x-2 bottom-[max(0.5rem,env(safe-area-inset-bottom))] z-50 md:hidden">
-        <div className="mp-panel px-2 py-2">
+        <div className="mp-mobile-nav px-2 py-2">
           <ul className="grid grid-cols-5 gap-1.5">
             {primaryNavItems.map((item) => {
               const Icon = item.icon;
@@ -252,10 +247,8 @@ export function AppShell({ authUser, onLogout }: AppShellProps) {
                     to={item.to}
                     end={item.to === "/"}
                     className={({ isActive }) =>
-                      `flex min-h-12 flex-col items-center justify-center rounded-xl px-2 py-1 text-[11px] font-medium leading-tight transition-all ${
-                        isActive
-                          ? "bg-[var(--ark-primary)] text-white shadow-[0_8px_20px_color-mix(in_oklab,var(--ark-primary)_32%,transparent)]"
-                          : "text-[var(--ark-ink-soft)]"
+                      `flex min-h-12 flex-col items-center justify-center rounded-md px-1.5 py-1 text-[11px] font-semibold leading-tight transition-colors ${
+                        isActive ? "bg-[var(--ark-primary)] text-white" : "text-[var(--ark-ink-soft)]"
                       }`
                     }
                   >
