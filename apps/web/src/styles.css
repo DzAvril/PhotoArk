@@ -2,42 +2,43 @@
 
 :root {
   color-scheme: light;
-  --ark-bg: #f5f1ec;
-  --ark-bg-soft: #fbf8f4;
+  --ark-bg: #f6f8fb;
+  --ark-bg-soft: #eef3f8;
   --ark-surface: #ffffff;
-  --ark-surface-soft: #f4efe8;
-  --ark-surface-deep: #ece4db;
-  --ark-ink: #1c242b;
-  --ark-ink-soft: #5b6672;
-  --ark-line: #e3d8cc;
-  --ark-line-strong: #cbbfb2;
+  --ark-surface-soft: #f1f5f9;
+  --ark-surface-deep: #e4eaf2;
+  --ark-ink: #172033;
+  --ark-ink-soft: #64748b;
+  --ark-line: #d8dee8;
+  --ark-line-strong: #b8c2d1;
   --ark-primary: #0f766e;
   --ark-primary-strong: #0b5d56;
-  --ark-primary-soft: #d7f2ee;
-  --ark-accent: #e27d43;
-  --ark-success: #1b7a47;
-  --ark-success-bg: #e7f6ee;
-  --ark-success-line: #a6d9bf;
-  --ark-warning: #b65b00;
-  --ark-warning-bg: #fff1e5;
-  --ark-warning-line: #f2c19a;
-  --ark-danger-bg: #ffe9ec;
-  --ark-danger-line: #f7b8c4;
-  --ark-danger-text: #b11b3b;
-  --ark-shadow-lg: 0 22px 50px rgba(20, 30, 36, 0.14);
-  --ark-shadow-md: 0 10px 28px rgba(20, 30, 36, 0.12);
-  --ark-overlay: rgba(10, 12, 16, 0.52);
-  --ark-radius-card: 18px;
-  --ark-radius-control: 12px;
+  --ark-primary-soft: #d9f2ef;
+  --ark-info: #2563eb;
+  --ark-success: #168a4a;
+  --ark-success-bg: #e8f7ee;
+  --ark-success-line: #afd8c4;
+  --ark-warning: #b76500;
+  --ark-warning-bg: #fff6e8;
+  --ark-warning-line: #efc68f;
+  --ark-danger-bg: #fff0f3;
+  --ark-danger-line: #f1b8c5;
+  --ark-danger-text: #b4233f;
+  --ark-shadow-lg: 0 20px 46px rgba(23, 32, 51, 0.13);
+  --ark-shadow-md: 0 10px 24px rgba(23, 32, 51, 0.1);
+  --ark-overlay: rgba(15, 23, 42, 0.52);
+  --ark-radius-card: 8px;
+  --ark-radius-control: 7px;
   --ark-radius-chip: 999px;
-  --ark-focus: color-mix(in oklab, var(--ark-primary) 24%, transparent);
-  --ark-focus-strong: color-mix(in oklab, var(--ark-primary) 38%, transparent);
+  --ark-focus: color-mix(in oklab, var(--ark-primary) 22%, transparent);
+  --ark-focus-strong: color-mix(in oklab, var(--ark-primary) 34%, transparent);
   --ark-focus-ring: 0 0 0 3px var(--ark-focus);
   --ark-focus-ring-strong: 0 0 0 4px var(--ark-focus-strong);
 
-  --ark-chart-image: #2f7dd1;
-  --ark-chart-video: #e08b39;
-  --ark-chart-live: #1f9d69;
+  --ark-accent: var(--ark-info);
+  --ark-chart-image: var(--ark-info);
+  --ark-chart-video: var(--ark-warning);
+  --ark-chart-live: var(--ark-success);
 
   --ark-heat-0: color-mix(in oklab, var(--ark-line) 70%, var(--ark-surface));
   --ark-heat-1: color-mix(in oklab, var(--ark-success) 18%, var(--ark-surface));
@@ -48,39 +49,43 @@
 
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --ark-bg: #0c1117;
-  --ark-bg-soft: #111822;
-  --ark-surface: #141c27;
-  --ark-surface-soft: #1a2432;
-  --ark-surface-deep: #223042;
-  --ark-ink: #f2f5f7;
-  --ark-ink-soft: #b8c2cf;
-  --ark-line: #2a3a4f;
-  --ark-line-strong: #364b63;
-  --ark-primary: #4fd1c5;
-  --ark-primary-strong: #2fb7a9;
-  --ark-primary-soft: #133937;
-  --ark-accent: #f0a870;
-  --ark-success: #56e09a;
+  --ark-bg: #0d1117;
+  --ark-bg-soft: #111827;
+  --ark-surface: #171f2b;
+  --ark-surface-soft: #1d2735;
+  --ark-surface-deep: #202b39;
+  --ark-ink: #edf2f7;
+  --ark-ink-soft: #a8b3c2;
+  --ark-line: #2d3a4c;
+  --ark-line-strong: #40516a;
+  --ark-primary: #4fc4b8;
+  --ark-primary-strong: #2aa99c;
+  --ark-primary-soft: #123b38;
+  --ark-info: #7aa7ff;
+  --ark-success: #58d68d;
   --ark-success-bg: #102a22;
   --ark-success-line: #2b5c49;
-  --ark-warning: #f0b764;
+  --ark-warning: #f2b45f;
   --ark-warning-bg: #3c2710;
   --ark-warning-line: #694317;
   --ark-danger-bg: #3a1a23;
   --ark-danger-line: #5b2a36;
-  --ark-danger-text: #f2b1bf;
+  --ark-danger-text: #f19aaa;
   --ark-shadow-lg: 0 26px 70px rgba(2, 4, 10, 0.6);
   --ark-shadow-md: 0 16px 40px rgba(2, 4, 10, 0.45);
   --ark-overlay: rgba(2, 6, 12, 0.72);
+  --ark-radius-card: 8px;
+  --ark-radius-control: 7px;
+  --ark-radius-chip: 999px;
   --ark-focus: color-mix(in oklab, var(--ark-primary) 32%, transparent);
   --ark-focus-strong: color-mix(in oklab, var(--ark-primary) 44%, transparent);
   --ark-focus-ring: 0 0 0 3px var(--ark-focus);
   --ark-focus-ring-strong: 0 0 0 4px var(--ark-focus-strong);
 
-  --ark-chart-image: #5aa2f2;
-  --ark-chart-video: #f2b65d;
-  --ark-chart-live: #52d7a5;
+  --ark-accent: var(--ark-info);
+  --ark-chart-image: var(--ark-info);
+  --ark-chart-video: var(--ark-warning);
+  --ark-chart-live: var(--ark-success);
 
   --ark-heat-0: color-mix(in oklab, var(--ark-line) 75%, var(--ark-surface));
   --ark-heat-1: color-mix(in oklab, var(--ark-success) 16%, var(--ark-surface));
@@ -99,10 +104,7 @@ body,
 body {
   margin: 0;
   font-family: "IBM Plex Sans", "PingFang SC", "Noto Sans SC", sans-serif;
-  background:
-    radial-gradient(circle at 8% 2%, color-mix(in oklab, var(--ark-primary) 18%, transparent) 0%, transparent 46%),
-    radial-gradient(circle at 95% 12%, color-mix(in oklab, var(--ark-accent) 14%, transparent) 0%, transparent 42%),
-    linear-gradient(180deg, var(--ark-bg-soft) 0%, var(--ark-bg) 100%);
+  background: var(--ark-bg);
   color: var(--ark-ink);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
@@ -121,7 +123,7 @@ h3,
 .mp-h2,
 .mp-h3 {
   font-family: "Space Grotesk", "IBM Plex Sans", "PingFang SC", sans-serif;
-  letter-spacing: -0.02em;
+  letter-spacing: 0;
 }
 
 .mp-h1 {
@@ -197,9 +199,18 @@ textarea:focus-visible {
   flex-direction: column;
 }
 
+.mp-panel,
+.mp-sidebar,
+.mp-topbar,
+.mp-subtle-card,
+.mp-card,
+.mp-table-shell,
+.mp-mobile-card {
+  border-radius: var(--ark-radius-card);
+}
+
 .mp-sidebar {
   border: 1px solid color-mix(in oklab, var(--ark-line) 85%, transparent);
-  border-radius: var(--ark-radius-card);
   background:
     linear-gradient(180deg, color-mix(in oklab, var(--ark-surface) 96%, var(--ark-surface-soft)) 0%, var(--ark-surface) 100%);
   box-shadow: var(--ark-shadow-md);
@@ -207,45 +218,31 @@ textarea:focus-visible {
 
 .mp-topbar {
   border: 1px solid color-mix(in oklab, var(--ark-line) 85%, transparent);
-  border-radius: var(--ark-radius-card);
   background:
     linear-gradient(180deg, color-mix(in oklab, var(--ark-surface) 96%, var(--ark-surface-soft)) 0%, var(--ark-surface) 100%);
   box-shadow: var(--ark-shadow-md);
 }
 
 .mp-panel {
-  border: 1px solid color-mix(in oklab, var(--ark-line) 88%, white);
-  border-radius: var(--ark-radius-card);
-  background:
-    linear-gradient(180deg, color-mix(in oklab, var(--ark-surface) 96%, white) 0%, var(--ark-surface) 100%);
-  box-shadow: var(--ark-shadow-md);
-  transition: border-color 0.2s ease, box-shadow 0.22s ease, background 0.22s ease, transform 0.2s ease;
+  border: 1px solid var(--ark-line);
+  background: var(--ark-surface);
+  box-shadow: none;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
 }
 
 .mp-panel-hero {
-  border-color: color-mix(in oklab, var(--ark-line-strong) 60%, var(--ark-primary));
-  background: linear-gradient(
-    154deg,
-    color-mix(in oklab, var(--ark-primary) 14%, var(--ark-surface)) 0%,
-    color-mix(in oklab, var(--ark-surface) 90%, var(--ark-primary-soft)) 42%,
-    var(--ark-surface) 100%
-  );
-  box-shadow: var(--ark-shadow-lg);
+  border-color: var(--ark-line);
+  background: var(--ark-surface);
+  box-shadow: var(--ark-shadow-md);
 }
 
 .mp-panel-soft {
-  background:
-    linear-gradient(
-      180deg,
-      color-mix(in oklab, var(--ark-surface-soft) 84%, var(--ark-surface)) 0%,
-      color-mix(in oklab, var(--ark-surface-soft) 78%, var(--ark-surface-deep)) 100%
-    );
+  background: var(--ark-surface-soft);
   box-shadow: none;
 }
 
 .mp-subtle-card {
   border: 1px solid color-mix(in oklab, var(--ark-line) 85%, var(--ark-surface));
-  border-radius: 16px;
   background: linear-gradient(
     180deg,
     color-mix(in oklab, var(--ark-surface) 94%, var(--ark-surface-soft)) 0%,
@@ -255,7 +252,6 @@ textarea:focus-visible {
 
 .mp-card {
   border: 1px solid color-mix(in oklab, var(--ark-line) 85%, var(--ark-surface));
-  border-radius: 16px;
   background: var(--ark-surface);
   transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
 }
@@ -270,12 +266,18 @@ textarea:focus-visible {
   transform: translateY(0);
 }
 
+.mp-btn,
+.mp-input,
+.mp-select,
+.mp-segment {
+  border-radius: var(--ark-radius-control);
+}
+
 .mp-input,
 .mp-select {
   width: 100%;
   min-height: 42px;
   border: 1px solid var(--ark-line);
-  border-radius: var(--ark-radius-control);
   padding: 10px 12px;
   font-size: 14px;
   font-weight: 500;
@@ -305,7 +307,6 @@ textarea:focus-visible {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  border-radius: calc(var(--ark-radius-control) - 1px);
   padding: 9px 12px;
   min-height: 40px;
   font-size: 14px;
@@ -428,7 +429,7 @@ textarea:focus-visible {
   font-size: 18px;
   font-weight: 700;
   color: var(--ark-ink);
-  letter-spacing: -0.01em;
+  letter-spacing: 0;
 }
 
 .mp-muted {
@@ -516,7 +517,6 @@ textarea:focus-visible {
 
 .mp-table-shell {
   border: 1px solid var(--ark-line);
-  border-radius: 16px;
   background: var(--ark-surface);
   overflow: auto;
   -webkit-overflow-scrolling: touch;
@@ -575,7 +575,6 @@ textarea:focus-visible {
 
 .mp-mobile-card {
   border: 1px solid color-mix(in oklab, var(--ark-line) 87%, var(--ark-surface));
-  border-radius: 14px;
   background: linear-gradient(
     180deg,
     color-mix(in oklab, var(--ark-surface-soft) 82%, var(--ark-surface)) 0%,
@@ -637,7 +636,6 @@ textarea:focus-visible {
   flex-wrap: wrap;
   gap: 4px;
   border: 1px solid color-mix(in oklab, var(--ark-line) 90%, var(--ark-surface));
-  border-radius: 12px;
   background: color-mix(in oklab, var(--ark-surface-soft) 72%, var(--ark-surface));
   padding: 4px;
 }
@@ -725,10 +723,11 @@ textarea:focus-visible {
 }
 
 .mp-relation-graph-surface {
-  background:
-    radial-gradient(120% 150% at 0% 0%, rgba(79, 209, 197, 0.14), transparent 54%),
-    radial-gradient(130% 160% at 100% 100%, rgba(226, 125, 67, 0.12), transparent 58%),
-    linear-gradient(180deg, rgba(251, 248, 244, 0.92), rgba(241, 234, 226, 0.9));
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklab, var(--ark-surface) 92%, var(--ark-surface-soft)) 0%,
+    var(--ark-surface-soft) 100%
+  );
 }
 
 .mp-relation-graph-viewport {
