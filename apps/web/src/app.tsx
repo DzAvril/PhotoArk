@@ -16,7 +16,6 @@ const queryClient = new QueryClient({
 });
 import { AdvancedSettingsPage } from "./pages/advanced-settings-page";
 import { BackupsPage } from "./pages/backups-page";
-import { JobsPage } from "./pages/jobs-page";
 import { LoginPage } from "./pages/login-page";
 import { PerformancePage } from "./pages/performance-page";
 import { SettingsLayoutPage } from "./pages/settings-layout-page";
@@ -26,11 +25,11 @@ import { StoragesPage } from "./pages/storages-page";
 const DashboardPage = lazy(() =>
   import("./pages/dashboard-page").then((m) => ({ default: m.DashboardPage }))
 );
-const JobDiffPage = lazy(() =>
-  import("./pages/job-diff-page").then((m) => ({ default: m.JobDiffPage }))
-);
 const MediaPage = lazy(() =>
   import("./pages/media-page").then((m) => ({ default: m.MediaPage }))
+);
+const SyncPage = lazy(() =>
+  import("./pages/sync-page").then((m) => ({ default: m.SyncPage }))
 );
 
 import { ViewCacheProvider } from "./context/view-cache-context";
@@ -149,23 +148,25 @@ export function App() {
               }
             />
             <Route
-              path="diff"
+              path="sync"
               element={
                 <Suspense fallback={<PageLoading />}>
-                  <JobDiffPage />
+                  <SyncPage />
                 </Suspense>
               }
             />
             <Route path="records" element={<BackupsPage />} />
             {import.meta.env.DEV && <Route path="performance" element={<PerformancePage />} />}
+            <Route path="diff" element={<Navigate to="/sync" replace />} />
+            <Route path="jobs" element={<Navigate to="/sync?tab=jobs" replace />} />
+            <Route path="settings/jobs" element={<Navigate to="/sync?tab=jobs" replace />} />
             <Route path="backups" element={<Navigate to="/records" replace />} />
             <Route path="storages" element={<Navigate to="/settings/storages" replace />} />
-            <Route path="jobs" element={<Navigate to="/settings/jobs" replace />} />
             <Route path="settings" element={<SettingsLayoutPage />}>
               <Route index element={<SettingsPage />} />
               <Route path="notifications" element={<SettingsPage />} />
               <Route path="storages" element={<StoragesPage />} />
-              <Route path="jobs" element={<JobsPage />} />
+              <Route path="jobs" element={<Navigate to="/sync?tab=jobs" replace />} />
               <Route path="diff" element={<Navigate to="/diff" replace />} />
               <Route path="advanced" element={<AdvancedSettingsPage />} />
             </Route>

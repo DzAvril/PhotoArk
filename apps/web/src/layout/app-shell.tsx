@@ -1,59 +1,16 @@
 import { motion, useAnimation } from "framer-motion";
-import type { ComponentType } from "react";
 import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
-import { GitCompareArrows, Images, LayoutDashboard, ListChecks, MoonStar, Settings, SunMedium, UserRound } from "lucide-react";
+import { MoonStar, SunMedium, UserRound } from "lucide-react";
 import { getVersionInfo } from "../lib/api";
+import { getPageMeta, normalizePathname, primaryNavItems } from "../navigation/navigation-model";
 import type { AuthUser, VersionInfo } from "../types/api";
-
-const tabs = [
-  { to: "/", label: "总览" },
-  { to: "/media", label: "媒体" },
-  { to: "/diff", label: "差异" },
-  { to: "/records", label: "记录" },
-  { to: "/settings", label: "设置" }
-] as const;
-
-type TabPath = (typeof tabs)[number]["to"];
-
-const tabIconByPath: Record<TabPath, ComponentType<{ className?: string; "aria-hidden"?: boolean }>> = {
-  "/": LayoutDashboard,
-  "/media": Images,
-  "/diff": GitCompareArrows,
-  "/records": ListChecks,
-  "/settings": Settings
-};
-
-function NavTabIcon({ to, className }: { to: TabPath; className?: string }) {
-  const Icon = tabIconByPath[to];
-  return <Icon className={className} aria-hidden={true} />;
-}
 
 type ThemeMode = "light" | "dark";
 const themeColorByMode: Record<ThemeMode, string> = {
   light: "#f5f1ec",
   dark: "#0c1117"
 };
-
-function normalizePathname(pathname: string) {
-  if (pathname !== "/" && pathname.endsWith("/")) {
-    return pathname.slice(0, -1);
-  }
-  return pathname;
-}
-
-function getPageMeta(pathname: string) {
-  if (pathname === "/") return { title: "备份总览", subtitle: "任务状态、存储健康度与实时同步进度" };
-  if (pathname === "/media") return { title: "媒体浏览", subtitle: "按存储查看图片、视频与 Live Photo" };
-  if (pathname === "/diff") return { title: "差异检查", subtitle: "查看源目录与目标目录的媒体差异并预览" };
-  if (pathname === "/records") return { title: "执行记录", subtitle: "查看任务历史执行结果与统计" };
-  if (pathname.startsWith("/settings/jobs")) return { title: "任务配置", subtitle: "管理备份任务与执行策略" };
-  if (pathname.startsWith("/settings/advanced")) return { title: "高级配置", subtitle: "索引与诊断工具，仅在排障时使用" };
-  if (pathname.startsWith("/settings/storages")) return { title: "存储配置", subtitle: "管理源存储和目标存储" };
-  if (pathname.startsWith("/settings/notifications")) return { title: "通知配置", subtitle: "配置 Telegram 通知" };
-  if (pathname.startsWith("/settings")) return { title: "设置中心", subtitle: "通知、存储、任务统一管理" };
-  return { title: "PhotoArk", subtitle: "照片备份与多目标同步控制台" };
-}
 
 type AppShellProps = {
   authUser: AuthUser;
@@ -180,24 +137,28 @@ export function AppShell({ authUser, onLogout }: AppShellProps) {
             </div>
 
             <nav className="flex-1 space-y-1.5 p-3">
-              {tabs.map((tab) => (
-                <NavLink
-                  key={tab.to}
-                  to={tab.to}
-                  className={({ isActive }) =>
-                    `flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition-all ${
-                      isActive
-                        ? "bg-[var(--ark-primary)] text-white shadow-[0_12px_24px_color-mix(in_oklab,var(--ark-primary)_32%,transparent)]"
-                        : "border border-transparent text-[var(--ark-ink)] hover:border-[var(--ark-line)] hover:bg-[var(--ark-surface-soft)]"
-                    }`
-                  }
-                >
-                  <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-current/10 bg-white/10">
-                    <NavTabIcon to={tab.to} className="h-4 w-4" />
-                  </span>
-                  <span>{tab.label}</span>
-                </NavLink>
-              ))}
+              {primaryNavItems.map((item) => {
+                const Icon = item.icon;
+                return (
+                  <NavLink
+                    key={item.to}
+                    to={item.to}
+                    end={item.to === "/"}
+                    className={({ isActive }) =>
+                      `flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition-all ${
+                        isActive
+                          ? "bg-[var(--ark-primary)] text-white shadow-[0_12px_24px_color-mix(in_oklab,var(--ark-primary)_32%,transparent)]"
+                          : "border border-transparent text-[var(--ark-ink)] hover:border-[var(--ark-line)] hover:bg-[var(--ark-surface-soft)]"
+                      }`
+                    }
+                  >
+                    <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-current/10 bg-white/10">
+                      <Icon className="h-4 w-4" aria-hidden={true} />
+                    </span>
+                    <span>{item.label}</span>
+                  </NavLink>
+                );
+              })}
             </nav>
 
             <div className="border-t border-[var(--ark-line)]/70 p-4">
@@ -283,23 +244,27 @@ export function AppShell({ authUser, onLogout }: AppShellProps) {
       <nav className="fixed inset-x-2 bottom-[max(0.5rem,env(safe-area-inset-bottom))] z-50 md:hidden">
         <div className="mp-panel px-2 py-2">
           <ul className="grid grid-cols-5 gap-1.5">
-            {tabs.map((tab) => (
-              <li key={tab.to}>
-                <NavLink
-                  to={tab.to}
-                  className={({ isActive }) =>
-                    `flex min-h-12 flex-col items-center justify-center rounded-xl px-2 py-1 text-[11px] font-medium leading-tight transition-all ${
-                      isActive
-                        ? "bg-[var(--ark-primary)] text-white shadow-[0_8px_20px_color-mix(in_oklab,var(--ark-primary)_32%,transparent)]"
-                        : "text-[var(--ark-ink-soft)]"
-                    }`
-                  }
-                >
-                  <NavTabIcon to={tab.to} className="h-4 w-4" />
-                  <span className="mt-0.5">{tab.label}</span>
-                </NavLink>
-              </li>
-            ))}
+            {primaryNavItems.map((item) => {
+              const Icon = item.icon;
+              return (
+                <li key={item.to}>
+                  <NavLink
+                    to={item.to}
+                    end={item.to === "/"}
+                    className={({ isActive }) =>
+                      `flex min-h-12 flex-col items-center justify-center rounded-xl px-2 py-1 text-[11px] font-medium leading-tight transition-all ${
+                        isActive
+                          ? "bg-[var(--ark-primary)] text-white shadow-[0_8px_20px_color-mix(in_oklab,var(--ark-primary)_32%,transparent)]"
+                          : "text-[var(--ark-ink-soft)]"
+                      }`
+                    }
+                  >
+                    <Icon className="h-4 w-4" aria-hidden={true} />
+                    <span className="mt-0.5">{item.label}</span>
+                  </NavLink>
+                </li>
+              );
+            })}
           </ul>
         </div>
       </nav>
