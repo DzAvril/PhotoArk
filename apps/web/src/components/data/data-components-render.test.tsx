@@ -43,9 +43,18 @@ test("DataTable renders headers and item cells", () => {
     <DataTable
       items={[{ id: "one", name: "NAS" }]}
       getKey={(item) => item.id}
-      columns={[{ key: "name", header: "名称", render: (item) => item.name }]}
+      columns={[
+        {
+          key: "name",
+          header: "名称",
+          render: (item) => item.name,
+          headerProps: { "aria-sort": "ascending" }
+        }
+      ]}
     />
   );
+  assert.match(html, /mp-data-table/);
+  assert.match(html, /aria-sort="ascending"/);
   assert.match(html, /名称/);
   assert.match(html, /NAS/);
 });

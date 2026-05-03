@@ -1,11 +1,13 @@
 import React from "react";
-import type { Key, ReactNode } from "react";
+import type { Key, ReactNode, TdHTMLAttributes, ThHTMLAttributes } from "react";
 
 export interface DataTableColumn<T> {
   key: string;
   header: ReactNode;
   render: (item: T) => ReactNode;
   className?: string;
+  headerProps?: ThHTMLAttributes<HTMLTableCellElement>;
+  cellProps?: TdHTMLAttributes<HTMLTableCellElement> | ((item: T) => TdHTMLAttributes<HTMLTableCellElement>);
 }
 
 interface DataTableProps<T> {
@@ -20,11 +22,11 @@ export function DataTable<T,>({ items, columns, getKey, empty = null }: DataTabl
 
   return (
     <div className="mp-table-shell hidden md:block">
-      <table className="min-w-full text-left text-sm">
+      <table className="mp-data-table min-w-full text-left text-sm">
         <thead>
           <tr>
             {columns.map((column) => (
-              <th key={column.key} className={column.className} scope="col">
+              <th key={column.key} scope="col" {...column.headerProps} className={[column.className, column.headerProps?.className].filter(Boolean).join(" ")}>
                 {column.header}
               </th>
             ))}
@@ -33,11 +35,14 @@ export function DataTable<T,>({ items, columns, getKey, empty = null }: DataTabl
         <tbody>
           {items.map((item) => (
             <tr key={getKey(item)}>
-              {columns.map((column) => (
-                <td key={column.key} className={column.className}>
-                  {column.render(item)}
-                </td>
-              ))}
+              {columns.map((column) => {
+                const cellProps = typeof column.cellProps === "function" ? column.cellProps(item) : column.cellProps;
+                return (
+                  <td key={column.key} {...cellProps} className={[column.className, cellProps?.className].filter(Boolean).join(" ")}>
+                    {column.render(item)}
+                  </td>
+                );
+              })}
             </tr>
           ))}
         </tbody>
