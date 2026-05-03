@@ -7,7 +7,7 @@ export function SyncPage() {
   const location = useLocation();
   const mode = getSyncPageMode(location.search);
 
-  if (mode === "jobs") {
+  if (mode === "jobs" || mode === "running") {
     return <JobsPage />;
   }
 
