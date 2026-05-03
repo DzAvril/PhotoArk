@@ -11,3 +11,5 @@ coverage
 apps/web/src/**/*.js
 apps/api/apps/
 .trae/
+.superpowers/
+.playwright-mcp/
