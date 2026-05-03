@@ -2,8 +2,12 @@ import { motion } from "framer-motion";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ConfirmDialog } from "../components/confirm-dialog";
+import { MetricTile } from "../components/data/metric-tile";
+import { ProgressBar } from "../components/data/progress-bar";
+import { StatusBadge } from "../components/data/status-badge";
 import { InlineAlert } from "../components/inline-alert";
-import { SectionCard } from "../components/ui/section-card";
+import { PageHeader } from "../components/ui/page-header";
+import { StateBlock } from "../components/ui/state-block";
 import {
   getJobExecutions,
   getJobs,
@@ -23,6 +27,7 @@ import type {
   StorageRelationNodeItem
 } from "../types/api";
 import { usePageVisibility } from "../hooks/use-page-visibility";
+import { buildCapacityRiskLabel, buildOverviewMetricTiles, sortStorageMediaSummary } from "./dashboard-page-model";
 
 type PieSlice = {
   label: string;
@@ -137,35 +142,35 @@ function getRemainingPercent(totalBytes: number | null, freeBytes: number | null
 }
 
 function getCapacityTone(remainingPercent: number | null): {
-  chipClass: string;
-  barClass: string;
+  progressTone: "success" | "warning" | "danger" | "info";
   statusText: string;
+  statusTone: "neutral" | "success" | "warning" | "danger" | "info";
 } {
   if (remainingPercent === null) {
     return {
-      chipClass: "mp-chip",
-      barClass: "bg-gradient-to-r from-[var(--ark-primary)] to-[var(--ark-primary-strong)]",
-      statusText: "未知"
+      progressTone: "info",
+      statusText: "未知",
+      statusTone: "neutral"
     };
   }
   if (remainingPercent <= 10) {
     return {
-      chipClass: "mp-chip border-red-300 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300",
-      barClass: "bg-gradient-to-r from-red-500 to-red-600",
-      statusText: "紧张"
+      progressTone: "danger",
+      statusText: "紧张",
+      statusTone: "danger"
     };
   }
   if (remainingPercent <= 25) {
     return {
-      chipClass: "mp-chip mp-chip-warning",
-      barClass: "bg-gradient-to-r from-amber-500 to-orange-500",
-      statusText: "偏低"
+      progressTone: "warning",
+      statusText: "偏低",
+      statusTone: "warning"
     };
   }
   return {
-    chipClass: "mp-chip mp-chip-success",
-    barClass: "bg-gradient-to-r from-emerald-500 to-green-500",
-    statusText: "充足"
+    progressTone: "success",
+    statusText: "充足",
+    statusTone: "success"
   };
 }
 
@@ -644,7 +649,7 @@ const SourceActivityHeatmap = memo(function SourceActivityHeatmap({
   }
 
   return (
-    <div className="rounded-2xl border border-[var(--ark-line)] bg-[var(--ark-surface)] p-3">
+    <div>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-lg font-semibold text-[var(--ark-ink)]">
           {data.year} 年媒体文件分布（共 {data.totalAddedCount} 个）
@@ -653,7 +658,7 @@ const SourceActivityHeatmap = memo(function SourceActivityHeatmap({
       </div>
 
       <div className="mt-2.5 grid items-start gap-2.5 lg:grid-cols-[minmax(0,1fr)_220px]">
-        <div className="rounded-xl border border-[var(--ark-line)] bg-[var(--ark-surface)] p-2.5">
+        <div className="min-w-0">
           <div className="min-h-5 text-xs mp-muted">
             {hoveredDate ? (
               <span>
@@ -725,7 +730,7 @@ const SourceActivityHeatmap = memo(function SourceActivityHeatmap({
           </div>
         </div>
 
-        <div className="self-start w-full rounded-xl border border-[var(--ark-line)] bg-[var(--ark-surface)] p-3">
+        <div className="self-start w-full border-t border-[var(--ark-line)] pt-3 lg:border-l lg:border-t-0 lg:pl-3 lg:pt-0">
           <label className="text-xs font-medium text-[var(--ark-ink-soft)]">年份</label>
           <select
             className="mp-select mt-2 w-full"
@@ -1183,27 +1188,48 @@ export function DashboardPage() {
         : "mp-status-warning";
   const progressDialogCanBackground = Boolean(progressDialogExecution && isExecutionActive(progressDialogExecution));
 
-  const summaryTone = getCapacityTone(capacitySummary.freePercent);
+  const capacityRemainingPercent = capacitySummary.totalBytes > 0 ? capacitySummary.freePercent : null;
+  const summaryTone = getCapacityTone(capacityRemainingPercent);
   const activeExecutionCount = activeExecutionByJobId.size;
   const storageNodeCount = relationNodes.length;
   const pendingEdgeCount = relationSummary.attentionEdgeCount;
   const syncedEdgeCount = relationSummary.syncedEdgeCount;
-  const capacitySummaryText = capacitySummary.freePercent ? `${capacitySummary.freePercent}%` : "未知";
+  const capacitySummaryText = capacityRemainingPercent !== null ? `${capacityRemainingPercent}%` : "未知";
   const lowCapacityItems = useMemo(() => {
     return capacities
       .map((item) => ({ item, remainingPercent: getRemainingPercent(item.totalBytes, item.freeBytes) }))
-      .filter((entry) => entry.remainingPercent !== null && entry.remainingPercent <= 20)
+      .filter((entry) => entry.remainingPercent !== null && entry.remainingPercent <= 25)
       .sort((a, b) => (a.remainingPercent ?? 0) - (b.remainingPercent ?? 0));
   }, [capacities]);
   const unreadableCapacities = useMemo(() => capacities.filter((item) => !item.available), [capacities]);
   const attentionEdges = useMemo(() => relationEdges.filter((edge) => edge.status !== "synced"), [relationEdges]);
   const recentFailedExecutions = useMemo(() => latestExecutions.filter((execution) => execution.status === "failed"), [latestExecutions]);
+  const sortedStorageMediaSummary = useMemo(() => sortStorageMediaSummary(storageMediaSummary), [storageMediaSummary]);
+  const metricTiles = useMemo(
+    () =>
+      buildOverviewMetricTiles({
+        storageCount: storageNodeCount || capacitySummary.groups,
+        jobCount: jobs.length,
+        activeExecutionCount,
+        failedRunCount: recentFailedExecutions.length,
+        mediaCount: mediaSummary.totalCount,
+        capacityRiskCount: lowCapacityItems.length + unreadableCapacities.length
+      }),
+    [
+      activeExecutionCount,
+      capacitySummary.groups,
+      jobs.length,
+      lowCapacityItems.length,
+      mediaSummary.totalCount,
+      recentFailedExecutions.length,
+      storageNodeCount,
+      unreadableCapacities.length
+    ]
+  );
   const quickSyncEdge = useMemo(
     () => attentionEdges.find((edge) => getRunnableManualJobIds(edge).length > 0),
     [attentionEdges, getRunnableManualJobIds, jobById]
   );
-  const hasAlertItems = Boolean(lowCapacityItems.length || unreadableCapacities.length || attentionEdges.length || recentFailedExecutions.length);
-
   function handleRelationEdgeClick(edgeId: string) {
     const edge = edgeById.get(edgeId);
     if (!edge) return;
@@ -1230,7 +1256,7 @@ export function DashboardPage() {
       return;
     }
     setEdgeActionEdgeId(null);
-    navigate(`/settings/jobs?editJobId=${encodeURIComponent(targetJobId)}`);
+    navigate(`/sync?tab=jobs&editJobId=${encodeURIComponent(targetJobId)}`);
   }
 
   async function startManualSyncForPendingEdge() {
@@ -1301,249 +1327,272 @@ export function DashboardPage() {
         </InlineAlert>
       ) : null}
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,360px)_minmax(0,1fr)]">
-        <div className="space-y-4 xl:sticky xl:top-4 xl:self-start">
-          <SectionCard
-            title="快捷操作"
-            description="快速刷新数据或进入关键页面。"
-            right={lastUpdatedAt ? <span className="mp-chip">更新于 {lastUpdatedAt.toLocaleString()}</span> : undefined}
-          >
-            <div className="flex flex-wrap items-center gap-2">
-              <button type="button" className="mp-btn mp-btn-primary" onClick={() => void handleRefreshAll()} disabled={refreshingAll}>
-                {refreshingAll ? "刷新中..." : "刷新首页数据"}
-              </button>
-              <button type="button" className="mp-btn" onClick={() => navigate("/settings/jobs")}>
-                任务配置
-              </button>
-              <button type="button" className="mp-btn" onClick={() => navigate("/diff")}>
-                差异检查
-              </button>
-              <button type="button" className="mp-btn" onClick={() => navigate("/media")}>
-                媒体浏览
-              </button>
-              <button type="button" className="mp-btn" onClick={() => navigate("/records")}>
-                执行记录
-              </button>
-            </div>
-          </SectionCard>
+      <PageHeader
+        eyebrow="Overview"
+        title="概览"
+        description="容量、媒体分布、趋势、风险与最近活动"
+        chips={
+          <>
+            {error ? <StatusBadge tone="warning">部分数据不可用</StatusBadge> : <StatusBadge tone="success">数据已更新</StatusBadge>}
+            {lastUpdatedAt ? <StatusBadge tone="neutral">更新于 {lastUpdatedAt.toLocaleString()}</StatusBadge> : null}
+          </>
+        }
+        actions={
+          <>
+            <button type="button" className="mp-btn mp-btn-primary" onClick={() => void handleRefreshAll()} disabled={refreshingAll}>
+              {refreshingAll ? "刷新中..." : "刷新"}
+            </button>
+            <button type="button" className="mp-btn" onClick={() => navigate("/sync")}>
+              同步
+            </button>
+            <button type="button" className="mp-btn" onClick={() => navigate("/sync?tab=jobs")}>
+              任务
+            </button>
+            <button type="button" className="mp-btn" onClick={() => navigate("/media")}>
+              媒体
+            </button>
+            <button type="button" className="mp-btn" onClick={() => navigate("/records")}>
+              记录
+            </button>
+          </>
+        }
+      />
 
-          <div className="mp-stat-grid">
-            <div className="mp-stat-card">
-              <h4>活跃任务</h4>
-              <p className="text-2xl font-semibold">{activeExecutionCount}</p>
-              <p className="mt-1 text-xs mp-muted">共 {jobs.length} 个任务</p>
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
+        {metricTiles.map((tile) => (
+          <MetricTile key={tile.key} label={tile.label} value={tile.value} description={tile.description} tone={tile.tone} />
+        ))}
+      </div>
+
+      <div className="grid gap-3 xl:grid-cols-[minmax(0,1.45fr)_minmax(360px,0.75fr)]">
+        <motion.section
+          className="mp-panel p-4"
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.03, duration: 0.2, ease: "easeOut" }}
+        >
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 className="text-base font-semibold">媒体日期分布和趋势</h3>
+              <p className="mt-1 text-sm mp-muted">按日期观察新增图片、视频与 Live Photo。</p>
             </div>
-            <div className="mp-stat-card">
-              <h4>同步关系</h4>
-              <p className="text-2xl font-semibold">{relationEdges.length}</p>
-              <p className="mt-1 text-xs mp-muted">
-                已同步 {syncedEdgeCount} · 待处理 {pendingEdgeCount}
+            {loadingActivity ? <StatusBadge tone="info">加载中</StatusBadge> : <StatusBadge tone="neutral">{selectedActivityYear}</StatusBadge>}
+          </div>
+          <div className="mt-3">
+            <SourceActivityHeatmap
+              data={sourceActivity}
+              selectedYear={selectedActivityYear}
+              loading={loadingActivity}
+              years={activityYears}
+              onSelectYear={handleSelectActivityYear}
+            />
+          </div>
+        </motion.section>
+
+        <aside className="grid gap-3">
+          <section className="mp-panel p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-base font-semibold">容量风险</h3>
+                <p className="mt-1 text-sm mp-muted">整体剩余 {capacitySummaryText}</p>
+              </div>
+              <StatusBadge tone={summaryTone.statusTone}>{buildCapacityRiskLabel(capacityRemainingPercent)}</StatusBadge>
+            </div>
+            <div className="mt-3">
+              <ProgressBar value={capacityRemainingPercent !== null ? 100 - capacityRemainingPercent : 0} label="整体容量使用率" tone={summaryTone.progressTone} />
+              <p className="mt-2 text-xs mp-muted">
+                已用 {formatBytes(capacitySummary.usedBytes)} / 总量 {formatBytes(capacitySummary.totalBytes)}
               </p>
             </div>
-            <div className="mp-stat-card">
-              <h4>存储节点</h4>
-              <p className="text-2xl font-semibold">{storageNodeCount}</p>
-              <p className="mt-1 text-xs mp-muted">孤立 {relationSummary.isolatedNodeCount}</p>
+            <div className="mt-3 space-y-2 border-t border-[var(--ark-line)] pt-3">
+              {lowCapacityItems.slice(0, 3).map(({ item, remainingPercent }) => (
+                <div key={`risk:${item.id}`} className="flex items-center justify-between gap-3 text-sm">
+                  <span className="min-w-0 truncate">{item.storageNames.join("、")}</span>
+                  <StatusBadge tone={getCapacityTone(remainingPercent).statusTone}>剩余 {remainingPercent}%</StatusBadge>
+                </div>
+              ))}
+              {unreadableCapacities.slice(0, 2).map((item) => (
+                <div key={`risk-unreadable:${item.id}`} className="flex items-center justify-between gap-3 text-sm">
+                  <span className="min-w-0 truncate">{item.storageNames.join("、")}</span>
+                  <StatusBadge tone="warning">不可读取</StatusBadge>
+                </div>
+              ))}
+              {!lowCapacityItems.length && !unreadableCapacities.length ? <p className="text-sm mp-muted">暂无容量风险。</p> : null}
             </div>
-            <div className="mp-stat-card">
-              <h4>容量健康度</h4>
-              <p className="text-2xl font-semibold">{capacitySummaryText}</p>
-              <p className={`mt-1 text-xs ${summaryTone.chipClass}`}>整体剩余 {capacitySummaryText}</p>
+            <button type="button" className="mp-btn mp-btn-sm mt-3" onClick={() => navigate("/settings/storages")}>
+              存储设置
+            </button>
+          </section>
+
+          <section className="mp-panel p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-base font-semibold">运行中</h3>
+                <p className="mt-1 text-sm mp-muted">队列、运行任务与最近异常。</p>
+              </div>
+              <StatusBadge tone={activeExecutionCount > 0 ? "info" : "success"}>{activeExecutionCount}</StatusBadge>
+            </div>
+            <div className="mt-3 space-y-2 border-t border-[var(--ark-line)] pt-3">
+              {latestExecutions.slice(0, 3).map((execution) => {
+                const job = jobById.get(execution.jobId);
+                const statusTone = execution.status === "failed" ? "danger" : execution.status === "success" ? "success" : "warning";
+                return (
+                  <div key={`running-summary:${execution.id}`} className="flex items-center justify-between gap-3 text-sm">
+                    <span className="min-w-0 truncate">{job?.name ?? execution.jobId}</span>
+                    <StatusBadge tone={statusTone}>{getExecutionStatusLabel(execution)}</StatusBadge>
+                  </div>
+                );
+              })}
+              {!latestExecutions.length ? <p className="text-sm mp-muted">暂无任务执行记录。</p> : null}
+            </div>
+            <button type="button" className="mp-btn mp-btn-sm mt-3" onClick={() => navigate("/sync?tab=running")}>
+              运行视图
+            </button>
+          </section>
+
+          <section className="mp-panel p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-base font-semibold">同步摘要</h3>
+                <p className="mt-1 text-sm mp-muted">已同步 {syncedEdgeCount} · 待处理 {pendingEdgeCount}</p>
+              </div>
+              <StatusBadge tone={pendingEdgeCount > 0 ? "warning" : "success"}>{relationEdges.length} 条关系</StatusBadge>
+            </div>
+            <div className="mt-3 space-y-2 border-t border-[var(--ark-line)] pt-3">
+              {attentionEdges.slice(0, 2).map((edge) => (
+                <div key={`sync-summary:${edge.id}`} className="flex items-center justify-between gap-3 text-sm">
+                  <span className="min-w-0 truncate">
+                    {edge.sourceStorageName} → {edge.destinationStorageName}
+                  </span>
+                  <StatusBadge tone="warning">任务 {edge.jobCount}</StatusBadge>
+                </div>
+              ))}
+              {!attentionEdges.length ? <p className="text-sm mp-muted">同步拓扑暂无待处理关系。</p> : null}
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {quickSyncEdge ? (
+                <button type="button" className="mp-btn mp-btn-sm mp-btn-primary" onClick={() => setPendingSyncEdgeId(quickSyncEdge.id)}>
+                  启动同步
+                </button>
+              ) : null}
+              <button type="button" className="mp-btn mp-btn-sm" onClick={() => navigate("/sync")}>
+                同步中心
+              </button>
+            </div>
+          </section>
+        </aside>
+      </div>
+
+      <div className="grid gap-3 xl:grid-cols-2">
+        <motion.section
+          className="mp-panel p-4"
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.05, duration: 0.2, ease: "easeOut" }}
+        >
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 className="text-base font-semibold">存储媒体分布</h3>
+              <p className="mt-1 text-sm mp-muted">
+                有媒体的存储 {mediaSummary.storagesWithMedia}/{mediaSummary.totalStorages}
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 text-sm">
+              <StatusBadge tone="info">总数量 {mediaSummary.totalCount}</StatusBadge>
+              <StatusBadge tone="neutral">总体积 {formatBytes(mediaSummary.totalBytes)}</StatusBadge>
             </div>
           </div>
 
-          <SectionCard title="待处理事项" description="系统监控到的风险与建议，优先处理高风险项。">
-            {hasAlertItems ? (
-              <div className="space-y-3">
-                {lowCapacityItems.length ? (
-                  <div className="rounded-xl border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-3">
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <p className="text-sm font-semibold">容量告急</p>
-                        <p className="mt-1 text-xs mp-muted">剩余空间低于 20% 的存储需要尽快处理。</p>
-                      </div>
-                      <span className="mp-chip mp-chip-warning">高风险</span>
+          <div className="mt-3 grid gap-3">
+            {sortedStorageMediaSummary.slice(0, 3).map((item) => {
+              const countSlices: PieSlice[] = [
+                { label: "视频", value: item.counts.video, color: mediaColors.video, formattedValue: String(item.counts.video) },
+                { label: "图片", value: item.counts.image, color: mediaColors.image, formattedValue: String(item.counts.image) },
+                {
+                  label: "Live Photo",
+                  value: item.counts.livePhoto,
+                  color: mediaColors.livePhoto,
+                  formattedValue: String(item.counts.livePhoto)
+                }
+              ];
+              const sizeSlices: PieSlice[] = [
+                { label: "视频", value: item.bytes.video, color: mediaColors.video, formattedValue: formatBytes(item.bytes.video) },
+                { label: "图片", value: item.bytes.image, color: mediaColors.image, formattedValue: formatBytes(item.bytes.image) },
+                {
+                  label: "Live Photo",
+                  value: item.bytes.livePhoto,
+                  color: mediaColors.livePhoto,
+                  formattedValue: formatBytes(item.bytes.livePhoto)
+                }
+              ];
+              return (
+                <article
+                  key={item.storageId}
+                  className="rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-3 transition-all hover:border-[var(--ark-line-strong)] hover:shadow-md"
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold break-all">{item.storageName}</p>
+                      <p className="text-xs mp-muted break-all">{item.basePath}</p>
                     </div>
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      {lowCapacityItems.slice(0, 3).map(({ item, remainingPercent }) => (
-                        <span key={`low:${item.id}`} className="mp-chip">
-                          {item.storageNames.join("、")} · 剩余 {remainingPercent}%
-                        </span>
-                      ))}
-                      {lowCapacityItems.length > 3 ? <span className="text-xs mp-muted">+{lowCapacityItems.length - 3} 个</span> : null}
-                    </div>
-                    <div className="mt-3">
-                      <button type="button" className="mp-btn mp-btn-sm" onClick={() => navigate("/settings/storages")}>
-                        查看存储配置
-                      </button>
-                    </div>
+                    <StatusBadge tone="neutral">
+                      {item.totalCount} 项 · {formatBytes(item.totalBytes)}
+                    </StatusBadge>
                   </div>
-                ) : null}
-
-                {unreadableCapacities.length ? (
-                  <div className="rounded-xl border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-3">
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <p className="text-sm font-semibold">容量读取失败</p>
-                        <p className="mt-1 text-xs mp-muted">有存储容量无法读取，建议检查挂载或授权。</p>
-                      </div>
-                      <span className="mp-chip mp-chip-warning">需要检查</span>
-                    </div>
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      {unreadableCapacities.slice(0, 3).map((item) => (
-                        <span key={`unreadable:${item.id}`} className="mp-chip">
-                          {item.storageNames.join("、")}
-                        </span>
-                      ))}
-                      {unreadableCapacities.length > 3 ? <span className="text-xs mp-muted">+{unreadableCapacities.length - 3} 个</span> : null}
-                    </div>
-                    <div className="mt-3">
-                      <button type="button" className="mp-btn mp-btn-sm" onClick={() => navigate("/settings/storages")}>
-                        排查存储状态
-                      </button>
-                    </div>
+                  <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                    <PieStatCard title="数量分布" totalLabel={`${item.totalCount} 项`} emptyLabel="暂无数据" slices={countSlices} />
+                    <PieStatCard title="体积分布" totalLabel={formatBytes(item.totalBytes)} emptyLabel="暂无数据" slices={sizeSlices} />
                   </div>
-                ) : null}
+                </article>
+              );
+            })}
+            {!sortedStorageMediaSummary.length ? <StateBlock title="暂无媒体统计数据" description="刷新后会显示按存储目录聚合的媒体数量与体积。" /> : null}
+          </div>
+        </motion.section>
 
-                {attentionEdges.length ? (
-                  <div className="rounded-xl border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-3">
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <p className="text-sm font-semibold">待同步关系</p>
-                        <p className="mt-1 text-xs mp-muted">有同步关系处于待同步状态，建议优先处理。</p>
-                      </div>
-                      <span className="mp-chip mp-chip-warning">待处理 {attentionEdges.length}</span>
-                    </div>
-                    <div className="mt-2 space-y-1 text-xs mp-muted">
-                      {attentionEdges.slice(0, 2).map((edge) => (
-                        <div key={`edge-attention:${edge.id}`} className="flex items-center justify-between gap-2">
-                          <span className="min-w-0 truncate">
-                            {edge.sourceStorageName} → {edge.destinationStorageName}
-                          </span>
-                          <span className="mp-chip">任务 {edge.jobCount}</span>
-                        </div>
-                      ))}
-                      {attentionEdges.length > 2 ? <span className="text-[11px]">+{attentionEdges.length - 2} 条关系</span> : null}
-                    </div>
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {quickSyncEdge ? (
-                        <button type="button" className="mp-btn mp-btn-sm mp-btn-primary" onClick={() => setPendingSyncEdgeId(quickSyncEdge.id)}>
-                          一键启动同步
-                        </button>
-                      ) : null}
-                      <button type="button" className="mp-btn mp-btn-sm" onClick={() => navigate("/diff")}>
-                        查看差异
-                      </button>
-                    </div>
-                  </div>
-                ) : null}
-
-                {recentFailedExecutions.length ? (
-                  <div className="rounded-xl border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-3">
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <p className="text-sm font-semibold">近期失败任务</p>
-                        <p className="mt-1 text-xs mp-muted">最近任务执行失败，请尽快查看日志。</p>
-                      </div>
-                      <span className="mp-chip mp-chip-danger">失败 {recentFailedExecutions.length}</span>
-                    </div>
-                    <div className="mt-2 space-y-1 text-xs mp-muted">
-                      {recentFailedExecutions.slice(0, 2).map((execution) => (
-                        <div key={`failed:${execution.id}`} className="flex items-center justify-between gap-2">
-                          <span className="min-w-0 truncate">{jobById.get(execution.jobId)?.name ?? execution.jobId}</span>
-                          <span className="mp-chip">失败</span>
-                        </div>
-                      ))}
-                      {recentFailedExecutions.length > 2 ? <span className="text-[11px]">+{recentFailedExecutions.length - 2} 条失败记录</span> : null}
-                    </div>
-                    <div className="mt-3">
-                      <button type="button" className="mp-btn mp-btn-sm" onClick={() => navigate("/records")}>
-                        查看执行记录
-                      </button>
-                    </div>
-                  </div>
-                ) : null}
-              </div>
-            ) : (
-              <p className="text-sm mp-muted">暂无待处理事项，系统状态良好。</p>
-            )}
-          </SectionCard>
-
-          <SectionCard
-            title="任务执行概览"
-            description="最近 5 条任务执行记录，便于快速掌握当前状态。"
-            right={
-              <button type="button" className="mp-btn" onClick={() => navigate("/records")}>
-                查看全部记录
+        <motion.section
+          className="mp-panel p-4"
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.06, duration: 0.2, ease: "easeOut" }}
+        >
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 className="text-base font-semibold">同步拓扑摘要</h3>
+              <p className="mt-1 text-sm mp-muted">节点、关系和待处理连线。</p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 text-sm">
+              <StatusBadge tone="neutral">节点 {relationNodes.length}</StatusBadge>
+              <StatusBadge tone={pendingEdgeCount > 0 ? "warning" : "success"}>待处理 {pendingEdgeCount}</StatusBadge>
+            </div>
+          </div>
+          <div className="mt-3 grid gap-3 sm:grid-cols-3">
+            <MetricTile label="同步关系" value={relationEdges.length} description={`已同步 ${syncedEdgeCount}`} tone={pendingEdgeCount > 0 ? "warning" : "success"} />
+            <MetricTile label="存储节点" value={storageNodeCount} description={`孤立 ${relationSummary.isolatedNodeCount}`} tone="neutral" />
+            <MetricTile label="运行连线" value={runningEdgeIds.size} description="可点击查看进度" tone={runningEdgeIds.size > 0 ? "info" : "success"} />
+          </div>
+          <div className="mt-3 space-y-2 border-t border-[var(--ark-line)] pt-3">
+            {attentionEdges.slice(0, 5).map((edge) => (
+              <button
+                key={`topology:${edge.id}`}
+                type="button"
+                className="flex w-full items-center justify-between gap-3 rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] px-3 py-2 text-left text-sm transition hover:border-[var(--ark-line-strong)]"
+                onClick={() => handleRelationEdgeClick(edge.id)}
+              >
+                <span className="min-w-0 truncate">
+                  {edge.sourceStorageName} → {edge.destinationStorageName}
+                </span>
+                <StatusBadge tone={runningEdgeIds.has(edge.id) ? "info" : "warning"}>
+                  {runningEdgeIds.has(edge.id) ? "同步中" : "待同步"}
+                </StatusBadge>
               </button>
-            }
-          >
-            {!latestExecutions.length ? (
-              <p className="text-sm mp-muted">暂无任务执行记录</p>
-            ) : (
-              <>
-                <div className="space-y-2 md:hidden">
-                  {latestExecutions.map((execution) => {
-                    const job = jobById.get(execution.jobId);
-                    const statusLabel = getExecutionStatusLabel(execution);
-                    const statusClass =
-                      execution.status === "failed"
-                        ? "mp-status-danger"
-                        : execution.status === "success"
-                          ? "mp-status-success"
-                          : "mp-status-warning";
-                    return (
-                      <article key={execution.id} className="mp-mobile-card">
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="min-w-0">
-                            <h4 className="truncate text-sm font-semibold">{job?.name ?? execution.jobId}</h4>
-                            <p className="mt-1 text-xs mp-muted">{new Date(execution.updatedAt).toLocaleString()}</p>
-                          </div>
-                          <span className={`text-sm ${statusClass}`}>{statusLabel}</span>
-                        </div>
-                      </article>
-                    );
-                  })}
-                </div>
+            ))}
+            {!attentionEdges.length ? <StateBlock title="同步关系稳定" description="当前没有待处理同步关系。" /> : null}
+          </div>
+        </motion.section>
+      </div>
 
-                <div className="hidden md:block">
-                  <div className="mp-table-shell">
-                    <table className="mp-data-table min-w-full text-sm">
-                      <thead>
-                        <tr className="text-left text-xs mp-muted">
-                          <th className="px-2 py-2">任务</th>
-                          <th className="px-2 py-2">状态</th>
-                          <th className="px-2 py-2">更新时间</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {latestExecutions.map((execution) => {
-                          const job = jobById.get(execution.jobId);
-                          const statusLabel = getExecutionStatusLabel(execution);
-                          const statusClass =
-                            execution.status === "failed"
-                              ? "mp-status-danger"
-                              : execution.status === "success"
-                                ? "mp-status-success"
-                                : "mp-status-warning";
-                          return (
-                            <tr key={execution.id} className="border-b border-[var(--ark-line)]/70">
-                              <td className="px-2 py-2 font-medium">{job?.name ?? execution.jobId}</td>
-                              <td className={`px-2 py-2 ${statusClass}`}>{statusLabel}</td>
-                              <td className="px-2 py-2 text-sm mp-muted">{new Date(execution.updatedAt).toLocaleString()}</td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              </>
-            )}
-          </SectionCard>
-        </div>
-
-        <div className="space-y-4">
+      <div className="space-y-4">
           <motion.article
             className="mp-panel p-4"
             initial={{ opacity: 0, y: 8 }}
@@ -1563,7 +1612,7 @@ export function DashboardPage() {
               </div>
             </div>
 
-            <div className="relative mt-3 overflow-hidden rounded-2xl border border-[var(--ark-line)] p-3 sm:p-4 mp-relation-graph-surface">
+            <div className="relative mt-3 overflow-hidden border-t border-[var(--ark-line)] pt-3 sm:pt-4 mp-relation-graph-surface">
               <div className="pointer-events-none absolute right-3 top-3 z-10 flex flex-wrap items-center gap-2 rounded-full bg-white/70 px-2.5 py-1 text-[11px] text-slate-600 backdrop-blur">
                 <span className="inline-flex items-center gap-1">
                   <span className="h-2 w-2 rounded-full bg-emerald-500" />
@@ -1709,33 +1758,10 @@ export function DashboardPage() {
                   </svg>
                 </div>
               ) : (
-                <p className="px-3 py-12 text-center text-sm mp-muted">暂无存储配置</p>
+                <StateBlock title="暂无存储配置" description="配置存储后会显示同步拓扑关系。" />
               )}
             </div>
 
-          </motion.article>
-
-          <motion.article
-            className="mp-panel p-4"
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.06, duration: 0.2, ease: "easeOut" }}
-          >
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <h3 className="text-base font-semibold">媒体日期分布热力图</h3>
-              </div>
-            </div>
-
-            <div className="mt-3">
-              <SourceActivityHeatmap
-                data={sourceActivity}
-                selectedYear={selectedActivityYear}
-                loading={loadingActivity}
-                years={activityYears}
-                onSelectYear={handleSelectActivityYear}
-              />
-            </div>
           </motion.article>
 
           <motion.article
@@ -1755,7 +1781,7 @@ export function DashboardPage() {
               <div className="flex flex-wrap items-center gap-2 text-sm">
                 <span className="mp-chip">总容量 {formatBytes(capacitySummary.totalBytes)}</span>
                 <span className="mp-chip">已用 {formatBytes(capacitySummary.usedBytes)}</span>
-                <span className={summaryTone.chipClass}>整体剩余 {capacitySummary.freePercent}%</span>
+                <StatusBadge tone={summaryTone.statusTone}>整体剩余 {capacitySummaryText}</StatusBadge>
               </div>
             </div>
 
@@ -1764,9 +1790,9 @@ export function DashboardPage() {
                 const remainingPercent = getRemainingPercent(item.totalBytes, item.freeBytes);
                 const tone = getCapacityTone(remainingPercent);
                 return (
-                  <div
+                  <article
                     key={item.id}
-                    className="rounded-xl border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-3 transition-all hover:border-[var(--ark-line-strong)] hover:shadow-md"
+                    className="rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-3 transition-all hover:border-[var(--ark-line-strong)] hover:shadow-md"
                   >
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div>
@@ -1774,21 +1800,18 @@ export function DashboardPage() {
                         <p className="text-xs mp-muted">{item.storageNames.length} 个配置存储</p>
                       </div>
                       {item.available ? (
-                        <span className={tone.chipClass}>
-                          剩余 {remainingPercent}% · {tone.statusText}
-                        </span>
+                        <StatusBadge tone={tone.statusTone}>
+                          {remainingPercent === null ? "容量未知" : `剩余 ${remainingPercent}% · ${tone.statusText}`}
+                        </StatusBadge>
                       ) : (
-                        <span className="mp-chip mp-chip-warning">不可读取</span>
+                        <StatusBadge tone="warning">不可读取</StatusBadge>
                       )}
                     </div>
 
                     {item.available ? (
                       <>
-                        <div className="mt-2 h-2.5 overflow-hidden rounded-full bg-[var(--ark-line)]">
-                          <div
-                            className={`h-full rounded-full ${tone.barClass}`}
-                            style={{ width: `${Math.min(100, Math.max(0, item.usedPercent ?? 0))}%` }}
-                          />
+                        <div className="mt-2">
+                          <ProgressBar value={item.usedPercent ?? 0} label={`${item.storageNames.join("、")} 容量使用率`} tone={tone.progressTone} />
                         </div>
                         <p className="mt-2 text-sm mp-muted">
                           已用 {formatBytes(item.usedBytes)} / 总量 {formatBytes(item.totalBytes)} · 可用 {formatBytes(item.freeBytes)}
@@ -1797,10 +1820,10 @@ export function DashboardPage() {
                     ) : (
                       <p className="mt-2 text-sm mp-muted">{item.reason ?? "无法读取该存储容量"}</p>
                     )}
-                  </div>
+                  </article>
                 );
               })}
-              {!capacities.length ? <p className="text-sm mp-muted">暂无存储容量数据</p> : null}
+              {!capacities.length ? <StateBlock title="暂无存储容量数据" description="刷新后会显示每组存储的容量使用情况。" /> : null}
             </div>
           </motion.article>
 
@@ -1824,7 +1847,7 @@ export function DashboardPage() {
             </div>
 
             <div className="mt-3 grid gap-3 xl:grid-cols-2">
-              {storageMediaSummary.map((item) => {
+              {sortedStorageMediaSummary.map((item) => {
                 const countSlices: PieSlice[] = [
                   { label: "视频", value: item.counts.video, color: mediaColors.video, formattedValue: String(item.counts.video) },
                   { label: "图片", value: item.counts.image, color: mediaColors.image, formattedValue: String(item.counts.image) },
@@ -1846,9 +1869,9 @@ export function DashboardPage() {
                   }
                 ];
                 return (
-                  <div
+                  <article
                     key={item.storageId}
-                    className="rounded-xl border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-3 transition-all hover:border-[var(--ark-line-strong)] hover:shadow-md"
+                    className="rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-3 transition-all hover:border-[var(--ark-line-strong)] hover:shadow-md"
                   >
                     <div className="flex flex-wrap items-start justify-between gap-2">
                       <div className="min-w-0">
@@ -1863,13 +1886,12 @@ export function DashboardPage() {
                       <PieStatCard title="数量分布" totalLabel={`${item.totalCount} 项`} emptyLabel="暂无数据" slices={countSlices} />
                       <PieStatCard title="体积分布" totalLabel={formatBytes(item.totalBytes)} emptyLabel="暂无数据" slices={sizeSlices} />
                     </div>
-                  </div>
+                  </article>
                 );
               })}
-              {!storageMediaSummary.length ? <p className="text-sm mp-muted">暂无媒体统计数据</p> : null}
+              {!sortedStorageMediaSummary.length ? <StateBlock title="暂无媒体统计数据" description="刷新后会显示按存储目录聚合的媒体数量与体积。" /> : null}
             </div>
           </motion.article>
-        </div>
       </div>
 
       {edgeActionEdge ? (
@@ -1965,11 +1987,8 @@ export function DashboardPage() {
               <span className="mp-muted">进度</span>
               <span className="font-semibold">{progressDialogPercent}%</span>
             </div>
-            <div className="mt-1 h-2 overflow-hidden rounded-full bg-[var(--ark-line)]">
-              <div
-                className="h-full rounded-full bg-[var(--ark-primary)] transition-all duration-300"
-                style={{ width: `${progressDialogPercent}%` }}
-              />
+            <div className="mt-1">
+              <ProgressBar value={progressDialogPercent} label="任务执行进度" tone={progressDialogExecution.status === "failed" ? "danger" : "info"} />
             </div>
 
             <div className="mt-3 grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
@@ -2001,11 +2020,8 @@ export function DashboardPage() {
                   {progressFileStage === "post_processing" ? " · 元数据写入中" : ""}
                 </p>
                 {progressFilePercent !== null ? (
-                  <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--ark-line)]">
-                    <div
-                      className="h-full rounded-full bg-[var(--ark-primary)] transition-all duration-200"
-                      style={{ width: `${progressFilePercent}%` }}
-                    />
+                  <div className="mt-2">
+                    <ProgressBar value={progressFilePercent} label="当前文件同步进度" tone="info" />
                   </div>
                 ) : null}
               </>
