@@ -122,7 +122,7 @@ export function AppShell({ authUser, onLogout }: AppShellProps) {
               <img
                 src="/logo.svg"
                 alt="PhotoArk logo"
-                className="h-11 w-11 rounded-2xl border border-[var(--ark-line)] bg-[var(--ark-surface)] p-1.5 shadow-sm"
+                className="h-11 w-11 rounded-md border border-[var(--ark-line)] bg-[var(--ark-surface)] p-1.5 shadow-sm"
               />
               <div className="min-w-0">
                 <p className="mp-kicker mp-kicker-primary">PhotoArk</p>
