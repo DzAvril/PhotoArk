@@ -1,7 +1,7 @@
 {
   "name": "photoark",
   "private": true,
-  "version": "0.1.31",
+  "version": "0.1.32",
   "description": "Photo backup and multi-target sync platform with Live Photo aware restore",
   "workspaces": [
     "apps/*",
@@ -11,7 +11,8 @@
     "dev": "npm run dev -w @photoark/api & npm run dev -w @photoark/web",
     "build": "npm run build -w @photoark/shared && npm run build -w @photoark/api && npm run build -w @photoark/web",
     "lint": "npm run lint -w @photoark/api && npm run lint -w @photoark/web",
-    "typecheck": "npm run typecheck -w @photoark/shared && npm run typecheck -w @photoark/api && npm run typecheck -w @photoark/web"
+    "typecheck": "npm run typecheck -w @photoark/shared && npm run typecheck -w @photoark/api && npm run typecheck -w @photoark/web",
+    "test": "tsx --test apps/api/src/modules/media/media-query.test.ts apps/api/src/modules/backup/job-diff-cache.test.ts apps/web/src/pages/jobs-page-model.test.ts"
   },
   "engines": {
     "node": ">=20.11.0"

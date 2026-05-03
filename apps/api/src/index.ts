@@ -6,7 +6,7 @@ import path from "node:path";
 import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
-import Fastify, { type FastifyReply } from "fastify";
+import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import cors from "@fastify/cors";
 import fastifyStatic from "@fastify/static";
 import exifr from "exifr";
@@ -20,6 +20,8 @@ import { TelegramService } from "./modules/notification/telegram-service.js";
 import { PasswordService } from "./modules/auth/password-service.js";
 import { FileStateRepository } from "./modules/backup/repository/file-state-repository.js";
 import { MediaIndexRepository, type MediaIndexRootEntry, type MediaIndexStore } from "./modules/backup/repository/media-index-repository.js";
+import { TimedValueCache } from "./modules/backup/job-diff-cache.js";
+import { paginateItems } from "./modules/media/media-query.js";
 import type {
   AppSettings,
   AuthSession,
@@ -59,26 +61,7 @@ app.setErrorHandler((error, req, reply) => {
       ? fastifyError.statusCode
       : 500;
   const message = error instanceof Error ? error.message : "Internal server error";
-  // #region debug-point A:api-error-handler
-  fetch("http://127.0.0.1:7777/event", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      sessionId: "backup-500",
-      runId: "post-fix",
-      hypothesisId: "A",
-      location: "apps/api/src/index.ts:42",
-      msg: "[DEBUG] api error handler",
-      data: {
-        statusCode,
-        code: fastifyError.code,
-        message,
-        method: req.method,
-        url: req.url
-      }
-    })
-  }).catch(() => {});
-  // #endregion
+  req.log.warn({ statusCode, code: fastifyError.code, err: message }, "API request failed");
   return reply.code(statusCode).send({ message });
 });
 
@@ -178,6 +161,12 @@ const jobDiffQuerySchema = z.object({
   all: z.union([z.string(), z.boolean()]).optional()
 });
 
+const mediaBrowseQuerySchema = z.object({
+  path: z.string().optional(),
+  page: z.coerce.number().int().min(1).optional(),
+  pageSize: z.coerce.number().int().min(1).max(500).optional()
+});
+
 const jobSyncFileSchema = z.object({
   relativePath: z.string().min(1)
 });
@@ -274,6 +263,15 @@ const publicApiRoutes = new Set<string>([
   "/api/auth/login"
 ]);
 
+async function getRequestState(req: FastifyRequest): Promise<BackupState> {
+  if (req.appState) {
+    return req.appState;
+  }
+  const state = await stateRepo.loadState();
+  req.appState = state;
+  return state;
+}
+
 function metricSummary(state: BackupState) {
   const encryptedAssets = state.assets.filter((a) => a.encrypted).length;
   const livePhotoPairs = new Set(state.assets.map((a) => a.livePhotoAssetId).filter(Boolean)).size;
@@ -354,10 +352,13 @@ const MIME_BY_EXT: Record<string, string> = {
   ".webm": "video/webm"
 };
 
-const MEDIA_INDEX_MAX_AGE_MS = 30_000;
+const MEDIA_INDEX_MAX_AGE_MS = 10 * 60_000;
+const DASHBOARD_MEDIA_INDEX_MAX_AGE_MS = 24 * 60 * 60_000;
 const MEDIA_INDEX_SAVE_DEBOUNCE_MS = 1_200;
 const MEDIA_INDEX_STAT_CONCURRENCY = 32;
 const JOB_DIFF_MTIME_TOLERANCE_MS = 1_000;
+const JOB_DIFF_CACHE_TTL_MS = 2 * 60_000;
+const JOB_DIFF_CACHE_MAX_ENTRIES = 16;
 
 type IndexedMediaFile = {
   relativePath: string;
@@ -596,16 +597,20 @@ function buildStorageMediaSummaryFromAssets(storageId: string, assets: BackupSta
   return summary;
 }
 
-async function buildStorageMediaSummaryFromLocalScan(storage: StorageTarget): Promise<StorageMediaSummaryMetrics> {
-  const summary = createEmptyStorageMediaSummaryMetrics();
+async function buildStorageMediaSummaryFromIndex(storage: StorageTarget): Promise<StorageMediaSummaryMetrics | null> {
   const rootPath = resolvePathInStorage(storage, storage.basePath);
-  const files = await collectIndexedMediaFiles(rootPath);
+  const files = await getDashboardMediaIndexRows(rootPath);
+  if (!files) return null;
+  return buildStorageMediaSummaryFromRows(files);
+}
+
+function buildStorageMediaSummaryFromRows(files: IndexedMediaFile[]): StorageMediaSummaryMetrics {
+  const summary = createEmptyStorageMediaSummaryMetrics();
   const relativePaths = files.map((row) => row.relativePath);
   const livePhotoMap = buildLivePhotoIdByRelativePath(relativePaths);
   const livePhotoBytesById = new Map<string, number>();
 
-  for (let i = 0; i < files.length; i += 1) {
-    const row = files[i];
+  for (const row of files) {
     const relativePath = row.relativePath;
     const sizeBytes = row.sizeBytes;
     const ext = path.extname(relativePath).toLowerCase();
@@ -640,7 +645,7 @@ async function buildStorageMediaSummary(state: BackupState): Promise<StorageMedi
 
       if (isLocalStorage(storage.type)) {
         try {
-          metrics = await buildStorageMediaSummaryFromLocalScan(storage);
+          metrics = (await buildStorageMediaSummaryFromIndex(storage)) ?? buildStorageMediaSummaryFromAssets(storage.id, state.assets);
         } catch (error) {
           app.log.warn(
             {
@@ -648,7 +653,7 @@ async function buildStorageMediaSummary(state: BackupState): Promise<StorageMedi
               storageName: storage.name,
               err: (error as Error).message
             },
-            "Failed to scan storage for media summary, fallback to backup assets"
+            "Failed to read media index for media summary, fallback to backup assets"
           );
           metrics = buildStorageMediaSummaryFromAssets(storage.id, state.assets);
         }
@@ -824,9 +829,9 @@ async function buildSourceMediaActivity(state: BackupState, dayCount: number): P
   for (const rootPath of sourceRoots) {
     let rows: IndexedMediaFile[] = [];
     try {
-      rows = await collectIndexedMediaFiles(rootPath);
+      rows = (await getDashboardMediaIndexRows(rootPath)) ?? [];
     } catch (error) {
-      app.log.warn({ rootPath, err: (error as Error).message }, "Failed to scan source root for media activity");
+      app.log.warn({ rootPath, err: (error as Error).message }, "Failed to read media index for source activity");
       continue;
     }
     const livePhotoIdByRelativePath = buildLivePhotoIdByRelativePath(rows.map((row) => row.relativePath));
@@ -1182,6 +1187,21 @@ async function buildJobDiff(
 
   const sourceRoot = resolvePathInStorage(sourceStorage, job.sourcePath);
   const destinationRoot = resolvePathInStorage(destinationStorage, job.destinationPath);
+  const normalizedKeyword = options.keyword.trim().toLowerCase();
+  const cacheKey = buildJobDiffCacheKey(state, job, sourceRoot, destinationRoot, {
+    statusFilter: options.statusFilter,
+    kindFilter: options.kindFilter,
+    keyword: normalizedKeyword
+  });
+
+  if (options.forceRefresh) {
+    jobDiffCache.delete(cacheKey);
+  } else {
+    const cached = jobDiffCache.get(cacheKey);
+    if (cached) {
+      return buildJobDiffResponseFromCached(cached, options);
+    }
+  }
 
   const [sourceRows, destinationRows] = await Promise.all([
     collectIndexedMediaFiles(sourceRoot, options.forceRefresh),
@@ -1198,7 +1218,6 @@ async function buildJobDiff(
   };
 
   const summary = buildEmptyJobDiffSummary();
-  const normalizedKeyword = options.keyword.trim().toLowerCase();
   const statusBuckets: Record<JobDiffStatus, JobDiffItem[]> = {
     source_only: [],
     changed: [],
@@ -1328,20 +1347,7 @@ async function buildJobDiff(
     .concat(statusBuckets.destination_only)
     .concat(statusBuckets.same);
 
-  const total = filteredItems.length;
-  let pageSize = Math.max(1, Math.min(200, Math.round(options.pageSize)));
-  let totalPages = Math.max(1, Math.ceil(total / pageSize));
-  let page = total === 0 ? 1 : Math.min(Math.max(1, Math.round(options.page)), totalPages);
-  let items = filteredItems.slice((page - 1) * pageSize, (page - 1) * pageSize + pageSize);
-
-  if (options.includeAll) {
-    page = 1;
-    totalPages = 1;
-    pageSize = Math.max(1, total);
-    items = filteredItems;
-  }
-
-  return {
+  const cached: CachedJobDiff = {
     generatedAt: new Date().toISOString(),
     job: {
       id: job.id,
@@ -1358,12 +1364,10 @@ async function buildJobDiff(
       destinationFileCount: destinationRows.length
     },
     summary,
-    page,
-    pageSize,
-    total,
-    totalPages,
-    items
+    filteredItems
   };
+  jobDiffCache.set(cacheKey, cached);
+  return buildJobDiffResponseFromCached(cached, options);
 }
 
 function sendBufferWithRange(reply: FastifyReply, plain: Buffer, mimeType: string, rangeHeader: string | undefined) {
@@ -1598,6 +1602,69 @@ type JobDiffResponse = {
   items: JobDiffItem[];
 };
 
+type CachedJobDiff = Omit<JobDiffResponse, "page" | "pageSize" | "total" | "totalPages" | "items"> & {
+  filteredItems: JobDiffItem[];
+};
+
+const jobDiffCache = new TimedValueCache<CachedJobDiff>({
+  ttlMs: JOB_DIFF_CACHE_TTL_MS,
+  maxEntries: JOB_DIFF_CACHE_MAX_ENTRIES
+});
+
+function buildJobDiffCacheKey(
+  state: BackupState,
+  job: BackupJob,
+  sourceRoot: string,
+  destinationRoot: string,
+  options: {
+    statusFilter: "all" | "diff" | JobDiffStatus;
+    kindFilter: "all" | JobDiffKind;
+    keyword: string;
+  }
+): string {
+  const latestRun = state.jobRuns[0];
+  const assetsVersion = `${state.assets.length}:${latestRun?.id ?? ""}:${latestRun?.finishedAt ?? ""}`;
+  return [
+    job.id,
+    job.sourceTargetId,
+    job.destinationTargetId,
+    sourceRoot,
+    destinationRoot,
+    options.statusFilter,
+    options.kindFilter,
+    options.keyword.trim().toLowerCase(),
+    assetsVersion
+  ].join("\u0000");
+}
+
+function buildJobDiffResponseFromCached(cached: CachedJobDiff, options: { page: number; pageSize: number; includeAll: boolean }): JobDiffResponse {
+  const { filteredItems, ...base } = cached;
+  if (options.includeAll) {
+    return {
+      ...base,
+      page: 1,
+      pageSize: Math.max(1, filteredItems.length),
+      total: filteredItems.length,
+      totalPages: 1,
+      items: filteredItems
+    };
+  }
+
+  const page = paginateItems(filteredItems, {
+    page: options.page,
+    pageSize: options.pageSize,
+    maxPageSize: 200
+  });
+  return {
+    ...base,
+    page: page.page,
+    pageSize: page.pageSize,
+    total: page.total,
+    totalPages: page.totalPages,
+    items: page.items
+  };
+}
+
 function normalizeVersion(input: string): string {
   return input.trim().replace(/^v/i, "");
 }
@@ -1766,6 +1833,25 @@ function getFreshMediaIndexEntry(rootPath: string, maxAgeMs = MEDIA_INDEX_MAX_AG
   if (!Number.isFinite(generatedAtMs)) return null;
   if (Date.now() - generatedAtMs > Math.max(1000, maxAgeMs)) return null;
   return root;
+}
+
+function getStoredMediaIndexEntry(rootPath: string): MediaIndexRootEntry | null {
+  return mediaIndexStore.roots[rootPath] ?? null;
+}
+
+async function getDashboardMediaIndexRows(rootPath: string): Promise<IndexedMediaFile[] | null> {
+  const normalizedRootPath = normalizeMediaIndexRootPath(rootPath);
+  await ensureMediaIndexLoaded();
+  const cached =
+    getFreshMediaIndexEntry(normalizedRootPath, DASHBOARD_MEDIA_INDEX_MAX_AGE_MS) ??
+    getStoredMediaIndexEntry(normalizedRootPath);
+  return cached ? rowsFromMediaIndexEntry(normalizedRootPath, cached) : null;
+}
+
+async function getMediaBrowseRows(rootPath: string): Promise<IndexedMediaFile[]> {
+  const cached = await getDashboardMediaIndexRows(rootPath);
+  if (cached) return cached;
+  return collectIndexedMediaFiles(rootPath);
 }
 
 function buildMediaIndexEntry(rows: IndexedMediaFile[]): MediaIndexRootEntry {
@@ -2253,20 +2339,6 @@ async function executeJob(
   });
 
   app.log.info({ event: "job.exec.scan.start", jobId, trigger }, "Job scan started");
-  // #region debug-point E:scan-start-mem
-  fetch("http://127.0.0.1:7777/event", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      sessionId: "backup-500",
-      runId: "pre-fix",
-      hypothesisId: "E",
-      location: "apps/api/src/index.ts:2122",
-      msg: "[DEBUG] scan start memory",
-      data: { jobId, trigger, memory: process.memoryUsage() }
-    })
-  }).catch(() => {});
-  // #endregion
 
   let sourceFiles: string[] = [];
   let relativePaths: string[] = [];
@@ -2335,20 +2407,6 @@ async function executeJob(
     { event: "job.exec.scan.done", jobId, trigger, scannedCount: sourceFiles.length, scanTookMs },
     "Job scan finished"
   );
-  // #region debug-point E:scan-done-mem
-  fetch("http://127.0.0.1:7777/event", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      sessionId: "backup-500",
-      runId: "pre-fix",
-      hypothesisId: "E",
-      location: "apps/api/src/index.ts:2148",
-      msg: "[DEBUG] scan done memory",
-      data: { jobId, trigger, scannedCount: sourceFiles.length, scanTookMs, memory: process.memoryUsage() }
-    })
-  }).catch(() => {});
-  // #endregion
 
   const copiedSamples: string[] = [];
   const errors: JobRun["errors"] = [];
@@ -2528,20 +2586,6 @@ async function executeJob(
           },
           "Job sync progress"
         );
-        // #region debug-point E:sync-heartbeat-mem
-        fetch("http://127.0.0.1:7777/event", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            sessionId: "backup-500",
-            runId: "pre-fix",
-            hypothesisId: "E",
-            location: "apps/api/src/index.ts:2230",
-            msg: "[DEBUG] sync heartbeat memory",
-            data: { jobId, trigger, processedCount, scannedCount, memory: process.memoryUsage() }
-          })
-        }).catch(() => {});
-        // #endregion
         lastHeartbeatAt = now;
         lastHeartbeatProcessed = processedCount;
       }
@@ -2616,20 +2660,6 @@ async function executeJob(
           },
           "Job sync progress"
         );
-        // #region debug-point E:sync-heartbeat-mem
-        fetch("http://127.0.0.1:7777/event", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            sessionId: "backup-500",
-            runId: "pre-fix",
-            hypothesisId: "E",
-            location: "apps/api/src/index.ts:2262",
-            msg: "[DEBUG] sync heartbeat memory",
-            data: { jobId, trigger, processedCount, scannedCount, memory: process.memoryUsage() }
-          })
-        }).catch(() => {});
-        // #endregion
         lastHeartbeatAt = now;
         lastHeartbeatProcessed = processedCount;
       }
@@ -2930,15 +2960,15 @@ function startJobExecution(jobId: string, trigger: JobRunTrigger): JobExecution 
         current.status = "canceled";
         current.startedAt = new Date().toISOString();
         current.finishedAt = new Date().toISOString();
-      current.progress.phase = "finished";
-      current.progress.percent = 100;
-      current.progress.currentPath = null;
-      current.progress.currentFileTotalBytes = null;
-      current.progress.currentFileCopiedBytes = null;
-      current.progress.currentFileStage = null;
-      current.message = "任务已取消";
-      current.error = null;
-    });
+        current.progress.phase = "finished";
+        current.progress.percent = 100;
+        current.progress.currentPath = null;
+        current.progress.currentFileTotalBytes = null;
+        current.progress.currentFileCopiedBytes = null;
+        current.progress.currentFileStage = null;
+        current.message = "任务已取消";
+        current.error = null;
+      });
       app.log.warn({ event: "job.exec.canceled", executionId: execution.id, jobId, trigger }, "Job execution canceled before start");
       trimJobExecutions();
       return;
@@ -3329,7 +3359,7 @@ app.addHook("onRequest", async (req, reply) => {
     return;
   }
 
-  const state = await stateRepo.loadState();
+  const state = await getRequestState(req);
   const cleaned = pruneExpiredSessions(state);
   if (cleaned) {
     await stateRepo.saveState(state);
@@ -3372,14 +3402,14 @@ app.addHook("onRequest", async (req, reply) => {
 
 app.get("/healthz", async () => ({ ok: true }));
 
-app.get("/api/metrics", async () => {
-  const state = await stateRepo.loadState();
+app.get("/api/metrics", async (req) => {
+  const state = await getRequestState(req);
   return metricSummary(state);
 });
 
 app.get<{ Querystring: { year?: string } }>("/api/dashboard/source-activity", async (req) => {
   const query = sourceActivityQuerySchema.parse(req.query ?? {});
-  const state = req.appState ?? (await stateRepo.loadState());
+  const state = await getRequestState(req);
   const year = query.year ?? new Date().getFullYear();
   const startedMs = Date.now();
   const result = await buildSourceMediaActivity(state, year);
@@ -3435,39 +3465,11 @@ app.get("/api/auth/status", async () => {
     if (cleaned) {
       await stateRepo.saveState(state);
     }
-    // #region debug-point C:auth-status-ok
-    fetch("http://127.0.0.1:7777/event", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        sessionId: "backup-500",
-        runId: "post-fix",
-        hypothesisId: "C",
-        location: "apps/api/src/index.ts:3142",
-        msg: "[DEBUG] auth status ok",
-        data: { hasUsers: state.users.length > 0 }
-      })
-    }).catch(() => {});
-    // #endregion
     return {
       enabled: true,
       hasUsers: state.users.length > 0
     };
   } catch (error) {
-    // #region debug-point C:auth-status-error
-    fetch("http://127.0.0.1:7777/event", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        sessionId: "backup-500",
-        runId: "post-fix",
-        hypothesisId: "C",
-        location: "apps/api/src/index.ts:3142",
-        msg: "[DEBUG] auth status error",
-        data: { message: (error as Error).message }
-      })
-    }).catch(() => {});
-    // #endregion
     throw error;
   }
 });
@@ -3477,20 +3479,6 @@ app.post<{ Body: { username: string; password: string } }>("/api/auth/bootstrap"
   try {
     state = await stateRepo.loadState();
   } catch (error) {
-    // #region debug-point D:auth-bootstrap-load-error
-    fetch("http://127.0.0.1:7777/event", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        sessionId: "backup-500",
-        runId: "pre-fix",
-        hypothesisId: "D",
-        location: "apps/api/src/index.ts:3154",
-        msg: "[DEBUG] auth bootstrap load error",
-        data: { message: (error as Error).message }
-      })
-    }).catch(() => {});
-    // #endregion
     throw error;
   }
   if (state.users.length > 0) {
@@ -3524,7 +3512,7 @@ app.post<{ Body: { username: string; password: string } }>("/api/auth/bootstrap"
 });
 
 app.post<{ Body: { username: string; password: string } }>("/api/auth/login", async (req, reply) => {
-  const state = await stateRepo.loadState();
+  const state = await getRequestState(req);
   if (!state.users.length) {
     return reply.code(428).send({ message: "No users configured yet, please bootstrap first" });
   }
@@ -3567,7 +3555,7 @@ app.post("/api/auth/logout", async (req, reply) => {
   if (!authTokenHash) {
     return reply.code(401).send({ message: "Authentication required" });
   }
-  const state = await stateRepo.loadState();
+  const state = await getRequestState(req);
   const before = state.sessions.length;
   state.sessions = state.sessions.filter((session) => session.tokenHash !== authTokenHash);
   if (state.sessions.length !== before) {
@@ -3581,7 +3569,7 @@ app.put<{ Body: { currentPassword: string; newPassword: string } }>("/api/auth/p
   if (!authUser) {
     return reply.code(401).send({ message: "Authentication required" });
   }
-  const state = await stateRepo.loadState();
+  const state = await getRequestState(req);
   const user = state.users.find((item) => item.id === authUser.id);
   if (!user) {
     return reply.code(404).send({ message: "User not found" });
@@ -3602,21 +3590,21 @@ app.put<{ Body: { currentPassword: string; newPassword: string } }>("/api/auth/p
   return { ok: true };
 });
 
-app.get("/api/settings", async () => {
-  const state = await stateRepo.loadState();
+app.get("/api/settings", async (req) => {
+  const state = await getRequestState(req);
   return { settings: normalizeSettings(state.settings) };
 });
 
 app.put<{ Body: AppSettings }>("/api/settings", async (req) => {
-  const state = await stateRepo.loadState();
+  const state = await getRequestState(req);
   const body = settingsSchema.parse(req.body);
   state.settings = normalizeSettings(body);
   await stateRepo.saveState(state);
   return { settings: state.settings };
 });
 
-app.post("/api/settings/telegram/test", async (_req, reply) => {
-  const state = await stateRepo.loadState();
+app.post("/api/settings/telegram/test", async (req, reply) => {
+  const state = await getRequestState(req);
   const settings = normalizeSettings(state.settings);
   if (!settings.telegram.botToken || !settings.telegram.chatId) {
     return reply.code(400).send({ message: "请先配置 Telegram Bot Token 和 Chat ID" });
@@ -3636,20 +3624,20 @@ app.post("/api/settings/telegram/test", async (_req, reply) => {
   }
 });
 
-app.get("/api/storages", async () => {
-  const state = await stateRepo.loadState();
+app.get("/api/storages", async (req) => {
+  const state = await getRequestState(req);
   return { items: state.storages };
 });
 
-app.get("/api/storages/capacity", async () => {
-  const state = await stateRepo.loadState();
+app.get("/api/storages/capacity", async (req) => {
+  const state = await getRequestState(req);
   const snapshots = await Promise.all(state.storages.map((storage) => buildStorageCapacitySnapshot(storage)));
   const items = mergeStorageCapacitySnapshots(snapshots);
   return { items };
 });
 
-app.get("/api/storages/relations", async () => {
-  const state = await stateRepo.loadState();
+app.get("/api/storages/relations", async (req) => {
+  const state = await getRequestState(req);
   return buildStorageRelationGraph(state);
 });
 
@@ -3663,7 +3651,7 @@ app.get("/api/media-index", async () => {
 
 app.post<{ Body: { storageId?: string } }>("/api/media-index/rebuild", async (req, reply) => {
   const body = mediaIndexRebuildSchema.parse(req.body ?? {});
-  const state = await stateRepo.loadState();
+  const state = await getRequestState(req);
   const localStorages = state.storages.filter((storage) => isLocalStorage(storage.type));
   const targets = body.storageId ? localStorages.filter((storage) => storage.id === body.storageId) : localStorages;
 
@@ -3738,7 +3726,7 @@ app.get<{ Querystring: { path?: string } }>("/api/fs/directories", async (req, r
 app.get<{ Params: { storageId: string }; Querystring: { path?: string } }>(
   "/api/storages/:storageId/directories",
   async (req, reply) => {
-    const state = await stateRepo.loadState();
+    const state = await getRequestState(req);
     const storage = state.storages.find((item) => item.id === req.params.storageId);
     if (!storage) {
       return reply.code(404).send({ message: "Storage not found" });
@@ -3779,10 +3767,11 @@ app.get<{ Params: { storageId: string }; Querystring: { path?: string } }>(
   }
 );
 
-app.get<{ Params: { storageId: string }; Querystring: { path?: string } }>(
+app.get<{ Params: { storageId: string }; Querystring: { path?: string; page?: string; pageSize?: string } }>(
   "/api/storages/:storageId/media",
   async (req, reply) => {
-    const state = await stateRepo.loadState();
+    const query = mediaBrowseQuerySchema.parse(req.query ?? {});
+    const state = await getRequestState(req);
     const storage = state.storages.find((item) => item.id === req.params.storageId);
     if (!storage) {
       return reply.code(404).send({ message: "Storage not found" });
@@ -3793,14 +3782,14 @@ app.get<{ Params: { storageId: string }; Querystring: { path?: string } }>(
 
     let currentPath = "";
     try {
-      currentPath = resolvePathInStorage(storage, req.query.path);
+      currentPath = resolvePathInStorage(storage, query.path);
     } catch (error) {
       return reply.code(403).send({ message: (error as Error).message });
     }
 
     let rows: IndexedMediaFile[] = [];
     try {
-      rows = await collectIndexedMediaFiles(currentPath);
+      rows = await getMediaBrowseRows(currentPath);
     } catch {
       return reply.code(404).send({ message: "Directory not found" });
     }
@@ -3825,11 +3814,21 @@ app.get<{ Params: { storageId: string }; Querystring: { path?: string } }>(
       })
       .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))
       .sort((a, b) => a.path.localeCompare(b.path, "zh-CN"));
+    const page = paginateItems(files, {
+      page: query.page,
+      pageSize: query.pageSize,
+      defaultPageSize: 300,
+      maxPageSize: 500
+    });
 
     return {
       storageId: storage.id,
       path: currentPath,
-      files
+      files: page.items,
+      total: page.total,
+      page: page.page,
+      pageSize: page.pageSize,
+      totalPages: page.totalPages
     };
   }
 );
@@ -3842,7 +3841,7 @@ app.get<{ Params: { storageId: string }; Querystring: { path?: string } }>(
       return reply.code(400).send({ message: "Path is required" });
     }
 
-    const state = await stateRepo.loadState();
+    const state = await getRequestState(req);
     const storage = state.storages.find((item) => item.id === req.params.storageId);
     if (!storage) {
       return reply.code(404).send({ message: "Storage not found" });
@@ -3881,7 +3880,7 @@ app.get<{ Params: { storageId: string }; Querystring: { path?: string } }>(
 );
 
 app.post<{ Body: Omit<StorageTarget, "id"> }>("/api/storages", async (req) => {
-  const state = await stateRepo.loadState();
+  const state = await getRequestState(req);
   const body = storageCreateSchema.parse(req.body);
   const item: StorageTarget = { id: `st_${randomUUID()}`, ...body };
   state.storages.push(item);
@@ -3889,12 +3888,13 @@ app.post<{ Body: Omit<StorageTarget, "id"> }>("/api/storages", async (req) => {
   if (isLocalStorage(item.type)) {
     await invalidateMediaIndexPath(item.basePath).catch(() => undefined);
   }
+  jobDiffCache.clear();
   await reconcileJobWatchers(state);
   return item;
 });
 
 app.delete<{ Params: { storageId: string } }>("/api/storages/:storageId", async (req, reply) => {
-  const state = await stateRepo.loadState();
+  const state = await getRequestState(req);
   const removed = state.storages.find((s) => s.id === req.params.storageId);
   const before = state.storages.length;
   state.storages = state.storages.filter((s) => s.id !== req.params.storageId);
@@ -3919,12 +3919,13 @@ app.delete<{ Params: { storageId: string } }>("/api/storages/:storageId", async 
   if (removed && isLocalStorage(removed.type)) {
     await invalidateMediaIndexPath(removed.basePath).catch(() => undefined);
   }
+  jobDiffCache.clear();
   await reconcileJobWatchers(state);
   return { ok: true };
 });
 
-app.get("/api/jobs", async () => {
-  const state = await stateRepo.loadState();
+app.get("/api/jobs", async (req) => {
+  const state = await getRequestState(req);
   return { items: state.jobs };
 });
 
@@ -3941,7 +3942,7 @@ app.get<{
   };
 }>("/api/jobs/:jobId/diff", async (req, reply) => {
   const query = jobDiffQuerySchema.parse(req.query ?? {});
-  const state = req.appState ?? (await stateRepo.loadState());
+  const state = await getRequestState(req);
   const startedMs = Date.now();
   try {
     app.log.info(
@@ -3994,7 +3995,7 @@ app.get<{
 });
 
 app.post<{ Body: Omit<BackupJob, "id"> }>("/api/jobs", async (req, reply) => {
-  const state = await stateRepo.loadState();
+  const state = await getRequestState(req);
   const body = jobCreateSchema.parse(req.body);
   const pathSafetyError = validateJobPathSafety(state, body);
   if (pathSafetyError) {
@@ -4003,12 +4004,13 @@ app.post<{ Body: Omit<BackupJob, "id"> }>("/api/jobs", async (req, reply) => {
   const item: BackupJob = { id: `job_${randomUUID()}`, ...body };
   state.jobs.push(item);
   await stateRepo.saveState(state);
+  jobDiffCache.clear();
   await reconcileJobWatchers(state);
   return item;
 });
 
 app.put<{ Params: { jobId: string }; Body: Omit<BackupJob, "id"> }>("/api/jobs/:jobId", async (req, reply) => {
-  const state = await stateRepo.loadState();
+  const state = await getRequestState(req);
   const body = jobCreateSchema.parse(req.body);
   const pathSafetyError = validateJobPathSafety(state, body);
   if (pathSafetyError) {
@@ -4021,13 +4023,14 @@ app.put<{ Params: { jobId: string }; Body: Omit<BackupJob, "id"> }>("/api/jobs/:
   const updated: BackupJob = { id: req.params.jobId, ...body };
   state.jobs[idx] = updated;
   await stateRepo.saveState(state);
+  jobDiffCache.clear();
   await reconcileJobWatchers(state);
   return updated;
 });
 
 app.delete<{ Params: { jobId: string } }>("/api/jobs/:jobId", async (req, reply) => {
   try {
-    const state = await stateRepo.loadState();
+    const state = await getRequestState(req);
     const before = state.jobs.length;
     state.jobs = state.jobs.filter((j) => j.id !== req.params.jobId);
     if (state.jobs.length === before) {
@@ -4035,6 +4038,7 @@ app.delete<{ Params: { jobId: string } }>("/api/jobs/:jobId", async (req, reply)
     }
     state.jobRuns = state.jobRuns.filter((run) => run.jobId !== req.params.jobId);
     await stateRepo.saveState(state);
+    jobDiffCache.clear();
     await reconcileJobWatchers(state);
     return { ok: true };
   } catch (error) {
@@ -4042,13 +4046,13 @@ app.delete<{ Params: { jobId: string } }>("/api/jobs/:jobId", async (req, reply)
   }
 });
 
-app.get("/api/runs", async () => {
-  const state = await stateRepo.loadState();
+app.get("/api/runs", async (req) => {
+  const state = await getRequestState(req);
   return { items: state.jobRuns.map(normalizeJobRun) };
 });
 
 app.get<{ Params: { jobId: string } }>("/api/jobs/:jobId/runs", async (req, reply) => {
-  const state = await stateRepo.loadState();
+  const state = await getRequestState(req);
   const hasJob = state.jobs.some((j) => j.id === req.params.jobId);
   if (!hasJob) {
     return reply.code(404).send({ message: "Job not found" });
@@ -4057,13 +4061,14 @@ app.get<{ Params: { jobId: string } }>("/api/jobs/:jobId/runs", async (req, repl
 });
 
 app.delete<{ Params: { runId: string } }>("/api/runs/:runId", async (req, reply) => {
-  const state = await stateRepo.loadState();
+  const state = await getRequestState(req);
   const before = state.jobRuns.length;
   state.jobRuns = state.jobRuns.filter((run) => run.id !== req.params.runId);
   if (state.jobRuns.length === before) {
     return reply.code(404).send({ message: "Run not found" });
   }
   await stateRepo.saveState(state);
+  jobDiffCache.clear();
   return { ok: true };
 });
 
@@ -4084,27 +4089,13 @@ app.post<{ Params: { executionId: string } }>("/api/job-executions/:executionId/
   if (!execution) {
     return reply.code(404).send({ message: "Execution not found" });
   }
-  // #region debug-point B:cancel-exec
-  fetch("http://127.0.0.1:7777/event", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      sessionId: "backup-500",
-      runId: "post-fix",
-      hypothesisId: "B",
-      location: "apps/api/src/index.ts:3586",
-      msg: "[DEBUG] cancel execution requested",
-      data: { executionId: execution.id, jobId: execution.jobId, status: execution.status }
-    })
-  }).catch(() => {});
-  // #endregion
   app.log.warn({ event: "job.exec.cancel.requested", executionId: execution.id, jobId: execution.jobId }, "Cancel requested");
   return { execution: normalizeJobExecution(execution) };
 });
 
 app.post<{ Params: { jobId: string } }>("/api/jobs/:jobId/run", async (req, reply) => {
   try {
-    const state = await stateRepo.loadState();
+    const state = await getRequestState(req);
     const job = state.jobs.find((item) => item.id === req.params.jobId);
     if (!job) {
       return reply.code(404).send({ message: "Job not found" });
@@ -4128,10 +4119,11 @@ app.post<{ Params: { jobId: string }; Body: { relativePath: string } }>(
       "Single-file sync requested"
     );
     try {
-      const state = req.appState ?? (await stateRepo.loadState());
+      const state = await getRequestState(req);
       const result = await syncSingleFileForJob(state, req.params.jobId, body.relativePath);
       await stateRepo.saveState(state);
-       app.log.info(
+      jobDiffCache.clear();
+      app.log.info(
         {
           event: "job.sync_file.success",
           jobId: req.params.jobId,
@@ -4169,9 +4161,10 @@ app.post<{ Params: { jobId: string }; Body: { relativePath: string; side: "sourc
       "Single-file delete requested"
     );
     try {
-      const state = req.appState ?? (await stateRepo.loadState());
+      const state = await getRequestState(req);
       const result = await deleteSingleFileForJob(state, req.params.jobId, body.relativePath, body.side);
       await stateRepo.saveState(state);
+      jobDiffCache.clear();
       app.log.info(
         { event: "job.delete_file.success", jobId: req.params.jobId, relativePath: result.relativePath, side: result.side },
         "Single-file delete completed"
@@ -4191,8 +4184,8 @@ app.post<{ Params: { jobId: string }; Body: { relativePath: string; side: "sourc
   }
 );
 
-app.get("/api/backups", async () => {
-  const state = await stateRepo.loadState();
+app.get("/api/backups", async (req) => {
+  const state = await getRequestState(req);
   const livePhotoPairs = livePhoto.detectPairs(state.assets.map((a) => a.name));
 
   return {
@@ -4201,8 +4194,8 @@ app.get("/api/backups", async () => {
   };
 });
 
-app.get("/api/backups/storage-media-summary", async () => {
-  const state = await stateRepo.loadState();
+app.get("/api/backups/storage-media-summary", async (req) => {
+  const state = await getRequestState(req);
   const items = await buildStorageMediaSummary(state);
   return {
     items
@@ -4210,27 +4203,29 @@ app.get("/api/backups/storage-media-summary", async () => {
 });
 
 app.post<{ Body: Omit<BackupAsset, "id"> }>("/api/backups", async (req) => {
-  const state = await stateRepo.loadState();
+  const state = await getRequestState(req);
   const body = assetCreateSchema.parse(req.body);
   const item: BackupAsset = { id: `asset_${randomUUID()}`, ...body };
   state.assets.push(item);
   await stateRepo.saveState(state);
+  jobDiffCache.clear();
   return item;
 });
 
 app.delete<{ Params: { assetId: string } }>("/api/backups/:assetId", async (req, reply) => {
-  const state = await stateRepo.loadState();
+  const state = await getRequestState(req);
   const before = state.assets.length;
   state.assets = state.assets.filter((a) => a.id !== req.params.assetId);
   if (state.assets.length === before) {
     return reply.code(404).send({ message: "Asset not found" });
   }
   await stateRepo.saveState(state);
+  jobDiffCache.clear();
   return { ok: true };
 });
 
 app.post<{ Params: { assetId: string } }>("/api/backups/:assetId/preview-token", async (req, reply) => {
-  const state = await stateRepo.loadState();
+  const state = await getRequestState(req);
   const asset = state.assets.find((item) => item.id === req.params.assetId);
   if (!asset) {
     return reply.code(404).send({ message: "Asset not found" });
@@ -4263,7 +4258,7 @@ app.get<{ Params: { assetId: string }; Querystring: { token?: string } }>(
       return reply.code(401).send({ message: "Preview token is invalid or expired" });
     }
 
-    const state = await stateRepo.loadState();
+    const state = await getRequestState(req);
     const asset = state.assets.find((item) => item.id === req.params.assetId);
     if (!asset) {
       return reply.code(404).send({ message: "Asset not found" });
@@ -4285,7 +4280,7 @@ app.get<{ Params: { assetId: string }; Querystring: { token?: string } }>(
 );
 
 app.get<{ Params: { assetId: string } }>("/api/backups/:assetId/live-photo", async (req, reply) => {
-  const state = await stateRepo.loadState();
+  const state = await getRequestState(req);
   const asset = state.assets.find((item) => item.id === req.params.assetId);
   if (!asset) {
     return reply.code(404).send({ message: "Asset not found" });
@@ -4324,7 +4319,7 @@ app.get<{ Params: { assetId: string }; Querystring: { ticket?: string } }>(
     }
 
     previewTickets.delete(ticket);
-    const state = await stateRepo.loadState();
+    const state = await getRequestState(req);
     const asset = state.assets.find((item) => item.id === req.params.assetId);
     if (!asset) {
       return reply.code(404).send({ message: "Asset not found" });

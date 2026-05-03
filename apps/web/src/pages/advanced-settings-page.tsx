@@ -124,7 +124,7 @@ export function AdvancedSettingsPage() {
               </div>
             ))
           ) : (
-            <p className="text-xs mp-muted">暂无可用索引缓存，首次统计时会自动建立。</p>
+            <p className="text-xs mp-muted">暂无可用索引缓存，可在维护窗口手动重建。</p>
           )}
         </div>
       </div>

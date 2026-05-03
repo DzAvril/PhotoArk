@@ -2,15 +2,17 @@ import { useMemo, useState } from "react";
 import type { DirectoryBrowseResult } from "../types/api";
 
 interface PathPickerProps {
+  id?: string;
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
   browse: (path?: string) => Promise<DirectoryBrowseResult>;
   disabled?: boolean;
+  browseDisabled?: boolean;
   required?: boolean;
 }
 
-export function PathPicker({ value, onChange, placeholder, browse, disabled, required }: PathPickerProps) {
+export function PathPicker({ id, value, onChange, placeholder, browse, disabled, browseDisabled, required }: PathPickerProps) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -43,6 +45,7 @@ export function PathPicker({ value, onChange, placeholder, browse, disabled, req
     <div className="space-y-2">
       <div className="flex gap-2">
         <input
+          id={id}
           className="mp-input"
           placeholder={placeholder}
           value={value}
@@ -50,7 +53,7 @@ export function PathPicker({ value, onChange, placeholder, browse, disabled, req
           required={required}
           onChange={(e) => onChange(e.target.value)}
         />
-        <button type="button" className="mp-btn shrink-0" onClick={() => void toggleOpen()} disabled={disabled}>
+        <button type="button" className="mp-btn shrink-0" onClick={() => void toggleOpen()} disabled={disabled || browseDisabled}>
           {open ? "收起" : "选择路径"}
         </button>
       </div>

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useSearchParams } from "react-router-dom";
 import { ConfirmDialog } from "../components/confirm-dialog";
 import { InlineAlert } from "../components/inline-alert";
+import { PathPicker } from "../components/path-picker";
 import { TablePagination } from "../components/table/table-pagination";
 import { SortableHeader } from "../components/table/sortable-header";
 import { TableToolbar } from "../components/table/table-toolbar";
@@ -11,36 +12,28 @@ import { EmptyState } from "../components/ui/empty-state";
 import { SectionCard } from "../components/ui/section-card";
 import { useLocalStorageState } from "../hooks/use-local-storage-state";
 import { usePageVisibility } from "../hooks/use-page-visibility";
-import { cancelJobExecution, createJob, deleteJob, getJobExecutions, getJobs, getRuns, getStorages, runJob, updateJob } from "../lib/api";
+import {
+  browseStorageDirectories,
+  cancelJobExecution,
+  createJob,
+  deleteJob,
+  getJobExecutions,
+  getJobs,
+  getRuns,
+  getStorages,
+  runJob,
+  updateJob
+} from "../lib/api";
+import { buildJobPayload, createInitialJobForm, type JobForm } from "./jobs-page-model";
 import type { BackupJob, JobExecution, JobRun, StorageTarget } from "../types/api";
 
 type SortKey = "name" | "sourceTargetId" | "destinationTargetId" | "enabled";
-
-type JobForm = {
-  name: string;
-  sourceTargetId: string;
-  destinationTargetId: string;
-  schedule: string;
-  watchMode: boolean;
-  enabled: boolean;
-};
 
 type PendingDeleteAction = {
   mode: "single" | "batch";
   ids: string[];
   label: string;
 };
-
-function createInitialForm(sourceTargetId = "", destinationTargetId = ""): JobForm {
-  return {
-    name: "",
-    sourceTargetId,
-    destinationTargetId,
-    schedule: "0 2 * * *",
-    watchMode: false,
-    enabled: true
-  };
-}
 
 function getAriaSort(active: boolean, asc: boolean): "ascending" | "descending" | "none" {
   if (!active) return "none";
@@ -109,7 +102,7 @@ export function JobsPage() {
     "ark-last-job-destination-target-id",
     ""
   );
-  const [form, setForm] = useState<JobForm>(() => createInitialForm(lastSourceTargetId, lastDestinationTargetId));
+  const [form, setForm] = useState<JobForm>(() => createInitialJobForm(lastSourceTargetId, lastDestinationTargetId));
   const [editingJobId, setEditingJobId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
@@ -128,6 +121,18 @@ export function JobsPage() {
   const storageById = useMemo(() => Object.fromEntries(storages.map((s) => [s.id, s])), [storages]);
   const sourceStorage = form.sourceTargetId ? storageById[form.sourceTargetId] : undefined;
   const destinationStorage = form.destinationTargetId ? storageById[form.destinationTargetId] : undefined;
+  const canBrowseSourcePath = Boolean(sourceStorage && sourceStorage.type !== "cloud_115");
+  const canBrowseDestinationPath = Boolean(destinationStorage && destinationStorage.type !== "cloud_115");
+
+  async function browseSourcePath(dirPath?: string) {
+    if (!sourceStorage) throw new Error("请先选择源存储");
+    return browseStorageDirectories(sourceStorage.id, dirPath);
+  }
+
+  async function browseDestinationPath(dirPath?: string) {
+    if (!destinationStorage) throw new Error("请先选择目标存储");
+    return browseStorageDirectories(destinationStorage.id, dirPath);
+  }
 
   async function load() {
     try {
@@ -152,7 +157,7 @@ export function JobsPage() {
   }, []);
 
   function resetForm() {
-    setForm(createInitialForm(lastSourceTargetId, lastDestinationTargetId));
+    setForm(createInitialJobForm(lastSourceTargetId, lastDestinationTargetId));
     setEditingJobId(null);
   }
 
@@ -160,12 +165,22 @@ export function JobsPage() {
     if (!storages.length) return;
     const storageIds = new Set(storages.map((item) => item.id));
     if (form.sourceTargetId && !storageIds.has(form.sourceTargetId)) {
-      setForm((prev) => ({ ...prev, sourceTargetId: "" }));
+      setForm((prev) => ({ ...prev, sourceTargetId: "", sourcePath: "" }));
     }
     if (form.destinationTargetId && !storageIds.has(form.destinationTargetId)) {
-      setForm((prev) => ({ ...prev, destinationTargetId: "" }));
+      setForm((prev) => ({ ...prev, destinationTargetId: "", destinationPath: "" }));
     }
   }, [storages, form.sourceTargetId, form.destinationTargetId]);
+
+  useEffect(() => {
+    setForm((prev) => {
+      const sourcePath = sourceStorage && !prev.sourcePath ? sourceStorage.basePath : prev.sourcePath;
+      const destinationPath =
+        destinationStorage && !prev.destinationPath ? destinationStorage.basePath : prev.destinationPath;
+      if (sourcePath === prev.sourcePath && destinationPath === prev.destinationPath) return prev;
+      return { ...prev, sourcePath, destinationPath };
+    });
+  }, [sourceStorage?.basePath, destinationStorage?.basePath]);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -177,16 +192,7 @@ export function JobsPage() {
       return;
     }
 
-    const payload: Omit<BackupJob, "id"> = {
-      name: form.name,
-      sourceTargetId: form.sourceTargetId,
-      sourcePath: sourceStorage.basePath,
-      destinationTargetId: form.destinationTargetId,
-      destinationPath: destinationStorage.basePath,
-      schedule: form.schedule,
-      watchMode: form.watchMode,
-      enabled: form.enabled
-    };
+    const payload = buildJobPayload(form, sourceStorage, destinationStorage);
 
     try {
       if (editingJobId) {
@@ -196,7 +202,7 @@ export function JobsPage() {
       }
       setLastSourceTargetId(form.sourceTargetId);
       setLastDestinationTargetId(form.destinationTargetId);
-      setForm(createInitialForm(form.sourceTargetId, form.destinationTargetId));
+      setForm(createInitialJobForm(form.sourceTargetId, form.destinationTargetId));
       setEditingJobId(null);
       await load();
       setMessage(editingJobId ? "任务已更新。" : "任务已创建。");
@@ -210,7 +216,9 @@ export function JobsPage() {
     setForm({
       name: job.name,
       sourceTargetId: job.sourceTargetId,
+      sourcePath: job.sourcePath,
       destinationTargetId: job.destinationTargetId,
+      destinationPath: job.destinationPath,
       schedule: job.schedule ?? "",
       watchMode: job.watchMode,
       enabled: job.enabled
@@ -340,7 +348,7 @@ export function JobsPage() {
         (row: BackupJob, keyword: string) => {
           const src = storageById[row.sourceTargetId];
           const dst = storageById[row.destinationTargetId];
-          return `${row.name} ${src?.name ?? row.sourceTargetId} ${dst?.name ?? row.destinationTargetId}`
+          return `${row.name} ${src?.name ?? row.sourceTargetId} ${row.sourcePath} ${dst?.name ?? row.destinationTargetId} ${row.destinationPath}`
             .toLowerCase()
             .includes(keyword);
         },
@@ -531,7 +539,8 @@ export function JobsPage() {
                 value={form.sourceTargetId}
                 onChange={(e) => {
                   const next = e.target.value;
-                  setForm((p) => ({ ...p, sourceTargetId: next }));
+                  const nextStorage = storages.find((storage) => storage.id === next);
+                  setForm((p) => ({ ...p, sourceTargetId: next, sourcePath: nextStorage?.basePath ?? "" }));
                   if (next) {
                     setLastSourceTargetId(next);
                   }
@@ -557,7 +566,8 @@ export function JobsPage() {
                 value={form.destinationTargetId}
                 onChange={(e) => {
                   const next = e.target.value;
-                  setForm((p) => ({ ...p, destinationTargetId: next }));
+                  const nextStorage = storages.find((storage) => storage.id === next);
+                  setForm((p) => ({ ...p, destinationTargetId: next, destinationPath: nextStorage?.basePath ?? "" }));
                   if (next) {
                     setLastDestinationTargetId(next);
                   }
@@ -571,6 +581,38 @@ export function JobsPage() {
                   </option>
                 ))}
               </select>
+            </div>
+
+            <div className="space-y-1 sm:col-span-2">
+              <label htmlFor="job-source-path" className="text-sm font-medium">
+                源目录
+              </label>
+              <PathPicker
+                id="job-source-path"
+                value={form.sourcePath}
+                onChange={(value) => setForm((p) => ({ ...p, sourcePath: value }))}
+                browse={browseSourcePath}
+                disabled={!sourceStorage}
+                browseDisabled={!canBrowseSourcePath}
+                required
+                placeholder={sourceStorage?.basePath ?? "请选择源存储"}
+              />
+            </div>
+
+            <div className="space-y-1 sm:col-span-2">
+              <label htmlFor="job-destination-path" className="text-sm font-medium">
+                目标目录
+              </label>
+              <PathPicker
+                id="job-destination-path"
+                value={form.destinationPath}
+                onChange={(value) => setForm((p) => ({ ...p, destinationPath: value }))}
+                browse={browseDestinationPath}
+                disabled={!destinationStorage}
+                browseDisabled={!canBrowseDestinationPath}
+                required
+                placeholder={destinationStorage?.basePath ?? "请选择目标存储"}
+              />
             </div>
 
             <div className="space-y-1">
@@ -609,12 +651,14 @@ export function JobsPage() {
               <div className="min-w-0">
                 <p className="mp-kicker">源存储预览</p>
                 <p className="mt-1 text-sm font-medium">{sourceStorage?.name ?? "未选择"}</p>
-                <p className="mt-1 break-all text-xs mp-muted">{sourceStorage?.basePath ?? "请选择源存储"}</p>
+                <p className="mt-1 break-all text-xs mp-muted">{form.sourcePath || sourceStorage?.basePath || "请选择源存储"}</p>
               </div>
               <div className="min-w-0">
                 <p className="mp-kicker">目标存储预览</p>
                 <p className="mt-1 text-sm font-medium">{destinationStorage?.name ?? "未选择"}</p>
-                <p className="mt-1 break-all text-xs mp-muted">{destinationStorage?.basePath ?? "请选择目标存储"}</p>
+                <p className="mt-1 break-all text-xs mp-muted">
+                  {form.destinationPath || destinationStorage?.basePath || "请选择目标存储"}
+                </p>
               </div>
             </div>
 
@@ -720,12 +764,12 @@ export function JobsPage() {
                   <dt>源存储</dt>
                   <dd>
                     <div>{src?.name ?? j.sourceTargetId}</div>
-                    <div className="break-all mp-muted">{src?.basePath ?? j.sourcePath}</div>
+                    <div className="break-all mp-muted">{j.sourcePath}</div>
                   </dd>
                   <dt>目标存储</dt>
                   <dd>
                     <div>{dst?.name ?? j.destinationTargetId}</div>
-                    <div className="break-all mp-muted">{dst?.basePath ?? j.destinationPath}</div>
+                    <div className="break-all mp-muted">{j.destinationPath}</div>
                   </dd>
                   <dt>最近执行</dt>
                   <dd>
@@ -878,11 +922,11 @@ export function JobsPage() {
                     <td className="px-2 py-2 font-medium">{j.name}</td>
                     <td className="px-2 py-2 text-sm">
                       <div>{src?.name ?? j.sourceTargetId}</div>
-                      <div className="break-all mp-muted">{src?.basePath ?? j.sourcePath}</div>
+                      <div className="break-all mp-muted">{j.sourcePath}</div>
                     </td>
                     <td className="px-2 py-2 text-sm">
                       <div>{dst?.name ?? j.destinationTargetId}</div>
-                      <div className="break-all mp-muted">{dst?.basePath ?? j.destinationPath}</div>
+                      <div className="break-all mp-muted">{j.destinationPath}</div>
                     </td>
                     <td className="px-2 py-2">
                       <span className={j.enabled ? "mp-status-success" : "mp-status-danger"}>{j.enabled ? "启用" : "停用"}</span>

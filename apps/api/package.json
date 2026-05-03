@@ -1,6 +1,6 @@
 {
   "name": "@photoark/api",
-  "version": "0.1.31",
+  "version": "0.1.32",
   "private": true,
   "type": "module",
   "main": "dist/index.js",
@@ -9,12 +9,13 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "lint": "echo 'lint placeholder'",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tsx --test src/modules/media/media-query.test.ts src/modules/backup/job-diff-cache.test.ts"
   },
   "dependencies": {
     "@fastify/cors": "^11.0.0",
     "@fastify/static": "^8.0.0",
-    "@photoark/shared": "0.1.31",
+    "@photoark/shared": "0.1.32",
     "chokidar": "^4.0.3",
     "dotenv": "^16.4.5",
     "exifr": "^7.1.3",
