@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { semanticColorNames, surfaceRadiusPx, workspacePalette } from "./design-tokens";
+import { darkWorkspacePalette, semanticColorNames, surfaceRadiusPx, workspacePalette } from "./design-tokens";
 
 test("workspace palette avoids the old beige-heavy theme", () => {
   assert.equal(workspacePalette.background, "#f6f8fb");
@@ -12,6 +12,11 @@ test("surface radius follows the approved operational console scale", () => {
   assert.equal(surfaceRadiusPx.panel, 8);
   assert.equal(surfaceRadiusPx.control, 7);
   assert.equal(surfaceRadiusPx.badge, 999);
+});
+
+test("dark workspace palette mirrors light token keys", () => {
+  assert.deepEqual(Object.keys(darkWorkspacePalette), Object.keys(workspacePalette));
+  assert.equal(darkWorkspacePalette.background, "#0d1117");
 });
 
 test("semantic statuses include text-friendly color names", () => {
