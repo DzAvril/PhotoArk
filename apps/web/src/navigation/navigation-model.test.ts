@@ -6,6 +6,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import {
   getLegacyRedirectTarget,
   getPageMeta,
+  getSyncPageMode,
   primaryNavItems,
   settingsNavItems,
   syncTabs
@@ -36,6 +37,13 @@ test("sync owns diff, jobs, and running subviews", () => {
       ["running", "执行中"]
     ]
   );
+});
+
+test("sync page query selection honors jobs redirects", () => {
+  assert.equal(getSyncPageMode("?tab=jobs"), "jobs");
+  assert.equal(getSyncPageMode("?tab=diff"), "diff");
+  assert.equal(getSyncPageMode("?tab=running"), "diff");
+  assert.equal(getSyncPageMode(""), "diff");
 });
 
 test("settings no longer contains jobs", () => {

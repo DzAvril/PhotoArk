@@ -30,6 +30,8 @@ export type SecondaryNavItem = {
 
 export type SyncTabValue = "diff" | "jobs" | "running";
 
+export type SyncPageMode = "diff" | "jobs";
+
 export const primaryNavItems: PrimaryNavItem[] = [
   { to: "/", label: "概览", description: "容量、媒体分布、趋势与风险", icon: BarChart3 },
   { to: "/media", label: "媒体库", description: "浏览图片、视频与 Live Photo", icon: Images },
@@ -65,6 +67,11 @@ export function getLegacyRedirectTarget(pathname: string): string | null {
   if (normalized === "/storages") return "/settings/storages";
   if (normalized === "/backups") return "/records";
   return null;
+}
+
+export function getSyncPageMode(search: string): SyncPageMode {
+  const tab = new URLSearchParams(search).get("tab");
+  return tab === "jobs" ? "jobs" : "diff";
 }
 
 export function getPageMeta(pathname: string): { title: string; subtitle: string } {
