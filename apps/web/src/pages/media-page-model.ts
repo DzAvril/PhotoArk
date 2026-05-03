@@ -4,6 +4,7 @@ export function normalizeThumbSize(input: number): number {
 
 export function getMediaGridColumns(containerWidth: number, thumbSize: number): number {
   const normalizedWidth = Math.max(0, Number(containerWidth) || 0);
+  if (normalizedWidth < 260) return 1;
   const normalizedThumb = normalizeThumbSize(thumbSize);
   if (normalizedWidth < 480) return Math.max(2, Math.floor(normalizedWidth / Math.max(130, normalizedThumb * 0.78)) || 2);
   return Math.max(2, Math.floor(normalizedWidth / normalizedThumb));

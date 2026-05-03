@@ -244,8 +244,9 @@ function MediaPane({ storages }: MediaPaneProps) {
     ? getMediaLibraryStatusText({ loaded: media.files.length, total: media.total, filtered: filteredItems.length })
     : `筛选后 ${filteredItems.length.toLocaleString("zh-CN")}`;
 
-  const renderSidebar = () => (
+  const renderSidebar = (idPrefix: string) => (
     <MediaSidebar
+      idPrefix={idPrefix}
       storages={storages}
       storageId={storageId}
       selectedStorage={selectedStorage}
@@ -302,11 +303,11 @@ function MediaPane({ storages }: MediaPaneProps) {
       ) : null}
 
       <Drawer open={filtersOpen} title="媒体筛选" side="bottom" onClose={() => setFiltersOpen(false)}>
-        {renderSidebar()}
+        {renderSidebar("media-drawer")}
       </Drawer>
 
       <div className="grid min-h-0 flex-1 gap-3 md:grid-cols-[280px_minmax(0,1fr)]">
-        <div className="hidden min-h-0 md:block">{renderSidebar()}</div>
+        <div className="hidden min-h-0 md:block">{renderSidebar("media-desktop")}</div>
 
         <section className="mp-panel flex min-h-[58vh] min-w-0 flex-col p-3 md:min-h-0">
           <div className="flex flex-wrap items-start justify-between gap-2 border-b border-[var(--ark-line)] pb-3">

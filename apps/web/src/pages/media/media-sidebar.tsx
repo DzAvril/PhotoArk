@@ -10,6 +10,7 @@ import { getStorageTypeLabel } from "./media-utils";
 type DateRangeFilter = "all" | "7d" | "30d" | "365d";
 
 type MediaSidebarProps = {
+  idPrefix?: string;
   storages: StorageTarget[];
   storageId: string;
   selectedStorage: StorageTarget | undefined;
@@ -43,6 +44,7 @@ const dateRangeItems: Array<{ value: DateRangeFilter; label: string }> = [
 
 export function MediaSidebar(props: MediaSidebarProps) {
   const {
+    idPrefix = "media",
     storages,
     storageId,
     selectedStorage,
@@ -59,13 +61,17 @@ export function MediaSidebar(props: MediaSidebarProps) {
     onSearchChange,
     onDateRangeChange
   } = props;
+  const storageSelectId = `${idPrefix}-storage-select`;
+  const searchId = `${idPrefix}-search`;
+  const zoomId = `${idPrefix}-zoom`;
+  const showCloudPreviewHint = !selectedStorage || selectedStorage.type === "cloud_115";
 
   return (
     <aside className="mp-panel flex min-h-0 flex-col gap-4 p-3">
       <div className="space-y-3">
-        <Field id="media-storage-select" label="选择存储">
+        <Field id={storageSelectId} label="选择存储">
           <select
-            id="media-storage-select"
+            id={storageSelectId}
             className="mp-select"
             value={storageId}
             disabled={!storages.length}
@@ -90,7 +96,7 @@ export function MediaSidebar(props: MediaSidebarProps) {
           <StatusBadge tone={selectedStorage ? "success" : "neutral"}>
             {selectedStorage ? getStorageTypeLabel(selectedStorage.type) : "未选择存储"}
           </StatusBadge>
-          <StatusBadge tone="info">115 云盘暂不支持直接预览</StatusBadge>
+          {showCloudPreviewHint ? <StatusBadge tone="info">115 云盘暂不支持直接预览</StatusBadge> : null}
           <StatusBadge>筛选 {displayCount.toLocaleString("zh-CN")}</StatusBadge>
         </div>
         <p className="mt-2 break-all text-xs leading-5 mp-muted">
@@ -103,9 +109,9 @@ export function MediaSidebar(props: MediaSidebarProps) {
         <SegmentedControl ariaLabel="筛选媒体类型" value={kindFilter} items={kindItems} onChange={onKindFilterChange} />
       </div>
 
-      <Field id="media-search" label="快速搜索">
+      <Field id={searchId} label="快速搜索">
         <input
-          id="media-search"
+          id={searchId}
           className="mp-input"
           placeholder="输入文件名或路径关键词"
           value={searchTerm}
@@ -120,13 +126,13 @@ export function MediaSidebar(props: MediaSidebarProps) {
 
       <div className="space-y-2">
         <div className="flex items-center justify-between gap-2">
-          <label htmlFor="media-zoom" className="text-sm font-medium">
+          <label htmlFor={zoomId} className="text-sm font-medium">
             缩略图尺寸
           </label>
           <StatusBadge>{normalizedThumbSize}px</StatusBadge>
         </div>
         <input
-          id="media-zoom"
+          id={zoomId}
           type="range"
           min={110}
           max={260}

@@ -107,6 +107,13 @@ export function MediaGrid(props: MediaGridProps) {
           {displayItems.length > 0 ? (
             <AutoSizer>
               {({ height, width }: { height: number; width: number }) => {
+                if (height <= 0 || width <= 0) {
+                  return (
+                    <div className="flex h-full min-h-40 items-center justify-center">
+                      <StateBlock tone="loading" title="正在准备媒体网格" description="等待布局尺寸稳定。" />
+                    </div>
+                  );
+                }
                 const columnCount = getMediaGridColumns(width, normalizedThumbSize);
                 const rowCount = Math.ceil(displayItems.length / columnCount);
                 const actualItemWidth = width / columnCount;
