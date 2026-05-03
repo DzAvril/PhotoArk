@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { InlineAlert } from "../components/inline-alert";
+import { ProgressBar } from "../components/data/progress-bar";
 import { Button } from "../components/ui/button";
 import { EmptyState } from "../components/ui/empty-state";
 import { PageHeader } from "../components/ui/page-header";
@@ -40,6 +41,8 @@ function clampPercent(value: number): number {
 
 function RunningExecutionsPanel() {
   const isVisible = usePageVisibility();
+  const navigate = useNavigate();
+  const mountedRef = useRef(false);
   const [jobs, setJobs] = useState<BackupJob[]>([]);
   const [executions, setExecutions] = useState<JobExecution[]>([]);
   const [loading, setLoading] = useState(true);
@@ -58,25 +61,49 @@ function RunningExecutionsPanel() {
   );
   const hasActiveExecution = activeExecutions.length > 0;
 
-  const load = useCallback(async (mode: "initial" | "refresh" | "poll" = "refresh") => {
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  const loadAll = useCallback(async (mode: "initial" | "refresh" = "refresh") => {
     if (mode === "initial") setLoading(true);
     if (mode === "refresh") setRefreshing(true);
     try {
       const [jobsRes, executionsRes] = await Promise.all([getJobs(), getJobExecutions()]);
+      if (!mountedRef.current) return;
       setJobs(jobsRes.items);
       setExecutions(executionsRes.items);
       setError("");
     } catch (err) {
+      if (!mountedRef.current) return;
       setError((err as Error).message);
     } finally {
+      if (!mountedRef.current) return;
       if (mode === "initial") setLoading(false);
       if (mode === "refresh") setRefreshing(false);
     }
   }, []);
 
+  const loadExecutions = useCallback(async () => {
+    try {
+      const executionsRes = await getJobExecutions();
+      if (!mountedRef.current) return hasActiveExecution;
+      setExecutions(executionsRes.items);
+      setError("");
+      return executionsRes.items.some(isActiveExecution);
+    } catch (err) {
+      if (!mountedRef.current) return hasActiveExecution;
+      setError((err as Error).message);
+      return hasActiveExecution;
+    }
+  }, [hasActiveExecution]);
+
   useEffect(() => {
-    void load("initial");
-  }, [load]);
+    void loadAll("initial");
+  }, [loadAll]);
 
   useEffect(() => {
     if (!isVisible) return;
@@ -86,9 +113,9 @@ function RunningExecutionsPanel() {
 
     const schedule = (delay: number) => {
       timer = window.setTimeout(async () => {
-        await load("poll");
+        const nextHasActiveExecution = await loadExecutions();
         if (!disposed) {
-          schedule(hasActiveExecution ? 1800 : 8000);
+          schedule(nextHasActiveExecution ? 1800 : 8000);
         }
       }, delay);
     };
@@ -99,7 +126,7 @@ function RunningExecutionsPanel() {
       disposed = true;
       if (timer !== null) window.clearTimeout(timer);
     };
-  }, [hasActiveExecution, isVisible, load]);
+  }, [hasActiveExecution, isVisible, loadExecutions]);
 
   async function handleCancelExecution(execution: JobExecution) {
     setError("");
@@ -107,11 +134,14 @@ function RunningExecutionsPanel() {
     setCancelingIds((prev) => new Set(prev).add(execution.id));
     try {
       const result = await cancelJobExecution(execution.id);
+      if (!mountedRef.current) return;
       setExecutions((prev) => [result.execution, ...prev.filter((item) => item.id !== result.execution.id)]);
       setMessage(`任务“${jobById.get(execution.jobId)?.name ?? execution.jobId}”已请求停止。`);
     } catch (err) {
+      if (!mountedRef.current) return;
       setError((err as Error).message);
     } finally {
+      if (!mountedRef.current) return;
       setCancelingIds((prev) => {
         const next = new Set(prev);
         next.delete(execution.id);
@@ -139,7 +169,7 @@ function RunningExecutionsPanel() {
         right={
           <>
             <span className="mp-chip">活跃 {activeExecutions.length}</span>
-            <Button size="sm" busy={refreshing} onClick={() => void load("refresh")}>
+            <Button size="sm" busy={refreshing} onClick={() => void loadAll("refresh")}>
               {refreshing ? "刷新中..." : "刷新"}
             </Button>
           </>
@@ -163,10 +193,16 @@ function RunningExecutionsPanel() {
                         {getExecutionStatusLabel(execution)} · {getExecutionPhaseLabel(execution.progress.phase)}
                       </p>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center justify-end gap-2">
                       <span className={execution.status === "queued" ? "mp-chip" : "mp-chip mp-chip-warning"}>
                         {execution.status === "queued" ? "排队" : "运行"}
                       </span>
+                      <Button
+                        size="sm"
+                        onClick={() => navigate(`/sync?tab=jobs&editJobId=${encodeURIComponent(execution.jobId)}`)}
+                      >
+                        查看任务
+                      </Button>
                       <Button
                         size="sm"
                         variant="danger"
@@ -183,12 +219,7 @@ function RunningExecutionsPanel() {
                     <span className="mp-muted">总体进度</span>
                     <span className="font-semibold">{percent}%</span>
                   </div>
-                  <div className="mt-1 h-2 overflow-hidden rounded-full bg-[var(--ark-line)]">
-                    <div
-                      className="h-full rounded-full bg-[var(--ark-primary)] transition-all duration-300"
-                      style={{ width: `${percent}%` }}
-                    />
-                  </div>
+                  <ProgressBar value={percent} label={`${job?.name ?? execution.jobId} 总体进度`} />
 
                   <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-4">
                     <div className="rounded-md border border-[var(--ark-line)] p-3">
