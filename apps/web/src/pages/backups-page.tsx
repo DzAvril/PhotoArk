@@ -418,7 +418,9 @@ export function BackupsPage() {
   ];
 
   const filteredEmpty = (
-    <div className="rounded-md border border-dashed border-[var(--ark-line)] p-6 text-center text-sm mp-muted md:block">暂无匹配记录</div>
+    <div className="hidden rounded-md border border-dashed border-[var(--ark-line)] p-6 text-center text-sm mp-muted md:block">
+      暂无匹配记录
+    </div>
   );
 
   return (
