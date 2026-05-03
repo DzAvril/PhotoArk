@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { InlineAlert } from "../components/inline-alert";
-import { SectionCard } from "../components/ui/section-card";
+import { Field } from "../components/ui/field";
+import { PageHeader } from "../components/ui/page-header";
 import { getSettings, sendTelegramTest, updateSettings } from "../lib/api";
 import type { AppSettings } from "../types/api";
 
@@ -70,33 +71,38 @@ export function SettingsPage() {
   }
 
   return (
-    <SectionCard
-      title="Telegram 通知"
-      description="用于接收备份摘要、异常提醒与测试消息。"
-      right={
-        <span className={`mp-chip ${form.telegram.enabled ? "mp-chip-success" : ""}`}>
-          {form.telegram.enabled ? "已启用" : "未启用"}
-        </span>
-      }
-      className="md:flex md:h-full md:flex-col"
-      variant="panelSoft"
-    >
-      {loading ? <p className="text-sm mp-muted">加载中...</p> : null}
-      {error ? (
-        <InlineAlert tone="error" className="mt-3" onClose={() => setError("")}>
-          {error}
-        </InlineAlert>
-      ) : null}
-      {message ? (
-        <InlineAlert tone="success" className="mt-3" autoCloseMs={5200} onClose={() => setMessage("")}>
-          {message}
-        </InlineAlert>
-      ) : null}
+    <section className="space-y-4">
+      <PageHeader
+        title="通知"
+        description="配置 Telegram 备份摘要、异常提醒与测试消息。"
+        chips={
+          <span className={`mp-chip ${form.telegram.enabled ? "mp-chip-success" : ""}`}>
+            {form.telegram.enabled ? "已启用" : "未启用"}
+          </span>
+        }
+      />
 
-      <form onSubmit={(e) => void onSubmit(e)} className="mt-4 space-y-3 md:min-h-0 md:flex-1 md:overflow-auto">
-        <fieldset className="mp-subtle-card p-4">
-          <label className="flex items-center gap-2 text-sm font-medium">
+      <div className="mp-panel p-4">
+        {loading ? <p className="text-sm mp-muted">加载中...</p> : null}
+        {error ? (
+          <InlineAlert tone="error" className="mt-3" onClose={() => setError("")}>
+            {error}
+          </InlineAlert>
+        ) : null}
+        {message ? (
+          <InlineAlert tone="success" className="mt-3" autoCloseMs={5200} onClose={() => setMessage("")}>
+            {message}
+          </InlineAlert>
+        ) : null}
+
+        <form onSubmit={(e) => void onSubmit(e)} className="mt-4 space-y-5">
+          <Field
+            id="telegram-enabled"
+            label="启用 Telegram"
+            help="关闭后将不会发送成功摘要、失败告警和测试通知。"
+          >
             <input
+              id="telegram-enabled"
               type="checkbox"
               checked={form.telegram.enabled}
               onChange={(e) =>
@@ -106,18 +112,10 @@ export function SettingsPage() {
                 }))
               }
             />
-            启用 Telegram 备份摘要通知
-          </label>
-          <p className="mt-2 text-sm mp-muted">关闭后将不会发送成功摘要、失败告警和测试通知。</p>
-        </fieldset>
+          </Field>
 
-        <fieldset className="mp-subtle-card p-4">
-          <legend className="px-1 text-sm font-semibold">连接凭据</legend>
-          <div className="mt-2 grid gap-3 sm:grid-cols-2">
-            <div className="space-y-1">
-              <label htmlFor="telegram-bot-token" className="text-sm font-medium">
-                Bot Token
-              </label>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field id="telegram-bot-token" label="Bot Token">
               <div className="flex gap-2">
                 <input
                   id="telegram-bot-token"
@@ -136,19 +134,16 @@ export function SettingsPage() {
                 />
                 <button
                   type="button"
-                  className="mp-btn shrink-0"
+                  className="mp-btn mp-btn-md shrink-0"
                   onClick={() => setShowBotToken((prev) => !prev)}
                   disabled={!form.telegram.enabled}
                 >
                   {showBotToken ? "隐藏" : "显示"}
                 </button>
               </div>
-            </div>
+            </Field>
 
-            <div className="space-y-1">
-              <label htmlFor="telegram-chat-id" className="text-sm font-medium">
-                Chat ID
-              </label>
+            <Field id="telegram-chat-id" label="Chat ID">
               <input
                 id="telegram-chat-id"
                 className="mp-input"
@@ -163,16 +158,14 @@ export function SettingsPage() {
                   }))
                 }
               />
-            </div>
+            </Field>
           </div>
-        </fieldset>
 
-        <fieldset className="mp-subtle-card p-4">
-          <legend className="px-1 text-sm font-semibold">网络设置</legend>
-          <div className="mt-2 space-y-1">
-            <label htmlFor="telegram-proxy-url" className="text-sm font-medium">
-              代理地址（可选）
-            </label>
+          <Field
+            id="telegram-proxy-url"
+            label="代理地址（可选）"
+            help="当 NAS 无法直连 Telegram 时填写 HTTP/HTTPS 代理地址；留空则直接连接 Telegram API。"
+          >
             <input
               id="telegram-proxy-url"
               className="mp-input"
@@ -187,21 +180,23 @@ export function SettingsPage() {
                 }))
               }
             />
-            <p className="text-sm mp-muted">
-              当 NAS 无法直连 Telegram 时填写 HTTP/HTTPS 代理地址；留空则直接连接 Telegram API。
-            </p>
-          </div>
-        </fieldset>
+          </Field>
 
-        <div className="flex flex-col gap-2 sm:flex-row">
-          <button type="submit" className="mp-btn mp-btn-primary sm:min-w-[132px]" disabled={saving || loading}>
-            {saving ? "保存中..." : "保存配置"}
-          </button>
-          <button type="button" className="mp-btn sm:min-w-[132px]" disabled={testing || loading} onClick={() => void handleTelegramTest()}>
-            {testing ? "发送中..." : "发送测试通知"}
-          </button>
-        </div>
-      </form>
-    </SectionCard>
+          <div className="flex flex-col gap-2 border-t border-[var(--ark-line)] pt-4 sm:flex-row">
+            <button type="submit" className="mp-btn mp-btn-primary mp-btn-md sm:min-w-[132px]" disabled={saving || loading}>
+              {saving ? "保存中..." : "保存配置"}
+            </button>
+            <button
+              type="button"
+              className="mp-btn mp-btn-md sm:min-w-[132px]"
+              disabled={testing || loading}
+              onClick={() => void handleTelegramTest()}
+            >
+              {testing ? "发送中..." : "发送测试通知"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </section>
   );
 }

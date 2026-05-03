@@ -53,13 +53,19 @@ export function PathPicker({ id, value, onChange, placeholder, browse, disabled,
           required={required}
           onChange={(e) => onChange(e.target.value)}
         />
-        <button type="button" className="mp-btn shrink-0" onClick={() => void toggleOpen()} disabled={disabled || browseDisabled}>
+        <button
+          type="button"
+          className="mp-btn shrink-0"
+          aria-expanded={open}
+          onClick={() => void toggleOpen()}
+          disabled={Boolean(disabled || browseDisabled)}
+        >
           {open ? "收起" : "选择路径"}
         </button>
       </div>
 
       {open ? (
-        <div className="rounded-xl border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-2.5">
+        <div className="mp-panel-soft rounded-md p-2.5">
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-sm">
             <div className="min-w-0 flex-1">
               <div className="mp-muted">当前目录</div>
@@ -98,7 +104,7 @@ export function PathPicker({ id, value, onChange, placeholder, browse, disabled,
 
           {error ? <p className="mp-error mb-2">{error}</p> : null}
 
-          <div className="max-h-56 overflow-auto rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface)] p-1">
+          <div className="max-h-56 overflow-auto rounded-md border border-[var(--ark-line)] bg-[var(--ark-surface)] p-1">
             {!hasDirs && !loading ? <p className="px-2 py-3 text-sm mp-muted">当前目录下没有子目录</p> : null}
             {browser?.directories.map((d) => (
               <button

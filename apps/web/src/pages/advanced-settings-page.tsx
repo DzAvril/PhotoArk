@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react";
+import { StatusBadge } from "../components/data/status-badge";
 import { InlineAlert } from "../components/inline-alert";
+import { Button } from "../components/ui/button";
+import { PageHeader } from "../components/ui/page-header";
 import { getMediaIndexStatus, rebuildMediaIndex } from "../lib/api";
 import type { MediaIndexStatusItem } from "../types/api";
 
@@ -63,71 +66,72 @@ export function AdvancedSettingsPage() {
   }
 
   return (
-    <div className="mp-panel mp-panel-soft p-4 md:flex md:h-full md:flex-col">
-      <div>
-        <h3 className="text-base font-semibold">媒体索引缓存</h3>
-        <p className="mt-1 text-sm mp-muted">用于排查媒体统计、热力图和预览索引问题。非异常情况下不建议频繁重建。</p>
-      </div>
+    <section className="space-y-4">
+      <PageHeader
+        title="高级配置"
+        description="索引、诊断与维护工具。"
+        chips={
+          <>
+            <StatusBadge>缓存根目录 {mediaIndexItems.length}</StatusBadge>
+            <StatusBadge tone="info">新鲜阈值 {formatDurationMs(mediaIndexMaxAgeMs)}</StatusBadge>
+            {indexLoading ? <StatusBadge tone="info">读取中</StatusBadge> : null}
+          </>
+        }
+      />
 
-      {error ? (
-        <InlineAlert tone="error" className="mt-3" onClose={() => setError("")}>
-          {error}
-        </InlineAlert>
-      ) : null}
-      {message ? (
-        <InlineAlert tone="success" className="mt-3" autoCloseMs={5200} onClose={() => setMessage("")}>
-          {message}
-        </InlineAlert>
-      ) : null}
-
-      <div className="mt-3 rounded-xl border border-[var(--ark-warning-line)] bg-[var(--ark-warning-bg)] p-3">
-        <p className="text-sm font-medium text-[var(--ark-warning)]">此页面面向排障和维护操作，重建索引可能持续较长时间。</p>
-      </div>
-
-      <div className="mt-3 rounded-xl border border-[var(--ark-line)] bg-[var(--ark-surface)] p-3">
-        <div className="flex flex-wrap items-center gap-2 text-xs">
-          <span className="mp-chip">缓存根目录 {mediaIndexItems.length}</span>
-          <span className="mp-chip">新鲜阈值 {formatDurationMs(mediaIndexMaxAgeMs)}</span>
-          {indexLoading ? <span className="mp-chip">读取中...</span> : null}
-          <button
-            type="button"
-            className="mp-btn min-h-[30px] px-2 py-1 text-xs font-medium"
-            disabled={indexLoading || indexRebuilding}
-            onClick={() => void loadMediaIndexStatus(true)}
-          >
-            刷新状态
-          </button>
-          <button
-            type="button"
-            className="mp-btn min-h-[30px] px-2 py-1 text-xs font-medium"
-            disabled={indexRebuilding}
-            onClick={() => void handleRebuildMediaIndex()}
-          >
-            {indexRebuilding ? "重建中..." : "重建索引"}
-          </button>
+      <div className="mp-panel p-4 md:flex md:min-h-0 md:flex-col">
+        <div className="flex flex-col gap-3">
+          {error ? (
+            <InlineAlert tone="error" onClose={() => setError("")}>
+              {error}
+            </InlineAlert>
+          ) : null}
+          {message ? (
+            <InlineAlert tone="success" autoCloseMs={5200} onClose={() => setMessage("")}>
+              {message}
+            </InlineAlert>
+          ) : null}
+          <InlineAlert tone="info">
+            <span className="inline-flex flex-wrap items-center gap-2">
+              <StatusBadge tone="warning">维护操作</StatusBadge>
+              <span>重建索引可能持续较长时间，建议在排障或维护窗口中执行。</span>
+            </span>
+          </InlineAlert>
         </div>
 
-        <div className="mt-3 max-h-60 space-y-2 overflow-auto">
-          {mediaIndexItems.length ? (
-            mediaIndexItems.map((item) => (
-              <div key={item.rootPath} className="rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] px-3 py-2">
-                <div className="flex flex-wrap items-center gap-2">
-                  <p className="text-xs font-medium">{item.rootPath}</p>
-                  <span className={`mp-chip text-xs ${item.fresh ? "mp-chip-success" : "mp-chip-warning"}`}>
-                    {item.fresh ? "新鲜" : "过期"}
-                  </span>
+        <div className="mt-4 flex flex-col gap-3 md:min-h-0 md:flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <StatusBadge>缓存根目录 {mediaIndexItems.length}</StatusBadge>
+            <StatusBadge tone="info">新鲜阈值 {formatDurationMs(mediaIndexMaxAgeMs)}</StatusBadge>
+            {indexLoading ? <StatusBadge tone="info">读取中</StatusBadge> : null}
+            <Button size="sm" disabled={indexLoading || indexRebuilding} onClick={() => void loadMediaIndexStatus(true)}>
+              刷新状态
+            </Button>
+            <Button size="sm" disabled={indexRebuilding} onClick={() => void handleRebuildMediaIndex()}>
+              {indexRebuilding ? "重建中..." : "重建索引"}
+            </Button>
+          </div>
+
+          <div className="max-h-[420px] space-y-2 overflow-auto">
+            {mediaIndexItems.length ? (
+              mediaIndexItems.map((item) => (
+                <div key={item.rootPath} className="mp-panel-soft rounded-md px-3 py-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="min-w-0 break-all text-sm font-medium">{item.rootPath}</p>
+                    <StatusBadge tone={item.fresh ? "success" : "warning"}>{item.fresh ? "新鲜" : "过期"}</StatusBadge>
+                  </div>
+                  <p className="mt-1 text-xs mp-muted">
+                    文件 {item.fileCount} · 更新于 {new Date(item.generatedAt).toLocaleString("zh-CN", { hour12: false })} · 距今{" "}
+                    {formatDurationMs(item.ageMs)}
+                  </p>
                 </div>
-                <p className="mt-1 text-xs mp-muted">
-                  文件 {item.fileCount} · 更新于 {new Date(item.generatedAt).toLocaleString("zh-CN", { hour12: false })} · 距今{" "}
-                  {formatDurationMs(item.ageMs)}
-                </p>
-              </div>
-            ))
-          ) : (
-            <p className="text-xs mp-muted">暂无可用索引缓存，可在维护窗口手动重建。</p>
-          )}
+              ))
+            ) : (
+              <p className="py-6 text-center text-sm mp-muted">暂无可用索引缓存，可在维护窗口手动重建。</p>
+            )}
+          </div>
         </div>
       </div>
-    </div>
+    </section>
   );
 }
