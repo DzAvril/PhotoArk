@@ -10,6 +10,7 @@ test("thumbnail size is clamped for stable grid layout", () => {
 
 test("grid columns adapt for mobile and desktop", () => {
   assert.equal(getMediaGridColumns(0, 170), 1);
+  assert.equal(getMediaGridColumns(9, 170), 1);
   assert.equal(getMediaGridColumns(120, 170), 1);
   assert.equal(getMediaGridColumns(360, 140), 2);
   assert.equal(getMediaGridColumns(820, 170), 4);

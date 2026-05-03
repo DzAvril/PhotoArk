@@ -57,8 +57,8 @@ const VirtualCell = memo(({ columnIndex, rowIndex, style, data }: GridChildCompo
     ...style,
     left: Number(style.left) + 5,
     top: Number(style.top) + 5,
-    width: Number(style.width) - 10,
-    height: Number(style.height) - 10
+    width: Math.max(1, Number(style.width) - 10),
+    height: Math.max(1, Number(style.height) - 10)
   };
 
   if (!selectedStorage) return null;
