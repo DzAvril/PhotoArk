@@ -1,7 +1,8 @@
-import { FormEvent, useEffect, useState } from "react";
+import React, { FormEvent, useEffect, useState } from "react";
 import { InlineAlert } from "../components/inline-alert";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
+import { Field } from "../components/ui/field";
 import { bootstrapAdmin, getAuthStatus, login, setStoredAuthToken } from "../lib/api";
 import type { AuthUser } from "../types/api";
 
@@ -66,136 +67,119 @@ export function LoginPage({ onAuthenticated }: LoginPageProps) {
   }
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-[var(--ark-bg)] text-[var(--ark-ink)]">
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(circle_at_10%_8%,color-mix(in_oklab,var(--ark-primary)_22%,transparent)_0%,transparent_36%),radial-gradient(circle_at_88%_84%,color-mix(in_oklab,var(--ark-accent)_16%,transparent)_0%,transparent_42%),linear-gradient(180deg,var(--ark-bg-soft),var(--ark-bg))]"
-      />
-      <div className="mx-auto flex min-h-screen w-full max-w-[1200px] items-center px-4 py-10 md:px-8">
-        <div className="grid w-full gap-6 lg:grid-cols-[1.05fr_0.95fr]">
-          <Card variant="panelHero" className="relative hidden overflow-hidden p-8 lg:flex lg:flex-col lg:justify-between">
-            <div aria-hidden="true" className="pointer-events-none absolute -right-20 -top-20 h-56 w-56 rounded-full bg-[var(--ark-primary)]/14 blur-3xl" />
-            <div aria-hidden="true" className="pointer-events-none absolute -bottom-24 -left-20 h-64 w-64 rounded-full bg-[var(--ark-accent)]/18 blur-3xl" />
+    <div className="min-h-screen bg-[var(--ark-bg)] px-4 py-8 text-[var(--ark-ink)]">
+      <main className="mx-auto grid min-h-[calc(100vh-4rem)] w-full max-w-[960px] items-center gap-4 md:grid-cols-[minmax(0,0.9fr)_420px]">
+        <section className="hidden md:block">
+          <div className="flex items-center gap-3">
+            <img
+              src="/logo.svg"
+              alt="PhotoArk logo"
+              className="h-11 w-11 rounded-md border border-[var(--ark-line)] bg-[var(--ark-surface)] p-1.5 shadow-sm"
+            />
+            <div>
+              <h1 className="text-2xl font-semibold leading-tight">PhotoArk</h1>
+              <p className="mt-1 text-sm mp-muted">照片备份与同步控制台</p>
+            </div>
+          </div>
 
-            <div className="relative">
-              <div className="inline-flex items-center gap-2 rounded-full border border-[var(--ark-line)] bg-[color-mix(in_oklab,var(--ark-surface)_78%,transparent)] px-3 py-1 mp-kicker text-[var(--ark-ink)]">
-                <img src="/logo.svg" alt="PhotoArk logo" className="h-4 w-4 rounded-sm" />
-                PhotoArk
+          <div className="mt-8 max-w-[420px] border-l border-[var(--ark-line)] pl-4">
+            <p className="text-sm leading-6 mp-muted">面向 NAS 与多目标存储的私有照片工作台。</p>
+            <dl className="mt-5 grid gap-4 text-sm">
+              <div>
+                <dt className="font-semibold">同步工作流</dt>
+                <dd className="mt-1 mp-muted">差异检查、任务执行和审计记录集中处理。</dd>
               </div>
-              <h1 className="mt-6 text-[46px] font-semibold leading-[1.08] tracking-[-0.02em]">
-                照片备份
-                <br />
-                管理控制台
-              </h1>
-              <p className="mt-5 max-w-[560px] text-base leading-7 mp-muted">
-                面向 NAS 与多目标存储的统一入口，聚焦安全备份、差异校验和稳定同步。
-              </p>
-            </div>
+              <div>
+                <dt className="font-semibold">媒体库</dt>
+                <dd className="mt-1 mp-muted">按存储浏览图片、视频与 Live Photo。</dd>
+              </div>
+              <div>
+                <dt className="font-semibold">系统配置</dt>
+                <dd className="mt-1 mp-muted">通知、存储和维护入口保持在同一控制台。</dd>
+              </div>
+            </dl>
+          </div>
+        </section>
 
-            <div className="relative grid gap-3 text-sm">
-              <div className="mp-subtle-card px-4 py-3">多存储目标统一管理</div>
-              <div className="mp-subtle-card px-4 py-3">定时任务与目录监听并行</div>
-              <div className="mp-subtle-card px-4 py-3">可追踪执行历史与差异状态</div>
+        <Card variant="panel" className="p-5 sm:p-6">
+          <div className="flex items-center gap-3 md:hidden">
+            <img
+              src="/logo.svg"
+              alt="PhotoArk logo"
+              className="h-10 w-10 rounded-md border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-1.5 shadow-sm"
+            />
+            <div>
+              <p className="mp-kicker mp-kicker-primary">PhotoArk</p>
+              <p className="text-xs mp-muted">安全备份与同步</p>
             </div>
-          </Card>
+          </div>
 
-          <Card variant="panel" className="p-6 sm:p-7">
-            <div className="flex items-center gap-3">
-              <img
-                src="/logo.svg"
-                alt="PhotoArk logo"
-                className="h-10 w-10 rounded-2xl border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-1.5 shadow-sm"
+          <h2 className="mt-4 mp-h2 md:mt-0">{checking ? "加载中..." : hasUsers ? "欢迎回来" : "初始化管理员账号"}</h2>
+          <p className="mt-2 text-sm leading-6 mp-muted">
+            {hasUsers ? "输入账号与密码以继续。" : "首次使用请先创建管理员账号，创建后将自动登录。"}
+          </p>
+
+          {!checking && !hasUsers ? (
+            <div className="mt-4">
+              <InlineAlert tone="info">建议使用仅管理员知晓的高强度密码，长度至少 8 位。</InlineAlert>
+            </div>
+          ) : null}
+
+          {error ? (
+            <div className="mt-4">
+              <InlineAlert tone="error" onClose={() => setError("")}>
+                {error}
+              </InlineAlert>
+            </div>
+          ) : null}
+
+          <form className="mt-5 space-y-4" onSubmit={handleSubmit}>
+            <Field id="auth-username" label="用户名">
+              <input
+                id="auth-username"
+                className="mp-input min-h-12 px-4 text-base"
+                placeholder="admin"
+                value={username}
+                autoComplete="username"
+                onChange={(e) => setUsername(e.target.value)}
+                disabled={checking || loading}
               />
-              <div>
-                <p className="mp-kicker mp-kicker-primary">PhotoArk</p>
-                <p className="text-xs mp-muted">安全备份与同步</p>
-              </div>
-            </div>
+            </Field>
 
-            <h2 className="mt-4 mp-h2">{checking ? "加载中..." : hasUsers ? "欢迎回来" : "初始化管理员账号"}</h2>
-            <p className="mt-2 text-sm leading-6 mp-muted">
-              {hasUsers ? "输入账号与密码以继续。" : "首次使用请先创建管理员账号，创建后将自动登录。"}
-            </p>
+            <Field id="auth-password" label="密码">
+              <input
+                id="auth-password"
+                className="mp-input min-h-12 px-4 text-base"
+                type="password"
+                placeholder="至少 8 位"
+                value={password}
+                autoComplete={hasUsers ? "current-password" : "new-password"}
+                onChange={(e) => setPassword(e.target.value)}
+                disabled={checking || loading}
+              />
+            </Field>
 
-            {!checking && !hasUsers ? (
-              <div className="mt-4">
-                <InlineAlert tone="info">建议使用仅管理员知晓的高强度密码，长度至少 8 位。</InlineAlert>
-              </div>
-            ) : null}
-
-            {error ? (
-              <div className="mt-4">
-                <InlineAlert tone="error" onClose={() => setError("")}> 
-                  {error}
-                </InlineAlert>
-              </div>
-            ) : null}
-
-            <form className="mt-5 space-y-4" onSubmit={handleSubmit}>
-              <div>
-                <label htmlFor="auth-username" className="mp-kicker">
-                  用户名
-                </label>
+            {!hasUsers ? (
+              <Field id="auth-confirm-password" label="确认密码">
                 <input
-                  id="auth-username"
-                  className="mp-input mt-1.5 min-h-12 px-4 text-base"
-                  placeholder="admin"
-                  value={username}
-                  autoComplete="username"
-                  onChange={(e) => setUsername(e.target.value)}
-                  disabled={checking || loading}
-                />
-              </div>
-
-              <div>
-                <label htmlFor="auth-password" className="mp-kicker">
-                  密码
-                </label>
-                <input
-                  id="auth-password"
-                  className="mp-input mt-1.5 min-h-12 px-4 text-base"
+                  id="auth-confirm-password"
+                  className="mp-input min-h-12 px-4 text-base"
                   type="password"
-                  placeholder="至少 8 位"
-                  value={password}
-                  autoComplete={hasUsers ? "current-password" : "new-password"}
-                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="再次输入密码"
+                  value={confirmPassword}
+                  autoComplete="new-password"
+                  onChange={(e) => setConfirmPassword(e.target.value)}
                   disabled={checking || loading}
                 />
-              </div>
+              </Field>
+            ) : null}
 
-              {!hasUsers ? (
-                <div>
-                  <label htmlFor="auth-confirm-password" className="mp-kicker">
-                    确认密码
-                  </label>
-                  <input
-                    id="auth-confirm-password"
-                    className="mp-input mt-1.5 min-h-12 px-4 text-base"
-                    type="password"
-                    placeholder="再次输入密码"
-                    value={confirmPassword}
-                    autoComplete="new-password"
-                    onChange={(e) => setConfirmPassword(e.target.value)}
-                    disabled={checking || loading}
-                  />
-                </div>
-              ) : null}
-
-              <div>
-                <Button
-                  type="submit"
-                  variant="primary"
-                  busy={loading}
-                  disabled={checking}
-                  className="min-h-12 w-full text-base"
-                >
-                  {loading ? "提交中..." : hasUsers ? "登录" : "创建管理员并登录"}
-                </Button>
-              </div>
-            </form>
-          </Card>
-        </div>
-      </div>
+            <Button type="submit" variant="primary" busy={loading} disabled={checking} className="min-h-12 w-full text-base">
+              {loading ? "提交中..." : hasUsers ? "登录" : "创建管理员并登录"}
+            </Button>
+          </form>
+        </Card>
+      </main>
     </div>
   );
 }

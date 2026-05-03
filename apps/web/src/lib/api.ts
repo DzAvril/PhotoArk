@@ -27,7 +27,7 @@ import type {
 } from "../types/api";
 import type { DiffResult } from "../types/diff";
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
+const API_BASE = import.meta.env?.VITE_API_BASE_URL ?? "";
 const AUTH_TOKEN_KEY = "photoark-auth-token";
 const AUTH_REQUIRED_EVENT = "photoark-auth-required";
 
