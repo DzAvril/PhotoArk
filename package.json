@@ -12,7 +12,7 @@
     "build": "npm run build -w @photoark/shared && npm run build -w @photoark/api && npm run build -w @photoark/web",
     "lint": "npm run lint -w @photoark/api && npm run lint -w @photoark/web",
     "typecheck": "npm run typecheck -w @photoark/shared && npm run typecheck -w @photoark/api && npm run typecheck -w @photoark/web",
-    "test": "tsx --test apps/api/src/modules/media/media-query.test.ts apps/api/src/modules/backup/job-diff-cache.test.ts apps/web/src/components/ui/design-tokens.test.ts apps/web/src/components/ui/primitives-render.test.tsx apps/web/src/components/data/data-components-render.test.tsx apps/web/src/navigation/navigation-model.test.ts apps/web/src/layout/app-shell-model.test.ts apps/web/src/pages/jobs-page-model.test.ts apps/web/src/pages/dashboard-page-model.test.ts apps/web/src/pages/media-page-model.test.ts"
+    "test": "tsx --test apps/api/src/modules/media/media-query.test.ts apps/api/src/modules/backup/job-diff-cache.test.ts apps/web/src/components/ui/design-tokens.test.ts apps/web/src/components/ui/primitives-render.test.tsx apps/web/src/components/data/data-components-render.test.tsx apps/web/src/navigation/navigation-model.test.ts apps/web/src/layout/app-shell-model.test.ts apps/web/src/pages/jobs-page-model.test.ts apps/web/src/pages/sync-page-model.test.ts apps/web/src/pages/dashboard-page-model.test.ts apps/web/src/pages/media-page-model.test.ts"
   },
   "engines": {
     "node": ">=20.11.0"

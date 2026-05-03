@@ -35,6 +35,8 @@ type PendingDeleteAction = {
   label: string;
 };
 
+type JobsPageProps = { embedded?: boolean };
+
 function getAriaSort(active: boolean, asc: boolean): "ascending" | "descending" | "none" {
   if (!active) return "none";
   return asc ? "ascending" : "descending";
@@ -91,7 +93,7 @@ function getStorageTypeLabel(type: StorageTarget["type"]): string {
   return "115 云盘";
 }
 
-export function JobsPage() {
+export function JobsPage({ embedded = false }: JobsPageProps) {
   const [searchParams, setSearchParams] = useSearchParams();
   const [items, setItems] = useState<BackupJob[]>([]);
   const [storages, setStorages] = useState<StorageTarget[]>([]);
@@ -493,7 +495,7 @@ export function JobsPage() {
   const allCurrentPageSelected = table.paged.length > 0 && table.paged.every((j) => selected.has(j.id));
 
   return (
-    <section className="space-y-3">
+    <section className={embedded ? "space-y-3 md:min-h-0" : "space-y-3"}>
       {message ? (
         <InlineAlert tone="success" autoCloseMs={5200} onClose={() => setMessage("")}>
           {message}

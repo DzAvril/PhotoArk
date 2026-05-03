@@ -155,7 +155,10 @@ function SizeObserver({
 
 
 
-export function JobDiffPage() {
+type JobDiffPageProps = { embedded?: boolean; initialPanel?: "diff" | "running" };
+
+export function JobDiffPage({ embedded = false, initialPanel = "diff" }: JobDiffPageProps) {
+  void initialPanel;
   const navigate = useNavigate();
   const cache = useViewCache();
   const requestSeqRef = useRef(0);
@@ -637,6 +640,90 @@ export function JobDiffPage() {
     }
   }, [previewSide, previewStreamUrl, previewOpen, detailItem?.kind]);
 
+  const diffOverview = (
+    <>
+      <div className="mp-toolbar">
+        <select
+          className="mp-select min-w-[260px]"
+          value={selectedJobId}
+          onChange={(event) => setSelectedJobId(event.target.value)}
+          disabled={loadingSetup || !diffableJobs.length}
+        >
+          {!diffableJobs.length ? <option value="">暂无可比对任务</option> : null}
+          {diffableJobs.map((job) => {
+            const sourceName = storageById.get(job.sourceTargetId)?.name ?? job.sourceTargetId;
+            const destinationName = storageById.get(job.destinationTargetId)?.name ?? job.destinationTargetId;
+            return (
+              <option key={job.id} value={job.id}>
+                {job.name} ({sourceName}
+                {" -> "}
+                {destinationName})
+              </option>
+            );
+          })}
+        </select>
+        <div className="mp-toolbar-group">
+          <Button busy={refreshingDiff} disabled={!selectedJobId} onClick={() => void loadDiff(true)}>
+            {refreshingDiff ? "刷新中..." : "刷新差异"}
+          </Button>
+          <Button disabled={!selectedJobId} onClick={() => navigate(`/sync?tab=jobs&editJobId=${encodeURIComponent(selectedJobId)}`)}>
+            编辑任务
+          </Button>
+          <Button variant="primary" busy={runningSync} disabled={!selectedJobId} onClick={() => void handleRunSync()}>
+            {runningSync ? "启动中..." : "立即同步"}
+          </Button>
+        </div>
+      </div>
+
+      <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+        <span className="inline-flex items-center gap-1">
+          <span className="h-3 w-3 rounded-sm" style={{ backgroundColor: "var(--ark-success)" }} /> 相同
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <span className="h-3 w-3 rounded-sm" style={{ backgroundColor: "var(--ark-warning)" }} /> 差异
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <span className="h-3 w-3 rounded-sm" style={{ backgroundColor: "var(--ark-danger-text)" }} /> 独有
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <span
+            className="h-3 w-3 rounded-sm"
+            style={{ backgroundColor: "color-mix(in oklab, var(--ark-line-strong) 60%, var(--ark-surface))" }}
+          />
+          缺失
+        </span>
+      </div>
+      {result ? (
+        <div className="mt-4 mp-stat-grid">
+          <div className="mp-stat-card">
+            <h4>总对比</h4>
+            <p className="text-2xl font-semibold">{result.summary.totalComparedCount}</p>
+          </div>
+          <div className="mp-stat-card">
+            <h4>差异</h4>
+            <p className="text-2xl font-semibold text-amber-600">{result.summary.totalDiffCount}</p>
+          </div>
+          <div className="mp-stat-card">
+            <h4>一致</h4>
+            <p className="text-2xl font-semibold text-emerald-600">{result.summary.sameCount}</p>
+          </div>
+          <div className="mp-stat-card">
+            <h4>仅源目录</h4>
+            <p className="text-2xl font-semibold">{result.summary.sourceOnlyCount}</p>
+          </div>
+          <div className="mp-stat-card">
+            <h4>仅目标目录</h4>
+            <p className="text-2xl font-semibold">{result.summary.destinationOnlyCount}</p>
+          </div>
+          <div className="mp-stat-card">
+            <h4>内容变更</h4>
+            <p className="text-2xl font-semibold">{result.summary.changedCount}</p>
+          </div>
+        </div>
+      ) : null}
+    </>
+  );
+
   return (
     <section className="space-y-3 md:flex md:h-full md:flex-col">
       {message ? (
@@ -655,91 +742,17 @@ export function JobDiffPage() {
         </InlineAlert>
       ) : null}
 
-      <SectionCard
-        variant="panelSoft"
-        title="目录差异"
-        description="按任务对比源目录和目标目录，支持单文件同步、预览与删除。"
-      >
-        <div className="mp-toolbar">
-          <select
-            className="mp-select min-w-[260px]"
-            value={selectedJobId}
-            onChange={(event) => setSelectedJobId(event.target.value)}
-            disabled={loadingSetup || !diffableJobs.length}
-          >
-            {!diffableJobs.length ? <option value="">暂无可比对任务</option> : null}
-            {diffableJobs.map((job) => {
-              const sourceName = storageById.get(job.sourceTargetId)?.name ?? job.sourceTargetId;
-              const destinationName = storageById.get(job.destinationTargetId)?.name ?? job.destinationTargetId;
-              return (
-                <option key={job.id} value={job.id}>
-                  {job.name} ({sourceName}
-                  {" -> "}
-                  {destinationName})
-                </option>
-              );
-            })}
-          </select>
-          <div className="mp-toolbar-group">
-            <Button busy={refreshingDiff} disabled={!selectedJobId} onClick={() => void loadDiff(true)}>
-              {refreshingDiff ? "刷新中..." : "刷新差异"}
-            </Button>
-            <Button disabled={!selectedJobId} onClick={() => navigate(`/settings/jobs?editJobId=${selectedJobId}`)}>
-              编辑任务
-            </Button>
-            <Button variant="primary" busy={runningSync} disabled={!selectedJobId} onClick={() => void handleRunSync()}>
-              {runningSync ? "启动中..." : "立即同步"}
-            </Button>
-          </div>
-        </div>
-
-        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
-          <span className="inline-flex items-center gap-1">
-            <span className="h-3 w-3 rounded-sm" style={{ backgroundColor: "var(--ark-success)" }} /> 相同
-          </span>
-          <span className="inline-flex items-center gap-1">
-            <span className="h-3 w-3 rounded-sm" style={{ backgroundColor: "var(--ark-warning)" }} /> 差异
-          </span>
-          <span className="inline-flex items-center gap-1">
-            <span className="h-3 w-3 rounded-sm" style={{ backgroundColor: "var(--ark-danger-text)" }} /> 独有
-          </span>
-          <span className="inline-flex items-center gap-1">
-            <span
-              className="h-3 w-3 rounded-sm"
-              style={{ backgroundColor: "color-mix(in oklab, var(--ark-line-strong) 60%, var(--ark-surface))" }}
-            />
-            缺失
-          </span>
-        </div>
-        {result ? (
-          <div className="mt-4 mp-stat-grid">
-            <div className="mp-stat-card">
-              <h4>总对比</h4>
-              <p className="text-2xl font-semibold">{result.summary.totalComparedCount}</p>
-            </div>
-            <div className="mp-stat-card">
-              <h4>差异</h4>
-              <p className="text-2xl font-semibold text-amber-600">{result.summary.totalDiffCount}</p>
-            </div>
-            <div className="mp-stat-card">
-              <h4>一致</h4>
-              <p className="text-2xl font-semibold text-emerald-600">{result.summary.sameCount}</p>
-            </div>
-            <div className="mp-stat-card">
-              <h4>仅源目录</h4>
-              <p className="text-2xl font-semibold">{result.summary.sourceOnlyCount}</p>
-            </div>
-            <div className="mp-stat-card">
-              <h4>仅目标目录</h4>
-              <p className="text-2xl font-semibold">{result.summary.destinationOnlyCount}</p>
-            </div>
-            <div className="mp-stat-card">
-              <h4>内容变更</h4>
-              <p className="text-2xl font-semibold">{result.summary.changedCount}</p>
-            </div>
-          </div>
-        ) : null}
-      </SectionCard>
+      {embedded ? (
+        <div className="mp-panel mp-panel-soft p-4">{diffOverview}</div>
+      ) : (
+        <SectionCard
+          variant="panelSoft"
+          title="目录差异"
+          description="按任务对比源目录和目标目录，支持单文件同步、预览与删除。"
+        >
+          {diffOverview}
+        </SectionCard>
+      )}
 
       {!selectedJobId ? (
         <EmptyState title="请选择一个任务开始比对" description="选择任务后可以查看差异方格视图与单文件操作。" />
