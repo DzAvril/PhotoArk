@@ -1,6 +1,13 @@
+import { RefreshCw } from "lucide-react";
+import { StatusBadge } from "../../components/data/status-badge";
+import { Button } from "../../components/ui/button";
+import { Field } from "../../components/ui/field";
+import { SegmentedControl } from "../../components/ui/segmented-control";
 import type { StorageTarget } from "../../types/api";
 import type { MediaKindFilter } from "./media-types";
 import { getStorageTypeLabel } from "./media-utils";
+
+type DateRangeFilter = "all" | "7d" | "30d" | "365d";
 
 type MediaSidebarProps = {
   storages: StorageTarget[];
@@ -11,14 +18,28 @@ type MediaSidebarProps = {
   kindFilter: MediaKindFilter;
   normalizedThumbSize: number;
   searchTerm: string;
-  dateRange: "all" | "7d" | "30d" | "365d";
+  dateRange: DateRangeFilter;
   onStorageChange: (nextId: string) => void;
   onRefresh: () => void;
   onKindFilterChange: (next: MediaKindFilter) => void;
   onThumbSizeChange: (next: number) => void;
   onSearchChange: (next: string) => void;
-  onDateRangeChange: (next: "all" | "7d" | "30d" | "365d") => void;
+  onDateRangeChange: (next: DateRangeFilter) => void;
 };
+
+const kindItems: Array<{ value: MediaKindFilter; label: string }> = [
+  { value: "all", label: "全部" },
+  { value: "image", label: "图片" },
+  { value: "video", label: "视频" },
+  { value: "live", label: "Live Photo" }
+];
+
+const dateRangeItems: Array<{ value: DateRangeFilter; label: string }> = [
+  { value: "all", label: "全部" },
+  { value: "7d", label: "近 7 天" },
+  { value: "30d", label: "近 30 天" },
+  { value: "365d", label: "近一年" }
+];
 
 export function MediaSidebar(props: MediaSidebarProps) {
   const {
@@ -40,128 +61,69 @@ export function MediaSidebar(props: MediaSidebarProps) {
   } = props;
 
   return (
-    <aside className="mp-panel mp-panel-soft p-3">
-      <label htmlFor="media-storage-select" className="block text-sm font-medium">
-        选择存储
-      </label>
-      <div className="mt-1.5 flex items-center gap-2">
-        <select
-          id="media-storage-select"
-          className="mp-select"
-          value={storageId}
-          disabled={!storages.length}
-          onChange={(e) => onStorageChange(e.target.value)}
-        >
-          <option value="">选择存储</option>
-          {storages.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.name} ({getStorageTypeLabel(s.type)})
-            </option>
-          ))}
-        </select>
-        <button
-          type="button"
-          className="mp-btn shrink-0"
-          onClick={onRefresh}
-          disabled={!selectedStorage || loadingMedia}
-        >
-          刷新
-        </button>
-      </div>
-      <p className="mt-2 text-[11px] mp-muted break-all">
-        {selectedStorage ? `${selectedStorage.name} · ${selectedStorage.basePath}` : "选择存储后可浏览媒体内容"}
-      </p>
-      <div className="mp-subtle-card mt-3 p-3">
-        <p className="mp-kicker">当前视图</p>
-        <p className="mt-1 text-sm font-medium">
-          {selectedStorage ? `${selectedStorage.name} · ${getStorageTypeLabel(selectedStorage.type)}` : "未选择存储"}
-        </p>
-        <p className="mt-1 text-xs mp-muted">
-          {selectedStorage
-            ? `当前筛选结果 ${displayCount} 项，可点击缩略图打开大图预览。`
-            : "选择本地存储后可浏览媒体；115 云盘当前不支持直接预览。"}
-        </p>
+    <aside className="mp-panel flex min-h-0 flex-col gap-4 p-3">
+      <div className="space-y-3">
+        <Field id="media-storage-select" label="选择存储">
+          <select
+            id="media-storage-select"
+            className="mp-select"
+            value={storageId}
+            disabled={!storages.length}
+            onChange={(e) => onStorageChange(e.target.value)}
+          >
+            <option value="">选择存储</option>
+            {storages.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name} ({getStorageTypeLabel(s.type)})
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Button className="w-full justify-center" onClick={onRefresh} disabled={!selectedStorage || loadingMedia} busy={loadingMedia}>
+          <RefreshCw className="h-4 w-4" aria-hidden="true" />
+          刷新目录
+        </Button>
       </div>
 
-      <div className="mt-4">
-        <p className="mb-2 mp-kicker">筛选类型</p>
-        <div className="mp-segment">
-          <button
-            type="button"
-            className="mp-segment-item"
-            aria-pressed={kindFilter === "all"}
-            onClick={() => onKindFilterChange("all")}
-          >
-            全部
-          </button>
-          <button
-            type="button"
-            className="mp-segment-item"
-            aria-pressed={kindFilter === "image"}
-            onClick={() => onKindFilterChange("image")}
-          >
-            图片
-          </button>
-          <button
-            type="button"
-            className="mp-segment-item"
-            aria-pressed={kindFilter === "video"}
-            onClick={() => onKindFilterChange("video")}
-          >
-            视频
-          </button>
-          <button
-            type="button"
-            className="mp-segment-item"
-            aria-pressed={kindFilter === "live"}
-            onClick={() => onKindFilterChange("live")}
-          >
-            Live Photo
-          </button>
+      <div className="rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <StatusBadge tone={selectedStorage ? "success" : "neutral"}>
+            {selectedStorage ? getStorageTypeLabel(selectedStorage.type) : "未选择存储"}
+          </StatusBadge>
+          <StatusBadge tone="info">115 云盘暂不支持直接预览</StatusBadge>
+          <StatusBadge>筛选 {displayCount.toLocaleString("zh-CN")}</StatusBadge>
         </div>
+        <p className="mt-2 break-all text-xs leading-5 mp-muted">
+          {selectedStorage ? `${selectedStorage.name} · ${selectedStorage.basePath}` : "选择本地存储后可浏览媒体。"}
+        </p>
       </div>
 
-      <div className="mt-4">
-        <label htmlFor="media-search" className="block text-sm font-medium">
-          快速搜索
-        </label>
+      <div>
+        <p className="mb-2 mp-kicker">筛选类型</p>
+        <SegmentedControl ariaLabel="筛选媒体类型" value={kindFilter} items={kindItems} onChange={onKindFilterChange} />
+      </div>
+
+      <Field id="media-search" label="快速搜索">
         <input
           id="media-search"
-          className="mp-input mt-1.5"
+          className="mp-input"
           placeholder="输入文件名或路径关键词"
           value={searchTerm}
           onChange={(e) => onSearchChange(e.target.value)}
         />
-      </div>
+      </Field>
 
-      <div className="mt-4">
+      <div>
         <p className="mb-2 mp-kicker">时间范围</p>
-        <div className="mp-segment">
-          {[
-            { value: "all", label: "全部" },
-            { value: "7d", label: "近 7 天" },
-            { value: "30d", label: "近 30 天" },
-            { value: "365d", label: "近一年" }
-          ].map((item) => (
-            <button
-              key={item.value}
-              type="button"
-              className="mp-segment-item"
-              aria-pressed={dateRange === item.value}
-              onClick={() => onDateRangeChange(item.value as "all" | "7d" | "30d" | "365d")}
-            >
-              {item.label}
-            </button>
-          ))}
-        </div>
+        <SegmentedControl ariaLabel="筛选拍摄时间" value={dateRange} items={dateRangeItems} onChange={onDateRangeChange} />
       </div>
 
-      <div className="mt-4 space-y-2">
+      <div className="space-y-2">
         <div className="flex items-center justify-between gap-2">
           <label htmlFor="media-zoom" className="text-sm font-medium">
             缩略图尺寸
           </label>
-          <span className="mp-chip text-xs">{normalizedThumbSize}px</span>
+          <StatusBadge>{normalizedThumbSize}px</StatusBadge>
         </div>
         <input
           id="media-zoom"
@@ -174,27 +136,30 @@ export function MediaSidebar(props: MediaSidebarProps) {
           className="mp-slider"
         />
         <div className="flex gap-2">
-          <button
-            type="button"
-            className={`mp-btn flex-1 ${normalizedThumbSize <= 150 ? "mp-btn-primary" : ""}`}
+          <Button
+            size="sm"
+            variant={normalizedThumbSize <= 150 ? "primary" : "default"}
+            className="flex-1"
             onClick={() => onThumbSizeChange(140)}
           >
             紧凑
-          </button>
-          <button
-            type="button"
-            className={`mp-btn flex-1 ${normalizedThumbSize > 150 && normalizedThumbSize < 200 ? "mp-btn-primary" : ""}`}
+          </Button>
+          <Button
+            size="sm"
+            variant={normalizedThumbSize > 150 && normalizedThumbSize < 200 ? "primary" : "default"}
+            className="flex-1"
             onClick={() => onThumbSizeChange(170)}
           >
             标准
-          </button>
-          <button
-            type="button"
-            className={`mp-btn flex-1 ${normalizedThumbSize >= 200 ? "mp-btn-primary" : ""}`}
+          </Button>
+          <Button
+            size="sm"
+            variant={normalizedThumbSize >= 200 ? "primary" : "default"}
+            className="flex-1"
             onClick={() => onThumbSizeChange(220)}
           >
             放大
-          </button>
+          </Button>
         </div>
       </div>
     </aside>

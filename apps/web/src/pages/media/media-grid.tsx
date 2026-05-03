@@ -1,5 +1,7 @@
 import { getStorageMediaStreamUrl } from "../../lib/api";
 import type { StorageTarget } from "../../types/api";
+import { StateBlock } from "../../components/ui/state-block";
+import { getMediaGridColumns } from "../media-page-model";
 import type { DisplayMediaItem } from "./media-types";
 import { formatBytes, formatDateTime } from "./media-utils";
 import AutoSizer from "react-virtualized-auto-sizer";
@@ -96,7 +98,7 @@ export function MediaGrid(props: MediaGridProps) {
     <div className="mt-2 min-h-0 flex-1 overflow-hidden">
       {loadingMedia ? (
         <div className="flex h-full min-h-40 items-center justify-center">
-          <span className="mp-chip">正在加载媒体目录...</span>
+          <StateBlock tone="loading" title="正在加载媒体目录" description="读取缩略图与媒体索引中。" />
         </div>
       ) : null}
 
@@ -105,8 +107,7 @@ export function MediaGrid(props: MediaGridProps) {
           {displayItems.length > 0 ? (
             <AutoSizer>
               {({ height, width }: { height: number; width: number }) => {
-                const itemWidth = normalizedThumbSize + 10;
-                const columnCount = Math.floor(width / itemWidth) || 1;
+                const columnCount = getMediaGridColumns(width, normalizedThumbSize);
                 const rowCount = Math.ceil(displayItems.length / columnCount);
                 const actualItemWidth = width / columnCount;
 
@@ -136,11 +137,11 @@ export function MediaGrid(props: MediaGridProps) {
               }}
             </AutoSizer>
           ) : (
-            <div className="overflow-auto h-full">
-              <p className="py-5 text-center text-sm mp-muted">
-                {emptyHint ??
-                  (selectedStorage ? "该位置暂无可浏览媒体，可尝试切换筛选类型。" : "请先选择存储后再浏览媒体。")}
-              </p>
+            <div className="flex h-full min-h-40 items-center justify-center overflow-auto p-4">
+              <StateBlock
+                title={selectedStorage ? "暂无可浏览媒体" : "请先选择存储"}
+                description={emptyHint ?? (selectedStorage ? "该位置暂无可浏览媒体，可尝试切换筛选类型。" : "请先选择存储后再浏览媒体。")}
+              />
             </div>
           )}
         </>
@@ -225,11 +226,12 @@ const MediaGridItem = memo(function MediaGridItem(props: MediaGridItemProps) {
     <button
       ref={lazyLoadRef}
       type="button"
-      className={`group overflow-hidden rounded-xl border bg-[var(--ark-surface)] text-left transition-all hover:border-[var(--ark-line-strong)] hover:shadow-md ${
+      className={`group overflow-hidden rounded-lg border bg-[var(--ark-surface)] text-left transition-all hover:border-[var(--ark-line-strong)] hover:shadow-md ${
         isActiveItem
           ? "border-[var(--ark-primary)] ring-2 ring-[color-mix(in_oklab,var(--ark-primary)_35%,transparent)]"
           : "border-[var(--ark-line)]"
       }`}
+      aria-label={`打开 ${item.file.name}`}
       onClick={handleClick}
     >
       <div className="relative aspect-square overflow-hidden bg-black/15">
@@ -265,7 +267,7 @@ const MediaGridItem = memo(function MediaGridItem(props: MediaGridItemProps) {
             onError={handleVideoError}
           />
         )}
-        <div className="absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-black/65 to-transparent" />
+        <div className="absolute inset-x-0 bottom-0 h-12 bg-black/55" />
         <div className="absolute left-2 top-2 flex items-center gap-1.5">
           {isLivePhoto ? (
             <span className="rounded bg-[color-mix(in_oklab,var(--ark-chart-live)_78%,black)] px-1.5 py-0.5 text-[11px] font-semibold text-white">

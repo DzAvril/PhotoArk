@@ -1,10 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { SlidersHorizontal } from "lucide-react";
+import { InlineAlert } from "../components/inline-alert";
+import { StatusBadge } from "../components/data/status-badge";
 import { Button } from "../components/ui/button";
-import { EmptyState } from "../components/ui/empty-state";
-import { SectionCard } from "../components/ui/section-card";
+import { Drawer } from "../components/ui/drawer";
+import { PageHeader } from "../components/ui/page-header";
+import { StateBlock } from "../components/ui/state-block";
 import { useLocalStorageState } from "../hooks/use-local-storage-state";
 import { getStorages } from "../lib/api";
 import type { StorageTarget } from "../types/api";
+import { getMediaLibraryStatusText, normalizeThumbSize } from "./media-page-model";
 import { MediaGrid } from "./media/media-grid";
 import { MediaPreviewDialog } from "./media/media-preview-dialog";
 import { MediaSidebar } from "./media/media-sidebar";
@@ -29,6 +34,7 @@ function MediaPane({ storages }: MediaPaneProps) {
   const [activePath, setActivePath] = useState<string | null>(null);
   const [playingLiveVideo, setPlayingLiveVideo] = useState(false);
   const [showMediaInfo, setShowMediaInfo] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [brokenThumbImagePaths, setBrokenThumbImagePaths] = useState<Set<string>>(new Set());
   const [brokenThumbVideoPaths, setBrokenThumbVideoPaths] = useState<Set<string>>(new Set());
   const [brokenViewerImagePaths, setBrokenViewerImagePaths] = useState<Set<string>>(new Set());
@@ -150,7 +156,7 @@ function MediaPane({ storages }: MediaPaneProps) {
     restoreFocusRef: openerElementRef
   });
 
-  const normalizedThumbSize = Math.max(110, Math.min(260, Number(thumbSize) || 170));
+  const normalizedThumbSize = normalizeThumbSize(thumbSize);
 
   const filteredItems = useMemo(() => {
     let items = displayItems;
@@ -229,92 +235,117 @@ function MediaPane({ storages }: MediaPaneProps) {
       setError("");
       setMedia(null);
       setActivePath(null);
+      setFiltersOpen(false);
     },
     [setError, setMedia, setStorageId]
   );
 
+  const statusText = media
+    ? getMediaLibraryStatusText({ loaded: media.files.length, total: media.total, filtered: filteredItems.length })
+    : `筛选后 ${filteredItems.length.toLocaleString("zh-CN")}`;
+
+  const renderSidebar = () => (
+    <MediaSidebar
+      storages={storages}
+      storageId={storageId}
+      selectedStorage={selectedStorage}
+      loadingMedia={loadingMedia}
+      displayCount={filteredItems.length}
+      kindFilter={kindFilter}
+      normalizedThumbSize={normalizedThumbSize}
+      searchTerm={searchTerm}
+      dateRange={dateRange}
+      onStorageChange={handleStorageChange}
+      onRefresh={handleRefresh}
+      onKindFilterChange={setKindFilter}
+      onThumbSizeChange={setThumbSize}
+      onSearchChange={setSearchTerm}
+      onDateRangeChange={setDateRange}
+    />
+  );
+
   return (
-    <SectionCard
-      title="存储媒体"
-      description="按存储浏览媒体，支持 Live Photo 动态预览与元数据查看"
-      className="md:min-h-0 md:flex-1"
-      right={
-        <div className="flex w-full items-center gap-2 overflow-x-auto pb-1 text-xs sm:text-sm">
-          <span className="mp-chip shrink-0">总计 {mediaSummary.total}</span>
-          <span className="mp-chip shrink-0">图片 {mediaSummary.imageCount}</span>
-          <span className="mp-chip shrink-0">视频 {mediaSummary.videoCount}</span>
-          <span className="mp-chip mp-chip-success shrink-0">Live Photo {mediaSummary.liveCount}</span>
-          <span className="mp-chip shrink-0">筛选后 {filteredItems.length}</span>
-          {media ? (
-            <span className="mp-chip shrink-0">
-              已加载 {media.files.length}/{media.total}
-            </span>
-          ) : null}
-          {hasMore ? (
-            <Button variant="default" size="sm" busy={loadingMore} onClick={() => void loadMore()}>
-              {loadingMore ? "加载中..." : "加载更多"}
+    <section className="flex min-h-0 flex-col gap-3 pb-4 md:h-full">
+      <PageHeader
+        eyebrow="Media Library"
+        title="存储媒体"
+        description="按存储浏览媒体，支持 Live Photo 动态预览与元数据查看。"
+        chips={
+          <>
+            <StatusBadge>总计 {mediaSummary.total.toLocaleString("zh-CN")}</StatusBadge>
+            <StatusBadge>图片 {mediaSummary.imageCount.toLocaleString("zh-CN")}</StatusBadge>
+            <StatusBadge>视频 {mediaSummary.videoCount.toLocaleString("zh-CN")}</StatusBadge>
+            <StatusBadge tone="success">Live Photo {mediaSummary.liveCount.toLocaleString("zh-CN")}</StatusBadge>
+            <StatusBadge tone="info">{statusText}</StatusBadge>
+          </>
+        }
+        actions={
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <Button className="md:hidden" size="sm" onClick={() => setFiltersOpen(true)}>
+              <SlidersHorizontal className="h-4 w-4" aria-hidden="true" />
+              筛选
             </Button>
-          ) : null}
-        </div>
-      }
-    >
-      {error ? <p className="mp-error">{error}</p> : null}
+            {loadingMedia ? <StatusBadge tone="info">正在读取</StatusBadge> : null}
+            {hasMore ? (
+              <Button variant="primary" size="sm" busy={loadingMore} onClick={() => void loadMore()}>
+                {loadingMore ? "加载中..." : "加载更多"}
+              </Button>
+            ) : null}
+          </div>
+        }
+      />
 
-      <div className="mt-3 grid gap-3 lg:grid-cols-[340px_minmax(0,1fr)]">
-        <MediaSidebar
-          storages={storages}
-          storageId={storageId}
-          selectedStorage={selectedStorage}
-          loadingMedia={loadingMedia}
-          displayCount={filteredItems.length}
-          kindFilter={kindFilter}
-          normalizedThumbSize={normalizedThumbSize}
-          searchTerm={searchTerm}
-          dateRange={dateRange}
-          onStorageChange={handleStorageChange}
-          onRefresh={handleRefresh}
-          onKindFilterChange={setKindFilter}
-          onThumbSizeChange={setThumbSize}
-          onSearchChange={setSearchTerm}
-          onDateRangeChange={setDateRange}
-        />
+      {error ? (
+        <InlineAlert tone="error" onClose={() => setError("")}>
+          {error}
+        </InlineAlert>
+      ) : null}
 
-        <section className="flex min-h-[56vh] min-w-0 flex-col rounded-2xl border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-2.5">
-          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--ark-line)] pb-2">
-            <p className="text-sm">
-              {selectedStorage ? (
-                <>
-                  <span className="font-semibold">{selectedStorage.name}</span>
-                  <span className="mp-muted"> · 匹配 {displayItems.length} 项</span>
-                </>
-              ) : (
-                <span className="mp-muted">请先选择存储后再浏览媒体</span>
-              )}
-            </p>
-            <div className="flex items-center gap-2 text-xs">
-              {loadingMedia ? <span className="mp-chip">正在读取...</span> : null}
-              {!loadingMedia && selectedStorage ? <span className="mp-chip mp-chip-success">已加载</span> : null}
+      <Drawer open={filtersOpen} title="媒体筛选" side="bottom" onClose={() => setFiltersOpen(false)}>
+        {renderSidebar()}
+      </Drawer>
+
+      <div className="grid min-h-0 flex-1 gap-3 md:grid-cols-[280px_minmax(0,1fr)]">
+        <div className="hidden min-h-0 md:block">{renderSidebar()}</div>
+
+        <section className="mp-panel flex min-h-[58vh] min-w-0 flex-col p-3 md:min-h-0">
+          <div className="flex flex-wrap items-start justify-between gap-2 border-b border-[var(--ark-line)] pb-3">
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold">
+                {selectedStorage ? (
+                  <>
+                    {selectedStorage.name}
+                    <span className="font-normal mp-muted"> · 匹配 {displayItems.length.toLocaleString("zh-CN")} 项</span>
+                  </>
+                ) : (
+                  "未选择存储"
+                )}
+              </p>
+              <p className="mt-1 truncate text-xs mp-muted">
+                {selectedStorage ? selectedStorage.basePath : "请先选择存储后再浏览媒体"}
+              </p>
             </div>
+            {!loadingMedia && selectedStorage ? <StatusBadge tone="success">已加载</StatusBadge> : null}
           </div>
 
           {!selectedStorage && !loadingMedia ? (
             <div className="flex min-h-[40vh] items-center justify-center p-4">
-              <EmptyState title="请先选择存储" description="选择左侧存储后即可浏览媒体内容。" />
+              <StateBlock title="请先选择存储" description="选择筛选面板中的存储后即可浏览媒体内容。" />
             </div>
           ) : (
-          <MediaGrid
-            selectedStorage={selectedStorage}
-            displayItems={filteredItems}
-            activePath={activePath}
-            loadingMedia={loadingMedia}
-            normalizedThumbSize={normalizedThumbSize}
-            brokenThumbImagePaths={brokenThumbImagePaths}
-            brokenThumbVideoPaths={brokenThumbVideoPaths}
-            onOpen={(path) => openByPath(path)}
-            onThumbImageError={handleThumbImageError}
-            onThumbVideoError={handleThumbVideoError}
-            emptyHint={searchTerm || dateRange !== "all" ? "当前筛选无结果，尝试调整搜索或时间范围。" : undefined}
-          />
+            <MediaGrid
+              selectedStorage={selectedStorage}
+              displayItems={filteredItems}
+              activePath={activePath}
+              loadingMedia={loadingMedia}
+              normalizedThumbSize={normalizedThumbSize}
+              brokenThumbImagePaths={brokenThumbImagePaths}
+              brokenThumbVideoPaths={brokenThumbVideoPaths}
+              onOpen={(path) => openByPath(path)}
+              onThumbImageError={handleThumbImageError}
+              onThumbVideoError={handleThumbVideoError}
+              emptyHint={searchTerm || dateRange !== "all" ? "当前筛选无结果，尝试调整搜索或时间范围。" : undefined}
+            />
           )}
         </section>
       </div>
@@ -343,7 +374,7 @@ function MediaPane({ storages }: MediaPaneProps) {
           pointerHandlers={longPress}
         />
       ) : null}
-    </SectionCard>
+    </section>
   );
 }
 
@@ -359,7 +390,11 @@ export function MediaPage() {
 
   return (
     <section className="space-y-3 md:flex md:h-full md:flex-col">
-      {error ? <p className="mp-error">{error}</p> : null}
+      {error ? (
+        <InlineAlert tone="error" onClose={() => setError("")}>
+          {error}
+        </InlineAlert>
+      ) : null}
       <MediaPane storages={storages} />
     </section>
   );
