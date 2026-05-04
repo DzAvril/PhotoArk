@@ -1862,7 +1862,7 @@ async function getDashboardMediaIndexRows(rootPath: string): Promise<IndexedMedi
 
 async function collectDashboardMediaIndexRows(rootPath: string): Promise<IndexedMediaFile[]> {
   const cached = await getDashboardMediaIndexRows(rootPath);
-  if (cached) return cached;
+  if (cached && cached.length > 0) return cached;
   return collectIndexedMediaFiles(rootPath);
 }
 
