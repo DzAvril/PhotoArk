@@ -21,6 +21,7 @@ import { PasswordService } from "./modules/auth/password-service.js";
 import { FileStateRepository } from "./modules/backup/repository/file-state-repository.js";
 import { MediaIndexRepository, type MediaIndexRootEntry, type MediaIndexStore } from "./modules/backup/repository/media-index-repository.js";
 import { TimedValueCache } from "./modules/backup/job-diff-cache.js";
+import { selectDashboardSourceActivityRoots, selectDashboardStorageMediaRoots } from "./modules/media/dashboard-media.js";
 import { paginateItems } from "./modules/media/media-query.js";
 import type {
   AppSettings,
@@ -597,10 +598,21 @@ function buildStorageMediaSummaryFromAssets(storageId: string, assets: BackupSta
   return summary;
 }
 
-async function buildStorageMediaSummaryFromIndex(storage: StorageTarget): Promise<StorageMediaSummaryMetrics | null> {
-  const rootPath = resolvePathInStorage(storage, storage.basePath);
-  const files = await getDashboardMediaIndexRows(rootPath);
-  if (!files) return null;
+async function buildStorageMediaSummaryFromIndex(storage: StorageTarget, state: BackupState): Promise<StorageMediaSummaryMetrics | null> {
+  const files: IndexedMediaFile[] = [];
+  const seenPaths = new Set<string>();
+
+  for (const rootInput of selectDashboardStorageMediaRoots(storage, state.jobs)) {
+    const rootPath = resolvePathInStorage(storage, rootInput);
+    const rootRows = await collectDashboardMediaIndexRows(rootPath);
+
+    for (const row of rootRows) {
+      if (seenPaths.has(row.fullPath)) continue;
+      seenPaths.add(row.fullPath);
+      files.push(row);
+    }
+  }
+
   return buildStorageMediaSummaryFromRows(files);
 }
 
@@ -645,7 +657,7 @@ async function buildStorageMediaSummary(state: BackupState): Promise<StorageMedi
 
       if (isLocalStorage(storage.type)) {
         try {
-          metrics = (await buildStorageMediaSummaryFromIndex(storage)) ?? buildStorageMediaSummaryFromAssets(storage.id, state.assets);
+          metrics = (await buildStorageMediaSummaryFromIndex(storage, state)) ?? buildStorageMediaSummaryFromAssets(storage.id, state.assets);
         } catch (error) {
           app.log.warn(
             {
@@ -790,14 +802,14 @@ async function buildSourceMediaActivity(state: BackupState, dayCount: number): P
   const storageById = new Map(state.storages.map((storage) => [storage.id, storage]));
   const sourceRoots = new Set<string>();
 
-  for (const job of state.jobs) {
-    const storage = storageById.get(job.sourceTargetId);
+  for (const rootRef of selectDashboardSourceActivityRoots(state.storages, state.jobs)) {
+    const storage = storageById.get(rootRef.storageId);
     if (!storage || !isLocalStorage(storage.type)) continue;
     try {
-      const rootPath = resolvePathInStorage(storage, job.sourcePath);
+      const rootPath = resolvePathInStorage(storage, rootRef.path);
       sourceRoots.add(rootPath);
     } catch {
-      // Ignore invalid source path for this job.
+      // Ignore invalid source path for this source root.
     }
   }
 
@@ -829,7 +841,7 @@ async function buildSourceMediaActivity(state: BackupState, dayCount: number): P
   for (const rootPath of sourceRoots) {
     let rows: IndexedMediaFile[] = [];
     try {
-      rows = (await getDashboardMediaIndexRows(rootPath)) ?? [];
+      rows = await collectDashboardMediaIndexRows(rootPath);
     } catch (error) {
       app.log.warn({ rootPath, err: (error as Error).message }, "Failed to read media index for source activity");
       continue;
@@ -1846,6 +1858,12 @@ async function getDashboardMediaIndexRows(rootPath: string): Promise<IndexedMedi
     getFreshMediaIndexEntry(normalizedRootPath, DASHBOARD_MEDIA_INDEX_MAX_AGE_MS) ??
     getStoredMediaIndexEntry(normalizedRootPath);
   return cached ? rowsFromMediaIndexEntry(normalizedRootPath, cached) : null;
+}
+
+async function collectDashboardMediaIndexRows(rootPath: string): Promise<IndexedMediaFile[]> {
+  const cached = await getDashboardMediaIndexRows(rootPath);
+  if (cached) return cached;
+  return collectIndexedMediaFiles(rootPath);
 }
 
 async function getMediaBrowseRows(rootPath: string): Promise<IndexedMediaFile[]> {

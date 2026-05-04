@@ -10,7 +10,7 @@
     "start": "node dist/index.js",
     "lint": "echo 'lint placeholder'",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "tsx --test src/modules/media/media-query.test.ts src/modules/backup/job-diff-cache.test.ts"
+    "test": "tsx --test src/modules/media/media-query.test.ts src/modules/media/dashboard-media.test.ts src/modules/backup/job-diff-cache.test.ts"
   },
   "dependencies": {
     "@fastify/cors": "^11.0.0",

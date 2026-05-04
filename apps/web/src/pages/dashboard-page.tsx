@@ -547,7 +547,7 @@ function SourceActivityPieChart({ data }: { data: SourceMediaActivity }) {
 
   const total = slices.reduce((sum, item) => sum + item.value, 0);
   if (!total) {
-    return <p className="px-2 py-6 text-center text-sm mp-muted">当前年份暂无媒体文件</p>;
+    return <p className="px-2 py-3 text-center text-sm mp-muted">当前年份暂无媒体文件</p>;
   }
 
   const cx = 72;
@@ -669,54 +669,59 @@ const SourceActivityHeatmap = memo(function SourceActivityHeatmap({
             )}
           </div>
 
-          <div className="mt-1.5 grid items-start gap-2 lg:grid-cols-[minmax(0,1fr)_250px]">
-            <div className="overflow-x-auto pb-1">
-              <div className="inline-block min-w-[760px]">
-                <div className="mb-1 ml-9 flex items-center justify-between text-[10px] mp-muted">
-                  {MONTH_LABELS.map((month) => (
-                    <span key={`month:${month}`}>{month}</span>
-                  ))}
+          <div className="mt-1.5 grid items-start gap-3 lg:grid-cols-[minmax(0,1fr)_220px]">
+            <div className="min-w-0">
+              <div className="mb-1 ml-5 grid grid-cols-12 text-[9px] mp-muted sm:ml-8 sm:text-[10px]">
+                {MONTH_LABELS.map((month) => (
+                  <span key={`month:${month}`} className="truncate">
+                    {month}
+                  </span>
+                ))}
+              </div>
+              <div className="grid grid-cols-[16px_minmax(0,1fr)] gap-1.5 sm:grid-cols-[24px_minmax(0,1fr)] sm:gap-2">
+                <div className="grid grid-rows-7 gap-[2px] text-[9px] leading-none mp-muted sm:gap-1 sm:text-[11px]">
+                  <span className="flex h-[5px] items-center sm:h-3">一</span>
+                  <span className="h-[5px] opacity-0 sm:h-3">二</span>
+                  <span className="flex h-[5px] items-center sm:h-3">三</span>
+                  <span className="h-[5px] opacity-0 sm:h-3">四</span>
+                  <span className="flex h-[5px] items-center sm:h-3">五</span>
+                  <span className="h-[5px] opacity-0 sm:h-3">六</span>
+                  <span className="h-[5px] opacity-0 sm:h-3">日</span>
                 </div>
-                <div className="inline-flex gap-1.5">
-                  <div className="grid grid-rows-7 gap-1 text-[11px] mp-muted">
-                    <span className="h-3 leading-3">一</span>
-                    <span className="h-3 leading-3 opacity-0">二</span>
-                    <span className="h-3 leading-3">三</span>
-                    <span className="h-3 leading-3 opacity-0">四</span>
-                    <span className="h-3 leading-3">五</span>
-                    <span className="h-3 leading-3 opacity-0">六</span>
-                    <span className="h-3 leading-3 opacity-0">日</span>
-                  </div>
-                  <div className="inline-flex gap-1">
-                    {columns.map((column, columnIndex) => (
-                      <div key={`col:${columnIndex}`} className="grid grid-rows-7 gap-1">
-                        {column.map((cell, rowIndex) => {
-                          if (!cell) {
-                            return <span key={`empty:${columnIndex}:${rowIndex}`} className="h-3 w-3 rounded-[2px] bg-transparent" />;
-                          }
-                          const level = cellLevelMap.get(cell.date) ?? 0;
+                <div className="grid min-w-0 gap-[2px] sm:gap-1" style={{ gridTemplateColumns: `repeat(${columns.length}, minmax(0, 1fr))` }}>
+                  {columns.map((column, columnIndex) => (
+                    <div key={`col:${columnIndex}`} className="grid grid-rows-7 gap-[2px] sm:gap-1">
+                      {column.map((cell, rowIndex) => {
+                        if (!cell) {
                           return (
-                            <button
-                              key={`day:${cell.date}`}
-                              type="button"
-                              className="h-3 w-3 rounded-[2px] border border-black/10 transition-transform hover:scale-[1.12] focus:scale-[1.12]"
-                              style={{ backgroundColor: ACTIVITY_LEVEL_COLORS[level] }}
-                              onMouseEnter={() => setHoveredDate(cell)}
-                              onMouseLeave={() => setHoveredDate((prev) => (prev?.date === cell.date ? null : prev))}
-                              onFocus={() => setHoveredDate(cell)}
-                              onBlur={() => setHoveredDate((prev) => (prev?.date === cell.date ? null : prev))}
-                              aria-label={`${cell.date} 文件 ${cell.count}`}
+                            <span
+                              key={`empty:${columnIndex}:${rowIndex}`}
+                              className="h-[5px] w-full rounded-[1px] bg-transparent sm:h-3 sm:rounded-[2px]"
                             />
                           );
-                        })}
-                      </div>
-                    ))}
-                  </div>
+                        }
+                        const level = cellLevelMap.get(cell.date) ?? 0;
+                        return (
+                          <button
+                            key={`day:${cell.date}`}
+                            type="button"
+                            className="h-[5px] w-full rounded-[1px] border border-black/10 transition-transform hover:scale-[1.12] focus:scale-[1.12] sm:h-3 sm:rounded-[2px]"
+                            style={{ backgroundColor: ACTIVITY_LEVEL_COLORS[level] }}
+                            onMouseEnter={() => setHoveredDate(cell)}
+                            onMouseLeave={() => setHoveredDate((prev) => (prev?.date === cell.date ? null : prev))}
+                            onFocus={() => setHoveredDate(cell)}
+                            onBlur={() => setHoveredDate((prev) => (prev?.date === cell.date ? null : prev))}
+                            aria-label={`${cell.date} 文件 ${cell.count}`}
+                          />
+                        );
+                      })}
+                    </div>
+                  ))}
                 </div>
               </div>
             </div>
 
-            <div>
+            <div className="rounded-md border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-2">
               <SourceActivityPieChart data={data} />
             </div>
           </div>
