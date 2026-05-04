@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import React, { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ConfirmDialog } from "../components/confirm-dialog";
 import { MetricTile } from "../components/data/metric-tile";
@@ -1483,73 +1483,7 @@ export function DashboardPage() {
         </aside>
       </div>
 
-      <div className="grid gap-3 xl:grid-cols-2">
-        <motion.section
-          className="mp-panel p-4"
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.05, duration: 0.2, ease: "easeOut" }}
-        >
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <h3 className="text-base font-semibold">存储媒体分布</h3>
-              <p className="mt-1 text-sm mp-muted">
-                有媒体的存储 {mediaSummary.storagesWithMedia}/{mediaSummary.totalStorages}
-              </p>
-            </div>
-            <div className="flex flex-wrap items-center gap-2 text-sm">
-              <StatusBadge tone="info">总数量 {mediaSummary.totalCount}</StatusBadge>
-              <StatusBadge tone="neutral">总体积 {formatBytes(mediaSummary.totalBytes)}</StatusBadge>
-            </div>
-          </div>
-
-          <div className="mt-3 grid gap-3">
-            {sortedStorageMediaSummary.slice(0, 3).map((item) => {
-              const countSlices: PieSlice[] = [
-                { label: "视频", value: item.counts.video, color: mediaColors.video, formattedValue: String(item.counts.video) },
-                { label: "图片", value: item.counts.image, color: mediaColors.image, formattedValue: String(item.counts.image) },
-                {
-                  label: "Live Photo",
-                  value: item.counts.livePhoto,
-                  color: mediaColors.livePhoto,
-                  formattedValue: String(item.counts.livePhoto)
-                }
-              ];
-              const sizeSlices: PieSlice[] = [
-                { label: "视频", value: item.bytes.video, color: mediaColors.video, formattedValue: formatBytes(item.bytes.video) },
-                { label: "图片", value: item.bytes.image, color: mediaColors.image, formattedValue: formatBytes(item.bytes.image) },
-                {
-                  label: "Live Photo",
-                  value: item.bytes.livePhoto,
-                  color: mediaColors.livePhoto,
-                  formattedValue: formatBytes(item.bytes.livePhoto)
-                }
-              ];
-              return (
-                <article
-                  key={item.storageId}
-                  className="rounded-lg border border-[var(--ark-line)] bg-[var(--ark-surface-soft)] p-3 transition-all hover:border-[var(--ark-line-strong)] hover:shadow-md"
-                >
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold break-all">{item.storageName}</p>
-                      <p className="text-xs mp-muted break-all">{item.basePath}</p>
-                    </div>
-                    <StatusBadge tone="neutral">
-                      {item.totalCount} 项 · {formatBytes(item.totalBytes)}
-                    </StatusBadge>
-                  </div>
-                  <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                    <PieStatCard title="数量分布" totalLabel={`${item.totalCount} 项`} emptyLabel="暂无数据" slices={countSlices} />
-                    <PieStatCard title="体积分布" totalLabel={formatBytes(item.totalBytes)} emptyLabel="暂无数据" slices={sizeSlices} />
-                  </div>
-                </article>
-              );
-            })}
-            {!sortedStorageMediaSummary.length ? <StateBlock title="暂无媒体统计数据" description="刷新后会显示按存储目录聚合的媒体数量与体积。" /> : null}
-          </div>
-        </motion.section>
-
+      <div className="grid gap-3">
         <motion.section
           className="mp-panel p-4"
           initial={{ opacity: 0, y: 8 }}
