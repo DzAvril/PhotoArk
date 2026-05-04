@@ -38,7 +38,7 @@ const schema = z.object({
   MEMORY_AUTO_SNAPSHOT_MAX_FILES: z.coerce.number().int().positive().default(20),
   MEMORY_AUTO_SNAPSHOT_RSS_THRESHOLD_MB: z.coerce.number().int().min(0).default(0),
   AUTH_SESSION_TTL_HOURS: z.coerce.number().int().positive().default(168),
-  APP_VERSION: z.string().default("0.1.34"),
+  APP_VERSION: z.string().default("0.1.35"),
   VERSION_CHECK_REPO: z.string().default("DzAvril/PhotoArk"),
   VERSION_CHECK_TIMEOUT_MS: z.coerce.number().int().positive().default(3500),
   GITHUB_TOKEN: z.string().optional(),
